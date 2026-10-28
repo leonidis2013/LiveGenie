@@ -3,7 +3,11 @@
  * End-to-end tests: start LiveGenie on a temporary data folder and use the API
  * the way the web page does. Run with: npm test
  */
+// run in a time zone where it is around midday right now, so schedule tests never cross midnight
+{ const off = 12 - new Date().getUTCHours(); process.env.TZ = 'Etc/GMT' + (off > 0 ? '-' : '+') + Math.min(Math.abs(off), 12); }
 const { spawn } = require('child_process');
+const http = require('http');
+const Schedule = require('../lib/schedule');
 const fs = require('fs');
 const os = require('os');
 const path = require('path');
@@ -19,7 +23,7 @@ let proc = null;
 function start() {
   return new Promise((resolve, reject) => {
     proc = spawn(process.execPath, ['--disable-warning=ExperimentalWarning', 'server.js'], {
-      cwd: ROOT, env: { ...process.env, LIVEGENIE_DATA: DATA, PORT: String(PORT), HOST: '127.0.0.1', LIVEGENIE_NO_UPDATE_CHECK: '1' }, stdio: ['ignore', 'pipe', 'pipe']
+      cwd: ROOT, env: { ...process.env, LIVEGENIE_DATA: DATA, PORT: String(PORT), HOST: '127.0.0.1', LIVEGENIE_NO_UPDATE_CHECK: '1', LIVEGENIE_NOTIFY_EVERY_MS: '300' }, stdio: ['ignore', 'pipe', 'pipe']
     });
     let out = '';
     const onData = (d) => { out += d; if (out.includes('LiveGenie ')) resolve(out); };
@@ -209,6 +213,120 @@ test('users change their own PIN', async () => {
   assert.strictEqual((await vol.post('/api/me/pin', { current: '0000', pin: '2222' })).status, 400);
   assert.strictEqual((await vol.post('/api/me/pin', { current: '9753', pin: '2222' })).status, 200);
   assert.strictEqual((await client().post('/api/signin', { name: 'Val', pin: '2222' })).status, 200);
+});
+
+test('schedule maths: last reset, done-by, active window, overnight', async () => {
+  const sun7 = new Date(2026, 10, 1, 7, 0).getTime();               // Sunday 07:00
+  const sch = [{ day: 0, reset: '06:00', due: '09:15' }, { day: 3, reset: '17:00', due: '' }];
+  let st = Schedule.status(sch, sun7);
+  assert.strictEqual(new Date(st.runStart).getHours(), 6);
+  assert.strictEqual(new Date(st.dueAt).getHours(), 9);
+  assert.strictEqual(st.active, true);
+  assert.strictEqual(new Date(st.nextReset).getDay(), 3);
+  st = Schedule.status(sch, sun7 + 25 * 3600e3);                      // Monday 08:00
+  assert.strictEqual(st.active, false, 'Sunday run is over on Monday');
+  st = Schedule.status([{ day: 'daily', reset: '22:00', due: '01:00' }], new Date(2026, 10, 2, 0, 30).getTime());
+  assert.strictEqual(new Date(st.runStart).getDate(), 1, 'overnight run started the evening before');
+  assert.strictEqual(new Date(st.dueAt).getDate(), 2);
+  assert.strictEqual(st.active, true);
+  assert.ok(Schedule.clean([{ day: 9, reset: '06:00' }]).error);
+  assert.ok(Schedule.clean([{ day: 0, reset: '6am' }]).error);
+  assert.strictEqual(Schedule.describe(sch[0]), 'Sundays at 6:00 AM, done by 9:15 AM');
+});
+
+let checkPage, checkId;
+const hhmm = (d) => String(d.getHours()).padStart(2, '0') + ':' + String(d.getMinutes()).padStart(2, '0');
+test('checklist ticks are shared, signed, and reset at the scheduled time', async () => {
+  const now = new Date();
+  const reset = new Date(now.getTime() - 2 * 60000), due = new Date(now.getTime() + 60 * 60000);
+  let r = await editor.post('/api/pages', { title: 'Sunday Morning Checks', space: 'services', blocks: [
+    { type: 'checklist', title: 'Startup', items: ['Desk on', 'Amps on', 'Batteries'], schedule: [{ day: 'daily', reset: hhmm(reset), due: hhmm(due) }] }] });
+  checkPage = r.data.id;
+  checkId = (await anon.get('/api/pages/' + checkPage)).data.page.blocks[0].id;
+  assert.match(checkId, /^[a-f0-9]{8}$/);
+  r = await vol.post('/api/pages/' + checkPage + '/checklists/' + checkId + '/tick', { item: 'Desk on', done: true });
+  assert.strictEqual(r.data.checklist.left, 2);
+  assert.strictEqual(r.data.checklist.items[0].by, 'Val');
+  r = await anon.post('/api/pages/' + checkPage + '/checklists/' + checkId + '/tick', { item: 'Amps on', done: true });
+  assert.strictEqual(r.data.checklist.items[1].by, 'Guest', 'anyone who can see the page can tick');
+  r = await editor.get('/api/pages/' + checkPage + '/checklists');
+  assert.strictEqual(r.data.checklists[0].left, 1, 'everyone sees the same ticks');
+  assert.strictEqual(r.data.checklists[0].active, true);
+  assert.strictEqual(r.data.checklists[0].overdue, false);
+  assert.strictEqual((await anon.post('/api/pages/' + checkPage + '/checklists/' + checkId + '/tick', { item: 'Not a step', done: true })).status, 409);
+  assert.strictEqual((await anon.post('/api/pages/' + checkPage + '/checklists/' + checkId + '/reset')).status, 401, 'guests cannot reset');
+  // editing the page keeps the checklist id, so ticks survive the edit
+  const page = (await editor.get('/api/pages/' + checkPage)).data.page;
+  await editor.put('/api/pages/' + checkPage, { ...page, space: 'services', title: 'Sunday Morning Checks', baseVersion: page.version });
+  assert.strictEqual((await anon.get('/api/pages/' + checkPage + '/checklists')).data.checklists[0].left, 1);
+  r = await vol.post('/api/pages/' + checkPage + '/checklists/' + checkId + '/reset');
+  assert.strictEqual(r.data.checklist.left, 3);
+  assert.strictEqual(r.data.checklist.lastReset.by, 'Val');
+});
+
+test('To do list: active runs show, finished ones stay as Done, overdue sorts first', async () => {
+  let t = (await anon.get('/api/todo')).data.todo;
+  const mine = t.find((x) => x.block_id === checkId);
+  assert.ok(mine && !mine.complete && mine.left === 3);
+  let st = (await anon.get('/api/state')).data.todo;
+  assert.ok(st.open >= 1);
+  for (const item of ['Desk on', 'Amps on', 'Batteries']) await vol.post('/api/pages/' + checkPage + '/checklists/' + checkId + '/tick', { item, done: true });
+  t = (await anon.get('/api/todo')).data.todo;
+  const done = t.find((x) => x.block_id === checkId);
+  assert.ok(done.complete, 'finished checklist stays on the list');
+  assert.strictEqual(done.completedBy, 'Val');
+  st = (await anon.get('/api/state')).data.todo;
+  assert.strictEqual(st.open, 0, 'header only counts open ones');
+  // an overdue one on a Tech only page
+  const now = new Date();
+  const r = await editor.post('/api/pages', { title: 'Rack checks', space: 'audio', tech_only: true, blocks: [
+    { type: 'checklist', title: 'Rack', items: ['Fans'], schedule: [{ day: 'daily', reset: hhmm(new Date(now - 10 * 60000)), due: hhmm(new Date(now - 60000)) }] }] });
+  t = (await editor.get('/api/todo')).data.todo;
+  assert.strictEqual(t[0].title, 'Rack');
+  assert.strictEqual(t[0].overdue, true);
+  assert.ok(!(await anon.get('/api/todo')).data.todo.some((x) => x.page_id === r.data.id), 'Tech only checklists stay hidden from guests');
+  assert.strictEqual((await editor.get('/api/state')).data.todo.overdue, 1);
+});
+
+test('overdue notices go to the webhook once per run', async () => {
+  const got = [];
+  const hook = http.createServer((req, res) => { let b = ''; req.on('data', (d) => { b += d; }); req.on('end', () => { got.push(JSON.parse(b)); res.end('ok'); }); });
+  await new Promise((r) => hook.listen(0, '127.0.0.1', r));
+  const url = 'http://127.0.0.1:' + hook.address().port + '/api/webhook/test';
+  assert.strictEqual((await editor.put('/api/settings/notify', { webhook: url })).status, 403);
+  assert.strictEqual((await admin.put('/api/settings/notify', { webhook: 'ftp://x' })).status, 400);
+  assert.strictEqual((await admin.put('/api/settings/notify', { webhook: url })).status, 200);
+  assert.strictEqual((await admin.post('/api/settings/notify/test')).status, 200);
+  await new Promise((r) => setTimeout(r, 1200));
+  hook.close();
+  assert.strictEqual(got[0].event, 'test');
+  const od = got.filter((g) => g.event === 'checklist_overdue');
+  assert.strictEqual(od.length, 1, 'one notice, not one per check');
+  assert.strictEqual(od[0].checklist, 'Rack');
+  assert.deepStrictEqual(od[0].items_left, ['Fans']);
+  assert.match(od[0].url, /#\/p\/\d+$/);
+});
+
+test('patch lists and IP lists are checked and searchable', async () => {
+  let r = await editor.post('/api/pages', { title: 'AVL network', space: 'network', blocks: [
+    { type: 'iplist', title: 'AVL', net: { name: 'AVL', vlan: '20', cidr: '10.10.20.0/24', gateway: '10.10.20.1' },
+      rows: [{ ip: '10.10.20.12', device: 'DriveRack PA2' }, { ip: '10.10.20.11', device: 'SQ-5', mac: 'aa:bb' }, {}] },
+    { type: 'patch', preset: 'input', rows: [['1', 'Pastor lav', 'SLX-D', '', 'SB1-1'], ['', '', '', '', '', '']] }] });
+  assert.strictEqual(r.status, 200);
+  const p = (await anon.get('/api/pages/' + r.data.id)).data.page;
+  assert.deepStrictEqual(p.blocks[0].rows.map((x) => x.ip), ['10.10.20.11', '10.10.20.12'], 'sorted by address, blank rows dropped');
+  assert.deepStrictEqual(p.blocks[1].trace, [1, 2, 4, 0]);
+  assert.strictEqual(p.blocks[1].rows.length, 1);
+  assert.strictEqual((await anon.get('/api/search?q=driverack')).data.results[0].id, r.data.id);
+  assert.strictEqual((await anon.get('/api/search?q=pastor')).data.results.some((x) => x.id === r.data.id), true);
+  r = await editor.post('/api/pages', { title: 'Bad net', space: 'network', blocks: [{ type: 'iplist', net: { cidr: '10.10.20.0/33' }, rows: [] }] });
+  assert.strictEqual(r.status, 400);
+});
+
+test('escaped Markdown characters are searchable as words', async () => {
+  const r = await editor.post('/api/pages', { title: 'Escapes', space: 'audio', blocks: [{ type: 'text', md: 'Use \\*only\\* the **Aux\\_7** send' }] });
+  assert.strictEqual(r.status, 200);
+  assert.ok((await anon.get('/api/search?q=only')).data.results.some((x) => x.id === r.data.id));
 });
 
 test('backup, then restore brings the data back after a restart', async () => {

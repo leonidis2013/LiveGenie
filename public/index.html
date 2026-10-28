@@ -32,6 +32,7 @@
     <input id="q" type="search" placeholder="Search pages" autocomplete="off" aria-label="Search pages">
   </form>
   <div class="hright">
+    <button id="todoPill" class="pill todo hide" title="Checklists to do"></button>
     <button id="updPill" class="pill acc hide" title="A newer LiveGenie is available">Update available</button>
     <button id="whoBtn" class="who hide"><span class="av" id="whoAv"></span><span class="nm" id="whoName"></span></button>
     <button id="signBtn" class="ghost hide">Sign in</button>
@@ -41,6 +42,8 @@
 <div class="offbar"><span class="spin"></span>Lost connection to LiveGenie. Retrying…</div>
 <main id="app"><div class="empty">Loading…</div></main>
 <div id="toast" class="toast"></div>
+<script src="/editor.js"></script>
+<script src="/blocks.js"></script>
 <script src="/app.js"></script>
 </body>
 </html>

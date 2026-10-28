@@ -4,20 +4,24 @@
 
 The Rolling Hills Community Church AVL knowledge base: one web app where volunteers find how our system works, how to run a service and how to fix what broke. Part of the Live series (LiveMic, LiveCompanion, LivePi, LiveVoice).
 
-Version 0.1.0 · © 2026 Jerod Ulicki
+Version 0.2.0 · © 2026 Jerod Ulicki
 
-## What 0.1.0 does
+## What it does
 
-- **Spaces and pages.** Audio, Video & Stream, Lighting, Network, Volunteers and Services. A page is a stack of blocks: text (headings, lists, tables, `code`, links), callouts (Tip, Warning, Sunday-critical), checklists, pictures and dividers.
-- **Checklists you can tick.** Ticks are kept on each phone or computer, with a progress bar and a Reset button. (Logged checklist runs that press Bitfocus Companion buttons come in 0.4.0.)
-- **Pictures.** Take a photo on a phone or drop one in; big photos are shrunk to 1600 px before upload. Tap a picture to zoom.
-- **Search.** Instant search over titles and page text, with prefix matching ("amplif" finds "amplifiers") and highlighted matches.
-- **History.** Every save is a version. See who changed what and restore any older version (restoring adds a new version; nothing is lost). Two people editing the same page cannot overwrite each other.
-- **Trash.** Deleted pages can be brought back.
-- **People and roles.** Sign in with a name and PIN. Admin, Editor and Volunteer roles; anyone on the network can read pages that are not marked **Tech only**. Five wrong PINs lock that person for five minutes.
-- **Backups.** Nightly at 02:30, kept for 14 days, plus Back up now. Each backup is one `.tar` file with the database and every picture. Download one, upload one, or restore one from Settings › Backups (the current data is saved first, then LiveGenie restarts).
-- **Update notice.** "Update available" appears in the top bar when GitHub has a newer version. It only reads a version number and never changes anything itself.
-- **Same look as the Live series.** LiveMic's colours, header and LivePi-style settings; Auto / Dark / Light theme; works one-handed on a phone at FOH.
+- **Spaces and pages.** Audio, Video & Stream, Lighting, Network, Volunteers and Services. A page is a stack of blocks: text, callouts (Tip, Warning, Sunday-critical), checklists, patch lists, IP lists, pictures and dividers.
+- **Easy formatting.** The text editor works like a notes app: headings, bold, italic, bullet and numbered lists, links, tables and an **IP** style for addresses, from a toolbar. Typing `- `, `1. ` or `# ` at the start of a line also works. Pages are stored as Markdown; the **MD** button shows it for anyone who prefers typing it.
+- **Shared checklists.** Everyone sees the same ticks, with who ticked each step and when (updates every 15 seconds). Anyone who can see the page can tick; signed-in people can reset.
+- **Auto reset and done-by times.** Give a checklist reset times, such as "Sundays at 6:00 AM, done by 9:15 AM" or "Wednesdays at 5:00 PM". At each reset it starts empty.
+- **To do list.** From its reset until the end of that day, a scheduled checklist sits at the top of the home page with its progress and due time. It turns red once the done-by time passes with steps left, and finished ones stay as green Done until the day ends. The header shows how many are open or overdue.
+- **Overdue notices.** Optional: LiveGenie posts each overdue checklist once to a webhook, for example a Home Assistant automation that sends it to your phone (Settings › Notifications has the automation to paste).
+- **Patch lists and cable runs.** Spreadsheet-style grids with ready-made layouts (Input patch, Output patch, Cable runs, or your own columns). Paste rows from a spreadsheet; Enter moves down a row.
+- **Wire trace.** Every patch list can draw its wiring (for an input patch: Source → Mic / DI → Stage box → Ch). Shared gear becomes one box; tap a box or line to follow the cable. Pick the columns and order in the editor.
+- **Static IP lists.** Network name, VLAN, subnet and gateway, then the addresses. Duplicates, addresses outside the subnet and the gateway are flagged as you type; Next free IP and Fill a range generate addresses; each IP links to the device's web page.
+- **Export PDF.** Every page has a PDF button with a clean print layout (logo, title, version, print date). On a computer choose Save as PDF; on an iPhone use Print, then Share › Save to Files.
+- **Pictures, search, history, trash.** Phone photos (shrunk to 1600 px), instant search across text, checklists, patch and IP lists, every save kept as a version, deleted pages recoverable.
+- **People and roles.** Name and PIN sign-in. Admin, Editor and Volunteer roles; **Tech only** pages are hidden from volunteers and anyone not signed in. Five wrong PINs lock that person for five minutes.
+- **Backups and updates.** Nightly backups (02:30, kept 14 days), Back up now, download, upload and restore. "Update available" in the header when GitHub has a newer version.
+- **Same look as the Live series.** LiveMic's colours, header and LivePi-style settings; Auto / Dark / Light; works one-handed on a phone at FOH.
 
 ## Install on TrueNAS
 
@@ -54,6 +58,8 @@ Then open `http://<this machine>:8080`. See [`docker-compose.yml`](docker-compos
 | `LIVEGENIE_BACKUP_AT` | `02:30` | Nightly backup time, 24 h local time |
 | `LIVEGENIE_NO_UPDATE_CHECK` | | Set to `1` to turn off the GitHub version check |
 
+Checklist reset and done-by times use `TZ`, so set it to the church's time zone.
+
 ## What is in the data folder
 
 | Path | Holds |
@@ -70,12 +76,11 @@ Run it on the TrueNAS host and reach it from the AVL and office VLANs through th
 
 | Version | Adds |
 |---|---|
-| 0.1.0 | Foundation (this release) |
-| 0.2.0 | Document library, text extraction and OCR, AI drafts from the Jetson with citations, review queue |
-| 0.3.0 | Ask the Genie: cited answers from approved pages, Sunday mode |
-| 0.4.0 | Startup and shutdown checklists with logged runs and Bitfocus Companion button presses |
-| 0.5.0 | Gear, ports, patching, VLANs and IP records; UniFi import |
-| 0.6.0 | Interactive LAN map, patch scenes, printable patch sheets |
+| 0.1.0 | Foundation: pages, search, history, roles, backups |
+| 0.2.0 | Formatting editor, shared checklists with auto reset, To do list and overdue notices, patch lists with wire trace, IP lists, PDF export (this release) |
+| next | Device library that links devices across pages (options under discussion) |
+| later | Document library, AI drafts from the Jetson with citations, review queue, Ask the Genie |
+| later | Bitfocus Companion buttons inside checklists |
 | 1.0.0 | A new volunteer runs a full Sunday startup from a phone with LiveGenie alone |
 
 ## Development

@@ -38,6 +38,10 @@ const ICONS = {
   upload: '<path d="M12 20V9M7 14l5-5 5 5M4 4h16"/>',
   pin: '<path d="M9 4h6l-1 6 4 4H6l4-4z"/><path d="M12 14v6"/>',
   lock: '<rect x="5" y="11" width="14" height="10" rx="2"/><path d="M8 11V7a4 4 0 0 1 8 0v4"/>',
+  pdf: '<path d="M6 3h8l5 5v13H6z"/><path d="M14 3v5h5M9 14h6M9 17h4"/>',
+  bell: '<path d="M6 16V11a6 6 0 0 1 12 0v5l2 2H4z"/><path d="M10 20a2 2 0 0 0 4 0"/>',
+  grid: '<rect x="3" y="4" width="18" height="16" rx="2"/><path d="M3 10h18M3 15h18M9 4v16M15 4v16"/>',
+  net: '<rect x="9" y="3" width="6" height="5" rx="1"/><rect x="3" y="16" width="6" height="5" rx="1"/><rect x="15" y="16" width="6" height="5" rx="1"/><path d="M12 8v4M6 16v-4h12v4"/>',
   spark: '<path d="M12 3c.6 3.7 1.3 4.4 5 5-3.7.6-4.4 1.3-5 5-.6-3.7-1.3-4.4-5-5 3.7-.6 4.4-1.3 5-5z"/>'
 };
 const icon = (n, cls = 'icon') => '<svg class="' + cls + '" viewBox="0 0 24 24">' + (ICONS[n] || '') + '</svg>';
@@ -103,7 +107,9 @@ const bytes = (n) => n < 1024 ? n + ' B' : n < 1048576 ? (n / 1024).toFixed(0) +
 
 // ---------- markdown (a safe subset: headings, lists, tables, quotes, code, bold, italic, links) ----------
 function inline(s) {
-  const codes = [];
+  const codes = [], escs = [];
+  // backslash escapes (\* \_ \| …) show the character itself
+  s = String(s == null ? '' : s).replace(/\\([\\`*_[\]|#+\-.>()!~])/g, (m, c) => { escs.push(c); return '\u0003' + (escs.length - 1) + '\u0003'; });
   let h = esc(s).replace(/`([^`]+)`/g, (m, c) => { codes.push('<code>' + c + '</code>'); return '\u0000' + (codes.length - 1) + '\u0000'; });
   h = h.replace(/\[([^\]]+)\]\(([^)\s]+)\)/g, (m, t, u) => {
     const url = u.replace(/&amp;/g, '&');
@@ -113,7 +119,7 @@ function inline(s) {
   });
   h = h.replace(/(^|[\s(])(https?:\/\/[^\s<]+[^\s<.,;:!?)])/g, (m, pre, u) => pre + '<a href="' + u + '" target="_blank" rel="noopener">' + u + '</a>');
   h = h.replace(/\*\*([^*]+)\*\*/g, '<strong>$1</strong>').replace(/(^|[^*\w])\*([^*\s][^*]*)\*(?!\w)/g, '$1<em>$2</em>').replace(/(^|[^_\w])_([^_\s][^_]*)_(?!\w)/g, '$1<em>$2</em>');
-  return h.replace(/\u0000(\d+)\u0000/g, (m, i) => codes[i]);
+  return h.replace(/\u0000(\d+)\u0000/g, (m, i) => codes[i]).replace(/\u0003(\d+)\u0003/g, (m, i) => esc(escs[i]));
 }
 
 function md(src) {
@@ -121,7 +127,7 @@ function md(src) {
   const out = [];
   let i = 0;
   const isTableSep = (l) => /^\s*\|?\s*:?-{2,}:?\s*(\|\s*:?-{2,}:?\s*)*\|?\s*$/.test(l);
-  const cells = (l) => l.trim().replace(/^\|/, '').replace(/\|$/, '').split('|').map((c) => inline(c.trim()));
+  const cells = (l) => l.trim().replace(/^\|/, '').replace(/(^|[^\\])\|$/, '$1').split(/(?<!\\)\|/).map((c) => inline(c.trim()));
   while (i < lines.length) {
     const l = lines[i];
     if (/^\s*$/.test(l)) { i++; continue; }
@@ -183,10 +189,17 @@ function paintHeader() {
   $('#whoBtn').classList.toggle('hide', !u);
   $('#signBtn').classList.toggle('hide', !!u || st.setupNeeded);
   if (u) { $('#whoAv').textContent = u.name.slice(0, 1).toUpperCase(); $('#whoName').textContent = u.name; }
+  const td = st.todo || { open: 0, overdue: 0 };
+  $('#todoPill').classList.toggle('hide', !td.open);
+  $('#todoPill').classList.toggle('bad', td.overdue > 0);
+  $('#todoPill').textContent = td.overdue ? td.overdue + ' overdue' : td.open + ' to do';
   $('#updPill').classList.toggle('hide', !(st.update && st.update.available));
   $('#updPill').textContent = 'Update available' + (st.update && st.update.latest ? ' · ' + st.update.latest : '');
   $('#hdr').classList.toggle('hide', !!st.setupNeeded);
+  measureHeader();
 }
+function measureHeader() { document.documentElement.style.setProperty('--hh', ($('#hdr').offsetHeight || 0) + 'px'); }
+window.addEventListener('resize', measureHeader);
 
 $('#searchForm').addEventListener('submit', (e) => {
   e.preventDefault();
@@ -196,6 +209,10 @@ $('#searchForm').addEventListener('submit', (e) => {
 $('#signBtn').addEventListener('click', () => signInDialog());
 $('#whoBtn').addEventListener('click', () => { location.hash = '#/settings/account'; });
 $('#updPill').addEventListener('click', () => { location.hash = '#/settings/about'; });
+$('#todoPill').addEventListener('click', () => { if (location.hash === '#/' || location.hash === '') route(); else location.hash = '#/'; });
+// keep the header (to do count, update notice) fresh
+setInterval(async () => { if (document.hidden || S.offline) return; await loadState(); paintHeader(); }, 60000);
+document.addEventListener('visibilitychange', async () => { if (!document.hidden && S.state && !S.offline) { await loadState(); paintHeader(); } });
 $('#gear').addEventListener('click', () => {
   if (location.hash.startsWith('#/settings')) location.hash = S.lastRoute || '#/';
   else location.hash = '#/settings';
@@ -294,17 +311,45 @@ async function viewSetup() {
 
 async function viewHome() {
   setTitle('');
-  const d = await get('/api/home');
+  const [d, t] = await Promise.all([get('/api/home'), get('/api/todo')]);
   S.spaces = d.spaces;
   const newBtn = can('editor') ? '<button class="primary btn" id="newPage">' + icon('plus') + 'New page</button>' : '';
   app.innerHTML = `
     <div class="bar"><div class="grow"></div>${newBtn}</div>
+    ${t.todo.length ? '<div class="section" id="todo"><h2>To do</h2><div class="list">' + t.todo.map(todoRow).join('') + '</div></div>' : ''}
     ${d.pinned.length ? '<div class="section"><h2>Pinned</h2><div class="list">' + d.pinned.map((p) => pageRow(p, { showSpace: true, noPin: true })).join('') + '</div></div>' : ''}
     <div class="section"><h2>Spaces</h2><div class="spaces">${d.spaces.map((s) => `<a class="space" href="#/s/${esc(s.slug)}"><i></i><b>${esc(s.name)}</b><span>${esc(s.blurb)}</span><em class="n">${s.pages} page${s.pages === 1 ? '' : 's'}</em></a>`).join('')}</div></div>
     <div class="section"><h2>Recently updated</h2>${d.recent.length ? '<div class="list">' + d.recent.map((p) => pageRow(p, { showSpace: true })).join('') + '</div>'
       : '<div class="card empty">No pages yet.' + (can('editor') ? ' Start with the Sunday startup checklist or a page about the SQ-5.' : (S.state.user ? '' : ' Editors can sign in to add the first pages.')) + '</div>'}</div>`;
   const nb = $('#newPage');
   if (nb) nb.addEventListener('click', () => { location.hash = '#/new'; });
+  // refresh the To do list while the home page is open
+  const mine = app.firstElementChild;
+  const timer = setInterval(async () => {
+    if (!mine.isConnected) return clearInterval(timer);
+    if (document.hidden || S.offline) return;
+    try {
+      const x = await get('/api/todo');
+      if (!mine.isConnected) return;
+      const sec = $('#todo');
+      const html = x.todo.length ? '<h2>To do</h2><div class="list">' + x.todo.map(todoRow).join('') + '</div>' : '';
+      if (sec) { if (html) sec.innerHTML = html; else sec.remove(); }
+      else if (html) { const div = document.createElement('div'); div.className = 'section'; div.id = 'todo'; div.innerHTML = html; app.querySelector('.bar').after(div); }
+    } catch (e) { /* offline banner */ }
+  }, 30000);
+}
+
+function todoRow(t) {
+  const tmText = (x) => new Date(x).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' });
+  const done = t.total - t.left;
+  const status = t.complete ? '<span class="chip ok">Done' + (t.completedAt ? ' ' + esc(tmText(t.completedAt)) : '') + '</span>'
+    : t.overdue ? '<span class="chip bad">Overdue</span>'
+    : t.dueAt ? '<span class="chip acc">Due ' + esc(tmText(t.dueAt)) + '</span>' : '<span class="chip acc">Today</span>';
+  const sub = t.complete ? 'Finished' + (t.completedBy ? ' by ' + esc(t.completedBy) : '') + ' · ' + esc(t.page_title)
+    : done + ' of ' + t.total + ' done · ' + esc(t.page_title) + (t.overdue ? ' · was due ' + esc(tmText(t.dueAt)) : '');
+  return '<a class="row todo' + (t.overdue ? ' overdue' : '') + (t.complete ? ' complete' : '') + '" href="#/p/' + t.page_id + '?c=' + esc(t.block_id) + '">' +
+    '<span class="ring" style="--p:' + (t.total ? Math.round(100 * done / t.total) : 0) + '"></span>' +
+    '<div class="t"><b>' + esc(t.title) + '</b><span>' + sub + '</span></div>' + status + '</a>';
 }
 
 async function viewSpace(slug) {
@@ -320,23 +365,15 @@ async function viewSpace(slug) {
   if (nb) nb.addEventListener('click', () => { location.hash = '#/new?space=' + encodeURIComponent(slug); });
 }
 
-function renderBlocks(blocks, pageId) {
-  return blocks.map((b, i) => {
+function renderBlocks(blocks, live = true) {
+  return blocks.map((b) => {
     switch (b.type) {
       case 'text': return '<div class="mdb">' + md(b.md) + '</div>';
       case 'callout': {
         const meta = { tip: ['info', 'Tip'], warning: ['warn', 'Warning'], critical: ['alert', 'Sunday-critical'] }[b.kind] || ['info', 'Tip'];
         return '<div class="callout ' + b.kind + '">' + icon(meta[0], 'ci') + '<div class="cb"><span class="cl">' + meta[1] + '</span>' + md(b.md) + '</div></div>';
       }
-      case 'checklist': {
-        const key = 'lg-ticks:' + pageId + ':' + i + ':' + b.items.length;
-        let ticks = [];
-        try { ticks = JSON.parse(localStorage.getItem(key) || '[]'); } catch (e) { ticks = []; }
-        const n = b.items.filter((_, j) => ticks[j]).length;
-        return '<div class="check" data-key="' + esc(key) + '"><div class="ch"><b>' + esc(b.title || 'Checklist') + '</b><span class="prog">' + n + ' / ' + b.items.length + '</span>' +
-          '<button class="ghost reset" style="padding:4px 8px;font-size:12px">Reset</button></div><div class="bar2"><i style="width:' + (b.items.length ? (100 * n / b.items.length) : 0) + '%"></i></div>' +
-          b.items.map((t, j) => '<label class="' + (ticks[j] ? 'done' : '') + '"><input type="checkbox" data-j="' + j + '"' + (ticks[j] ? ' checked' : '') + '><span>' + inline(t) + '</span></label>').join('') + '</div>';
-      }
+      case 'checklist': case 'patch': case 'iplist': return Blk.render(b, live);
       case 'image': return '<figure class="pic"><img src="/uploads/' + esc(b.upload) + '" alt="' + esc(b.caption) + '" loading="lazy">' + (b.caption ? '<figcaption>' + esc(b.caption) + '</figcaption>' : '') + '</figure>';
       case 'divider': return '<hr>';
       default: return '';
@@ -344,21 +381,8 @@ function renderBlocks(blocks, pageId) {
   }).join('');
 }
 
-function wireBlocks(root) {
-  $$('.check', root).forEach((c) => {
-    const key = c.dataset.key;
-    const save = () => {
-      const boxes = $$('input', c);
-      const ticks = boxes.map((x) => x.checked);
-      try { localStorage.setItem(key, JSON.stringify(ticks)); } catch (e) { /* private mode */ }
-      const n = ticks.filter(Boolean).length;
-      $('.prog', c).textContent = n + ' / ' + boxes.length;
-      $('.bar2 i', c).style.width = (boxes.length ? 100 * n / boxes.length : 0) + '%';
-      boxes.forEach((x) => x.closest('label').classList.toggle('done', x.checked));
-    };
-    $$('input', c).forEach((x) => x.addEventListener('change', save));
-    $('.reset', c).addEventListener('click', () => { $$('input', c).forEach((x) => { x.checked = false; }); save(); });
-  });
+function wireBlocks(root, page, live = true) {
+  Blk.wire(root, page, live);
   $$('figure.pic img', root).forEach((img) => img.addEventListener('click', () => {
     const z = document.createElement('div');
     z.className = 'zoom';
@@ -368,7 +392,17 @@ function wireBlocks(root) {
   }));
 }
 
-async function viewPage(id) {
+/** Export PDF: the browser's print dialog with a clean layout (Save as PDF). */
+function exportPdf(title) {
+  const old = document.title;
+  document.title = title;
+  const after = () => { document.title = old; window.removeEventListener('afterprint', after); };
+  window.addEventListener('afterprint', after);
+  window.print();
+  setTimeout(after, 60000);
+}
+
+async function viewPage(id, focusChecklist) {
   let d;
   try { d = await get('/api/pages/' + id); }
   catch (e) {
@@ -382,18 +416,27 @@ async function viewPage(id) {
   }
   const p = d.page;
   setTitle(p.title);
+  const pdf = '<button class="btn ghost" id="pB" title="Export PDF">' + icon('pdf') + '<span class="hide-sm">PDF</span></button>';
   const acts = can('editor')
-    ? '<button class="btn" id="eB">' + icon('edit') + 'Edit</button><button class="btn ghost" id="hB">' + icon('clock') + 'History</button><button class="ghost danger" id="dB" title="Delete page">' + icon('trash') + '</button>'
-    : '<button class="btn ghost" id="hB">' + icon('clock') + 'History</button>';
+    ? '<button class="btn" id="eB">' + icon('edit') + 'Edit</button>' + pdf + '<button class="btn ghost" id="hB" title="History">' + icon('clock') + '<span class="hide-sm">History</span></button><button class="ghost danger" id="dB" title="Delete page">' + icon('trash') + '</button>'
+    : pdf + '<button class="btn ghost" id="hB" title="History">' + icon('clock') + '<span class="hide-sm">History</span></button>';
   app.innerHTML = `<div class="page">
+    <div class="printhead"><img src="/icons/livegenie-glyph.svg" alt=""><div><b>LiveGenie</b><span>Rolling Hills Community Church · AVL knowledge base</span></div>
+      <div class="pm">${esc(p.space_name)} · version ${p.version} · updated ${esc(when(p.updated_at))}${p.updated_by ? ' by ' + esc(p.updated_by) : ''}<br>Printed ${esc(when(Date.now()))}</div></div>
     <div class="crumbs"><a href="#/">Home</a><span>/</span><a href="#/s/${esc(p.space)}">${esc(p.space_name)}</a></div>
     <div class="bar acts-top" style="margin-bottom:0"><div class="grow"><h1 class="title">${esc(p.title)}</h1></div>${acts}</div>
     <div class="meta">${p.tech_only ? '<span class="badge tech">' + icon('lock', 'icon') + 'Tech only</span>' : ''}${p.pinned ? '<span class="badge pin">Pinned</span>' : ''}
       <span>Updated ${esc(ago(p.updated_at))}${p.updated_by ? ' by ' + esc(p.updated_by) : ''} · version ${p.version}</span></div>
-    <div class="doc" id="doc">${p.blocks.length ? renderBlocks(p.blocks, p.id) : '<p class="note">This page is empty.' + (can('editor') ? ' Tap Edit to add text, steps or pictures.' : '') + '</p>'}</div>
+    <div class="doc" id="doc">${p.blocks.length ? renderBlocks(p.blocks) : '<p class="note">This page is empty.' + (can('editor') ? ' Tap Edit to add text, steps or pictures.' : '') + '</p>'}</div>
   </div>`;
-  wireBlocks($('#doc'));
+  wireBlocks($('#doc'), p);
   $('#hB').addEventListener('click', () => { location.hash = '#/p/' + p.id + '/history'; });
+  $('#pB').addEventListener('click', () => exportPdf(p.title));
+  if (focusChecklist) {
+    const c = document.getElementById('c-' + focusChecklist);
+    if (c) setTimeout(() => { c.scrollIntoView({ block: 'start', behavior: 'smooth' }); c.classList.add('flash'); }, 60);
+    S.noScroll = true;
+  }
   if (can('editor')) {
     $('#eB').addEventListener('click', () => { location.hash = '#/p/' + p.id + '/edit'; });
     $('#dB').addEventListener('click', async () => {
@@ -406,9 +449,31 @@ async function viewPage(id) {
 
 // ----- editor -----
 const BLOCK_TYPES = [
-  ['text', 'Text', 'text'], ['callout', 'Callout', 'info'], ['checklist', 'Checklist', 'check'], ['image', 'Picture', 'image'], ['divider', 'Divider', 'line']
+  ['text', 'Text', 'text'], ['callout', 'Callout', 'info'], ['checklist', 'Checklist', 'check'], ['patch', 'Patch list', 'grid'],
+  ['iplist', 'IP list', 'net'], ['image', 'Picture', 'image'], ['divider', 'Divider', 'line']
 ];
-const newBlock = (t) => ({ text: { type: 'text', md: '' }, callout: { type: 'callout', kind: 'tip', md: '' }, checklist: { type: 'checklist', title: '', items: [] }, image: { type: 'image', upload: '', caption: '' }, divider: { type: 'divider' } }[t]);
+const BLOCK_LABELS = { text: 'Text', callout: 'Callout', checklist: 'Checklist', patch: 'Patch list', iplist: 'IP list', image: 'Picture', divider: 'Divider' };
+const newBlock = (t, preset) => ({
+  text: { type: 'text', md: '' }, callout: { type: 'callout', kind: 'tip', md: '' }, checklist: { type: 'checklist', title: '', items: [], schedule: [] },
+  patch: { type: 'patch', title: '', preset: preset || 'input', columns: Blk.PRESETS[preset || 'input'].columns.slice(), rows: [], trace: Blk.PRESETS[preset || 'input'].trace.slice() },
+  iplist: { type: 'iplist', title: '', net: { name: '', vlan: '', cidr: '', gateway: '' }, rows: [] },
+  image: { type: 'image', upload: '', caption: '' }, divider: { type: 'divider' }
+}[t]);
+
+/** Ask which patch list layout to start from. */
+function pickPreset() {
+  return new Promise((resolve) => {
+    const P = Blk.PRESETS;
+    const desc = { input: 'Mics and DIs into the desk', output: 'Desk outputs to speakers, IEMs, stream', cable: 'Cable labels, from, to, length and route', custom: 'Your own columns' };
+    let picked = null;
+    modal('<h3>Add a patch list</h3><p>Pick a starting layout. You can rename or add columns later.</p><div class="plist">' +
+      Object.keys(P).map((k) => '<button type="button" class="pchoice" data-k="' + k + '"><b>' + P[k].title + '</b><span>' + desc[k] + '</span><em>' + esc(P[k].columns.join(' · ')) + '</em></button>').join('') +
+      '</div><div class="acts"><button type="button" data-close>Cancel</button></div>', (w, close) => {
+      w.querySelectorAll('.pchoice').forEach((b) => b.addEventListener('click', () => { picked = b.dataset.k; close(); resolve(picked); }));
+      w.querySelectorAll('[data-close]').forEach((b) => b.addEventListener('click', () => resolve(null)));
+    });
+  });
+}
 
 async function viewEdit(id, spaceSlug) {
   if (!can('editor')) {
@@ -446,10 +511,16 @@ async function viewEdit(id, spaceSlug) {
   $('#eS').addEventListener('change', (e) => { ed.space = e.target.value; dirty(); });
   $('#eTech').addEventListener('change', (e) => { ed.tech_only = e.target.checked; e.target.closest('.tog').classList.toggle('on', e.target.checked); dirty(); });
   $('#ePin').addEventListener('change', (e) => { ed.pinned = e.target.checked; e.target.closest('.tog').classList.toggle('on', e.target.checked); dirty(); });
-  $$('[data-add]').forEach((b) => b.addEventListener('click', () => {
-    ed.blocks.push(newBlock(b.dataset.add)); dirty(); paintBlocks();
+  $$('[data-add]').forEach((b) => b.addEventListener('click', async () => {
+    let preset;
+    if (b.dataset.add === 'patch') { preset = await pickPreset(); if (!preset) return; }
+    ed.blocks.push(newBlock(b.dataset.add, preset)); dirty(); paintBlocks();
     const last = $$('#eB .blk').pop();
-    if (last) { last.scrollIntoView({ block: 'center', behavior: 'smooth' }); const f = $('textarea, input', last); if (f) f.focus({ preventScroll: true }); }
+    if (last) {
+      last.scrollIntoView({ block: 'center', behavior: 'smooth' });
+      const f = $('.rtx, textarea, input:not([type=file]), [data-pick]', last);
+      if (f && f.classList.contains('rtx')) { f.focus({ preventScroll: true }); } else if (f && f.focus) f.focus({ preventScroll: true });
+    }
   }));
   $('#eCancel').addEventListener('click', () => { location.hash = id ? '#/p/' + id : (ed.space ? '#/s/' + ed.space : '#/'); });
   $('#eSave').addEventListener('click', save);
@@ -457,11 +528,11 @@ async function viewEdit(id, spaceSlug) {
   function paintBlocks() {
     const host = $('#eB');
     host.innerHTML = ed.blocks.map((b, i) => {
-      const label = { text: 'Text', callout: 'Callout', checklist: 'Checklist', image: 'Picture', divider: 'Divider' }[b.type];
+      const label = BLOCK_LABELS[b.type];
       let body = '';
-      if (b.type === 'text') body = '<textarea data-f="md" rows="6" placeholder="Write here. # Heading, - list, **bold**, [link](https://…), | tables |">' + esc(b.md) + '</textarea><div class="mdhelp"><code># Heading</code> <code>- list</code> <code>1. steps</code> <code>**bold**</code> <code>`IP 10.0.0.2`</code> <code>[link](url)</code> <code>| table |</code></div>';
-      if (b.type === 'callout') body = '<div class="seg" style="margin-bottom:8px">' + [['tip', 'Tip'], ['warning', 'Warning'], ['critical', 'Sunday-critical']].map((k) => '<button data-kind="' + k[0] + '" class="' + (b.kind === k[0] ? 'on' : '') + '">' + k[1] + '</button>').join('') + '</div><textarea data-f="md" rows="3" placeholder="What should people know?">' + esc(b.md) + '</textarea>';
-      if (b.type === 'checklist') body = '<input class="full" data-f="title" placeholder="Checklist name, e.g. Sunday startup" value="' + esc(b.title) + '"><textarea data-f="_items" rows="6" placeholder="One step per line">' + esc(b._items !== undefined ? b._items : (b.items || []).join('\n')) + '</textarea><div class="mdhelp">One step per line. Ticks are kept on each phone or computer and can be reset.</div>';
+      if (b.type === 'text') body = '<div data-rte="full"></div>';
+      if (b.type === 'callout') body = '<div class="seg" style="margin-bottom:8px">' + [['tip', 'Tip'], ['warning', 'Warning'], ['critical', 'Sunday-critical']].map((k) => '<button data-kind="' + k[0] + '" class="' + (b.kind === k[0] ? 'on' : '') + '">' + k[1] + '</button>').join('') + '</div><div data-rte="compact"></div>';
+      if (b.type === 'checklist' || b.type === 'patch' || b.type === 'iplist') body = '<div data-blk></div>';
       if (b.type === 'image') body = (b.upload ? '<img class="imgprev" src="/uploads/' + esc(b.upload) + '" alt=""><button data-repick>Replace picture</button>' : '<div class="drop" data-pick>' + icon('image') + '<div>Tap to choose a picture or take a photo</div><div class="note">Large photos are shrunk before upload</div></div>') +
         '<input type="file" accept="image/*" class="hide" data-file><input class="full" data-f="caption" placeholder="Caption (optional)" value="' + esc(b.caption) + '" style="margin-top:8px">';
       if (b.type === 'divider') body = '<hr style="border:0;border-top:1px solid var(--line);margin:4px 0">';
@@ -482,8 +553,16 @@ async function viewEdit(id, spaceSlug) {
         [ed.blocks[i], ed.blocks[j]] = [ed.blocks[j], ed.blocks[i]];
         dirty(); paintBlocks();
       }));
+      const rte = $('[data-rte]', el);
+      if (rte) {
+        const r = Rich.create({ md: b.md, compact: rte.dataset.rte === 'compact', placeholder: b.type === 'text' ? 'Write here. Use the buttons above for headings, bold, lists and tables.' : 'What should people know?', onChange: (v) => { b.md = v; dirty(); } });
+        rte.appendChild(r.el);
+      }
+      const bh = $('[data-blk]', el);
+      if (bh) ({ checklist: Blk.editChecklist, patch: Blk.editPatch, iplist: Blk.editIplist })[b.type](bh, b, dirty);
       $('[data-del]', el).addEventListener('click', async () => {
-        const hasContent = (b.md && b.md.trim()) || (b._items && b._items.trim()) || b.upload || (b.items && b.items.length);
+        const hasContent = (b.md && b.md.trim()) || (b._items && b._items.trim()) || b.upload || (b.items && b.items.length) ||
+          (b.rows && b.rows.some((r) => Object.values(r).some((v) => String(v || '').trim())));
         if (hasContent && !await confirmBox('Remove this block?', 'Its content will be gone from this page (older versions keep it).', 'Remove', true)) return;
         ed.blocks.splice(i, 1); dirty(); paintBlocks();
       });
@@ -516,6 +595,7 @@ async function viewEdit(id, spaceSlug) {
     const blocks = ed.blocks.map((b) => {
       const c = { ...b };
       if (c.type === 'checklist') { c.items = String(c._items !== undefined ? c._items : (c.items || []).join('\n')).split('\n').map((s) => s.trim()).filter(Boolean); }
+      if (c.type === 'checklist' && (c.schedule || []).some((r) => !r.reset)) c.schedule = c.schedule.filter((r) => r.reset);
       delete c._items;
       return c;
     }).filter((b) => !(b.type === 'image' && !b.upload));
@@ -568,10 +648,10 @@ async function viewHistory(id, v) {
         <div class="bar" style="margin-bottom:6px"><div class="grow"><div class="note">Version ${ver.version} · ${esc(ver.saved_by || '')} · ${esc(when(ver.saved_at))}${ver.tech_only ? ' · Tech only' : ''} · ${esc(spaceName(ver.space))}</div></div>
           ${!isCurrent && can('editor') ? '<button class="primary btn" id="rB">' + icon('restore') + 'Restore this version</button>' : ''}</div>
         <h1 class="title" style="font-size:20px">${esc(ver.title)}</h1>
-        <div class="doc" id="doc">${renderBlocks(ver.blocks, 'h' + p.id + 'v' + ver.version)}</div>
+        <div class="doc" id="doc">${renderBlocks(ver.blocks, false)}</div>
       </div>
     </div>`;
-  wireBlocks($('#doc'));
+  wireBlocks($('#doc'), { id: p.id, blocks: ver.blocks }, false);
   const rb = $('#rB');
   if (rb) rb.addEventListener('click', async () => {
     if (!await confirmBox('Restore version ' + ver.version + '?', 'This saves it as a new version on top. Nothing is lost; the current version stays in the history.', 'Restore')) return;
@@ -593,7 +673,7 @@ async function viewSearch(q) {
 // ----- settings -----
 const TABS = [
   ['display', 'Display', 'sun', 'viewer'], ['account', 'Account', 'user', 'viewer'], ['users', 'Users', 'users', 'admin'],
-  ['backups', 'Backups', 'box', 'admin'], ['trash', 'Trash', 'trash', 'editor'], ['activity', 'Activity', 'list', 'admin'], ['about', 'About', 'spark', 'viewer']
+  ['notify', 'Notifications', 'bell', 'admin'], ['backups', 'Backups', 'box', 'admin'], ['trash', 'Trash', 'trash', 'editor'], ['activity', 'Activity', 'list', 'admin'], ['about', 'About', 'spark', 'viewer']
 ];
 
 async function viewSettings(tab) {
@@ -603,7 +683,7 @@ async function viewSettings(tab) {
   app.innerHTML = `<div class="setup"><div class="side">${tabs.map((t) => '<button data-tab="' + t[0] + '" class="' + (t[0] === tab ? 'on' : '') + '">' + icon(t[2]) + t[1] + '</button>').join('')}</div><div class="pane" id="pane"></div></div>`;
   $$('[data-tab]').forEach((b) => b.addEventListener('click', () => { location.hash = '#/settings/' + b.dataset.tab; }));
   const pane = $('#pane');
-  await ({ display: tabDisplay, account: tabAccount, users: tabUsers, backups: tabBackups, trash: tabTrash, activity: tabActivity, about: tabAbout }[tab])(pane);
+  await ({ display: tabDisplay, account: tabAccount, users: tabUsers, notify: tabNotify, backups: tabBackups, trash: tabTrash, activity: tabActivity, about: tabAbout }[tab])(pane);
 }
 
 const setRow = (title, sub, ctl, first) => '<div class="set' + (first ? ' first' : '') + '"><div class="sl"><b>' + title + '</b><span>' + (sub || '') + '</span></div><div class="sc">' + ctl + '</div></div>';
@@ -732,6 +812,46 @@ async function tabBackups(pane) {
   }));
 }
 
+async function tabNotify(pane) {
+  const d = await get('/api/settings/notify');
+  const ha = `alias: LiveGenie overdue checklist
+triggers:
+  - trigger: webhook
+    webhook_id: livegenie_overdue
+    allowed_methods: [POST]
+    local_only: true
+actions:
+  - action: notify.notify   # or notify.mobile_app_your_phone
+    data:
+      title: "{{ trigger.json.title }}"
+      message: "{{ trigger.json.message }}"
+      data:
+        url: "{{ trigger.json.url }}"
+        clickAction: "{{ trigger.json.url }}"`;
+  pane.innerHTML = '<p class="note pnote">Overdue checklists always show in LiveGenie: red on the checklist, on the To do list and in the header. To also get them on your phone, send them to a webhook. Each overdue checklist sends one notice.</p>' +
+    '<div class="card"><h2>Webhook</h2><form id="nf">' +
+    setRow('Webhook address', 'LiveGenie sends a POST with JSON (title, message, page, items left, link). Leave empty to turn it off.', '<input class="txt" id="nw" style="width:340px" inputmode="url" autocapitalize="off" spellcheck="false" placeholder="http://homeassistant.local:8123/api/webhook/livegenie_overdue" value="' + esc(d.webhook) + '">', true) +
+    setRow('', d.baseUrl ? 'Links in notices open ' + esc(d.baseUrl) + ' (the address you use right now, saved when you press Save).' : 'Links in notices use the address you are on when you press Save.', '<button type="button" id="nt">Send test</button><button class="primary">Save</button>') +
+    '</form></div>' +
+    '<div class="card"><h2>Home Assistant</h2><p class="note" style="margin:0 0 8px">In Home Assistant: Settings › Automations › Create automation › ⋮ › Edit in YAML, paste this, and save. Then use <span class="mono">http://&lt;home-assistant&gt;:8123/api/webhook/livegenie_overdue</span> above. Home Assistant must be reachable from the LiveGenie server.</p>' +
+    '<pre class="code">' + esc(ha) + '</pre><button type="button" id="cp">Copy</button></div>';
+  const save = async () => { await call('PUT', '/api/settings/notify', { webhook: $('#nw').value.trim() }); };
+  $('#nf').addEventListener('submit', async (e) => {
+    e.preventDefault();
+    try { await save(); toast('Saved', 'ok'); tabNotify(pane); } catch (err) { toast(err.message, 'bad'); }
+  });
+  $('#nt').addEventListener('click', async (e) => {
+    e.target.disabled = true;
+    try { await save(); await call('POST', '/api/settings/notify/test'); toast('Test sent. Check your phone.', 'ok'); }
+    catch (err) { toast(err.message, 'bad'); }
+    finally { e.target.disabled = false; }
+  });
+  $('#cp').addEventListener('click', async () => {
+    try { await navigator.clipboard.writeText(ha); toast('Copied', 'ok'); }
+    catch (e) { const r = document.createRange(); r.selectNodeContents($('pre.code', pane)); const sel = getSelection(); sel.removeAllRanges(); sel.addRange(r); toast('Selected. Copy it with your keyboard or long-press.'); }
+  });
+}
+
 async function tabTrash(pane) {
   const d = await get('/api/trash');
   pane.innerHTML = '<div class="card"><h2>Trash</h2>' + (d.pages.length ? d.pages.map((p, i) => setRow(esc(p.title), esc(p.space_name) + ' · deleted ' + esc(ago(p.deleted_at)) + (p.deleted_by ? ' by ' + esc(p.deleted_by) : ''), '<button data-un="' + p.id + '">Restore</button>', i === 0)).join('')
@@ -746,6 +866,7 @@ async function tabActivity(pane) {
   const what = {
     'page.create': 'created page', 'page.edit': 'edited page', 'page.delete': 'deleted page', 'page.undelete': 'restored page', signin: 'signed in',
     'user.create': 'added user', 'user.edit': 'changed user', 'user.delete': 'removed user', 'backup.make': 'made a backup', 'backup.nightly': 'Nightly backup',
+    'checklist.reset': 'reset a checklist', 'notify.overdue': 'Overdue notice', 'settings.notify': 'changed notifications',
     'backup.upload': 'uploaded a backup', 'backup.restore': 'restored a backup', 'backup.restored': 'Restore finished', 'backup.delete': 'deleted a backup'
   };
   pane.innerHTML = '<div class="card"><h2>Activity</h2>' + (d.activity.length ? d.activity.map((a, i) => setRow(
@@ -762,7 +883,7 @@ function tabAbout(pane) {
     '<div class="card"><h2>About</h2>' + setRow('LiveGenie ' + esc(S.state.version), 'The RHCC AVL knowledge base. Part of the Live series.', '', true) +
     setRow('Updates', status, can('admin') ? '<button id="chk">Check now</button>' : '') +
     setRow('Image', '<span class="mono">ghcr.io/leonidis2013/livegenie</span>', '') +
-    setRow('Coming next', '0.2.0 adds the document library and AI drafts from the Jetson; 0.4.0 adds startup checklists that press Bitfocus Companion buttons.', '') +
+    setRow('Coming next', '0.3.0 adds the document library and AI drafts from the Jetson; Bitfocus Companion buttons in checklists follow.', '') +
     '</div><p class="note pnote">© 2026 Jerod Ulicki</p>';
   const c = $('#chk');
   if (c) c.addEventListener('click', async () => {
@@ -792,12 +913,13 @@ async function route() {
     else if (p[0] === 's' && p[1]) await viewSpace(p[1]);
     else if (p[0] === 'p' && p[1] && p[2] === 'edit') await viewEdit(p[1]);
     else if (p[0] === 'p' && p[1] && p[2] === 'history') await viewHistory(p[1], p[3]);
-    else if (p[0] === 'p' && p[1]) await viewPage(p[1]);
+    else if (p[0] === 'p' && p[1]) await viewPage(p[1], qs.get('c'));
     else if (p[0] === 'new') await viewEdit(null, qs.get('space'));
     else if (p[0] === 'search') await viewSearch(qs.get('q') || '');
     else if (p[0] === 'settings') await viewSettings(p[1]);
     else app.innerHTML = '<div class="card empty">Page not found. <a href="#/">Go home</a></div>';
-    if (n === routing) window.scrollTo(0, 0);
+    if (n === routing && !S.noScroll) window.scrollTo(0, 0);
+    S.noScroll = false;
   } catch (e) {
     if (n !== routing) return;
     if (!S.offline) app.innerHTML = '<div class="card empty">' + esc(e.message) + '<div style="margin-top:12px"><a href="#/">Go home</a></div></div>';

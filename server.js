@@ -147,6 +147,50 @@ function serveFile(req, res, file, type, extra = {}) {
 }
 
 // ---------- API ----------
+// ---------- overdue checklist notices to a webhook (Home Assistant or anything that takes JSON) ----------
+function postJson(url, body) {
+  return new Promise((resolve) => {
+    let u;
+    try { u = new URL(url); } catch (e) { return resolve({ ok: false, error: 'bad address' }); }
+    const data = Buffer.from(JSON.stringify(body));
+    const lib = u.protocol === 'https:' ? require('https') : require('http');
+    const req = lib.request(u, { method: 'POST', timeout: 8000, headers: { 'content-type': 'application/json', 'content-length': data.length, 'user-agent': 'LiveGenie/' + pkg.version } }, (res) => {
+      res.resume();
+      resolve(res.statusCode >= 200 && res.statusCode < 300 ? { ok: true, status: res.statusCode } : { ok: false, error: 'answered ' + res.statusCode });
+    });
+    req.on('timeout', () => req.destroy(new Error('no answer in 8 seconds')));
+    req.on('error', (e) => resolve({ ok: false, error: e.message }));
+    req.end(data);
+  });
+}
+
+const timeText = (t) => new Date(t).toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' });
+let notifying = false;
+async function notifyOverdue() {
+  if (notifying) return;
+  notifying = true;
+  try {
+    const url = store.getSetting('notify_webhook');
+    const base = store.getSetting('base_url');
+    for (const n of store.overdue({ role: 'admin' })) {
+      if (store.wasNoticed(n)) continue;
+      if (!url) { store.markNoticed(n, 'no webhook'); continue; }
+      const message = n.title + ' (' + n.page_title + '): ' + n.left + ' of ' + n.total + ' not done by ' + timeText(n.dueAt) + '. Left: ' + n.items_left.join(', ');
+      const r = await postJson(url, {
+        event: 'checklist_overdue', source: 'LiveGenie', title: 'Checklist overdue: ' + n.title, message,
+        page: n.page_title, checklist: n.title, left: n.left, total: n.total, items_left: n.items_left,
+        due_at: new Date(n.dueAt).toISOString(), url: base ? base + '/#/p/' + n.page_id : ''
+      });
+      store.markNoticed(n, r.ok ? 'sent' : 'failed: ' + r.error);
+      store.audit(null, 'notify.overdue', n.page_id, n.title + ': ' + (r.ok ? 'sent' : 'failed (' + r.error + ')'));
+    }
+  } catch (e) {
+    console.error('Overdue check failed:', e.message);
+  } finally {
+    notifying = false;
+  }
+}
+
 function state(user) {
   return {
     ok: true,
@@ -155,6 +199,7 @@ function state(user) {
     setupNeeded: !auth.hasUsers(),
     user: user ? { id: user.id, name: user.name, role: user.role } : null,
     role: Auth.roleOf(user),
+    todo: (() => { const t = store.todo(user); return { open: t.filter((x) => !x.complete).length, overdue: t.filter((x) => x.overdue).length }; })(),
     update: update.info()
   };
 }
@@ -247,6 +292,45 @@ async function api(req, res, url, user, token) {
     need(user, 'editor');
     if (m === 'GET' && !b) return send(res, 200, { ok: true, pages: store.trash() });
     if (m === 'POST' && b && c === 'restore') { store.undelete(b, user); return send(res, 200, { ok: true }); }
+  }
+
+  // ----- shared checklists -----
+  if (a === 'pages' && b && c === 'checklists') {
+    if (m === 'GET' && !d) return send(res, 200, { ok: true, now: Date.now(), checklists: store.checklists(b, user) });
+    if (m === 'POST' && d && e === 'tick') {
+      const body = await readJson(req);
+      return send(res, 200, { ok: true, now: Date.now(), checklist: store.tick(b, d, String(body.item || ''), !!body.done, user) });
+    }
+    if (m === 'POST' && d && e === 'reset') {
+      need(user, 'volunteer');
+      return send(res, 200, { ok: true, now: Date.now(), checklist: store.resetChecklist(b, d, user) });
+    }
+  }
+  if (m === 'GET' && a === 'todo') return send(res, 200, { ok: true, now: Date.now(), todo: store.todo(user) });
+
+  // ----- notifications (admin) -----
+  if (a === 'settings' && b === 'notify') {
+    need(user, 'admin');
+    if (m === 'GET') return send(res, 200, { ok: true, webhook: store.getSetting('notify_webhook'), baseUrl: store.getSetting('base_url') });
+    if (m === 'PUT') {
+      const body = await readJson(req);
+      const url = String(body.webhook || '').trim();
+      if (url && !/^https?:\/\/\S+$/i.test(url)) return fail(res, 400, 'The webhook address must start with http:// or https://');
+      store.setSetting('notify_webhook', url);
+      if (req.headers.host) store.setSetting('base_url', 'http://' + req.headers.host);
+      store.audit(user, 'settings.notify', '', url ? 'webhook set' : 'webhook cleared');
+      return send(res, 200, { ok: true });
+    }
+    if (m === 'POST' && c === 'test') {
+      const url = store.getSetting('notify_webhook');
+      if (!url) return fail(res, 400, 'Save a webhook address first');
+      const r = await postJson(url, {
+        event: 'test', source: 'LiveGenie', title: 'LiveGenie test',
+        message: 'This is a test notice from LiveGenie. Overdue checklists will arrive like this.',
+        url: store.getSetting('base_url')
+      });
+      return r.ok ? send(res, 200, { ok: true, status: r.status }) : fail(res, 502, 'The webhook did not accept it: ' + r.error);
+    }
   }
 
   // ----- pictures -----
@@ -368,6 +452,7 @@ Backup.daily(BACKUP_AT[0], BACKUP_AT[1] || 0, () => {
 });
 setInterval(() => auth.prune(), 6 * 3600 * 1000).unref();
 update.start();
+setInterval(notifyOverdue, Number(process.env.LIVEGENIE_NOTIFY_EVERY_MS) || 60000).unref();
 
 server.listen(PORT, HOST, () => {
   console.log('LiveGenie ' + pkg.version + ' on http://' + HOST + ':' + PORT + ' (data in ' + DATA + ')');

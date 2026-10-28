@@ -476,7 +476,7 @@ function pickPreset() {
   });
 }
 
-async function viewEdit(id, spaceSlug) {
+async function viewEdit(id, spaceSlug, drawBlock) {
   if (!can('editor')) {
     if (!S.state.user) { signInDialog(() => route()); app.innerHTML = '<div class="card empty">Sign in as an editor to edit pages.</div>'; return; }
     app.innerHTML = '<div class="card empty">Your role can read pages but not edit them. Ask an admin for the Editor role.</div>'; return;
@@ -613,8 +613,14 @@ async function viewEdit(id, spaceSlug) {
     finally { const b = $('#eSave'); if (b) b.disabled = false; }
   }
 
+  if (drawBlock) { const blk = ed.blocks.find((x) => x.id === drawBlock); if (blk) blk._view = 'draw'; }
   paintBlocks();
   if (!id) $('#eT').focus();
+  if (drawBlock) {
+    const i = ed.blocks.findIndex((x) => x.id === drawBlock);
+    const el = $$('#eB .blk')[i];
+    if (el) { S.noScroll = true; setTimeout(() => el.scrollIntoView({ block: 'start', behavior: 'smooth' }), 60); }
+  }
 }
 
 /** Shrink big photos to at most 1600 px on the long side before upload. */
@@ -918,7 +924,7 @@ async function route() {
     if (S.state.setupNeeded) return await viewSetup();
     if (!p.length) await viewHome();
     else if (p[0] === 's' && p[1]) await viewSpace(p[1]);
-    else if (p[0] === 'p' && p[1] && p[2] === 'edit') await viewEdit(p[1]);
+    else if (p[0] === 'p' && p[1] && p[2] === 'edit') await viewEdit(p[1], null, qs.get('draw'));
     else if (p[0] === 'p' && p[1] && p[2] === 'history') await viewHistory(p[1], p[3]);
     else if (p[0] === 'p' && p[1]) await viewPage(p[1], qs.get('c'));
     else if (p[0] === 'new') await viewEdit(null, qs.get('space'));

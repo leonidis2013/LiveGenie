@@ -324,11 +324,22 @@ const Blk = (() => {
     if (!Array.isArray(b.trace)) b.trace = (PRESETS[b.preset] || PRESETS.custom).trace.filter((i) => i < b.columns.length);
     const ensureBlank = () => { if (!b.rows.length || b.rows[b.rows.length - 1].some((v) => String(v || '').trim())) b.rows.push(b.columns.map(() => '')); };
     const paint = (focus) => {
-      ensureBlank();
       const traceTxt = b.trace.filter((i) => i < b.columns.length).map((i) => b.columns[i] || '?').join(' → ') || 'not set';
-      host.innerHTML = '<div class="prow"><input class="full grow" data-f="title" placeholder="' + esc((PRESETS[b.preset] || PRESETS.custom).title) + '" value="' + esc(b.title || '') + '">' +
-        '<select data-preset aria-label="Layout">' + Object.keys(PRESETS).map((k) => '<option value="' + k + '"' + (k === b.preset ? ' selected' : '') + '>' + PRESETS[k].title + ' layout</option>').join('') + '</select></div>' +
-        '<div class="tscroll"><table class="gedit"><thead><tr><th class="rn">#</th>' +
+      const top = '<div class="prow"><input class="full grow" data-f="title" placeholder="' + esc((PRESETS[b.preset] || PRESETS.custom).title) + '" value="' + esc(b.title || '') + '">' +
+        '<select data-preset aria-label="Layout">' + Object.keys(PRESETS).map((k) => '<option value="' + k + '"' + (k === b.preset ? ' selected' : '') + '>' + PRESETS[k].title + ' layout</option>').join('') + '</select>' +
+        '<div class="seg pmode"><button type="button" data-pm="table"' + (b._view !== 'draw' ? ' class="on"' : '') + '>Table</button><button type="button" data-pm="draw"' + (b._view === 'draw' ? ' class="on"' : '') + '>Draw</button></div></div>';
+      if (b._view === 'draw') {
+        b.rows = b.rows.filter((r) => r.some((v) => String(v || '').trim()));
+        host.innerHTML = top + '<div class="pdhelp note">Drag from the dot on a box to another box to connect them, or tap the dot and then the box. Tap a line or box to edit it. Everything you draw is a row in the table.</div>' +
+          '<div class="tscroll pdscroll"><div class="pdraw"></div></div><div class="pdpanel"></div>' +
+          '<div class="adder" style="padding:8px 0 4px"><span class="note grow">Wire trace: ' + esc(traceTxt) + '</span><button type="button" class="btn" data-trace>Trace path</button></div>';
+        wireTop();
+        host.querySelector('[data-trace]').addEventListener('click', () => traceDialog());
+        drawPatch(host.querySelector('.pdraw'), host.querySelector('.pdpanel'), b, dirty, traceDialog);
+        return;
+      }
+      ensureBlank();
+      host.innerHTML = top + '<div class="tscroll"><table class="gedit"><thead><tr><th class="rn">#</th>' +
         b.columns.map((c, ci) => '<th><div class="colh"><input data-col="' + ci + '" value="' + esc(c) + '" aria-label="Column name"><button type="button" class="ghost" data-cdel="' + ci + '" title="Remove column">' + icon('x') + '</button></div></th>').join('') +
         '<th class="rt"><button type="button" class="ghost" data-cadd title="Add column">' + icon('plus') + '</button></th></tr></thead><tbody>' +
         b.rows.map((r, ri) => '<tr><td class="rn">' + (ri + 1) + '</td>' + b.columns.map((_, ci) => '<td><input data-r="' + ri + '" data-c="' + ci + '" value="' + esc(r[ci] || '') + '"></td>').join('') +
@@ -337,21 +348,13 @@ const Blk = (() => {
         '<div class="adder" style="padding:8px 0 4px"><button type="button" class="btn" data-radd>' + icon('plus') + 'Row</button><button type="button" class="btn" data-paste>Paste rows</button>' +
         '<span class="note grow">Wire trace: ' + esc(traceTxt) + '</span><button type="button" class="btn" data-trace>Trace path</button></div>' +
         '<div class="mdhelp">Enter moves down a row. Paste rows straight from a spreadsheet.</div>';
-      host.querySelector('[data-f=title]').addEventListener('input', (e) => { b.title = e.target.value; dirty(); });
+      wireTop();
       host.querySelectorAll('[data-col]').forEach((f) => f.addEventListener('input', () => { b.columns[Number(f.dataset.col)] = f.value; dirty(); }));
       host.querySelectorAll('input[data-r]').forEach((f) => f.addEventListener('input', () => {
         b.rows[Number(f.dataset.r)][Number(f.dataset.c)] = f.value; dirty();
         if (Number(f.dataset.r) === b.rows.length - 1 && f.value) { b.rows.push(b.columns.map(() => '')); appendRow(); }
       }));
       gridKeys(host.querySelector('.gedit'), (c) => { b.rows.push(b.columns.map(() => '')); paint({ r: b.rows.length - 1, c }); });
-      host.querySelector('[data-preset]').addEventListener('change', async (e) => {
-        const k = e.target.value;
-        const has = b.rows.some((r) => r.some((v) => String(v || '').trim()));
-        if (has && !await confirmBox('Use the ' + PRESETS[k].title + ' columns?', 'Column names change to ' + PRESETS[k].columns.join(', ') + '. Your rows stay, matched by position.', 'Change columns')) { e.target.value = b.preset; return; }
-        b.preset = k; b.columns = PRESETS[k].columns.slice(); b.trace = PRESETS[k].trace.slice();
-        b.rows = b.rows.map((r) => b.columns.map((_, i) => r[i] || ''));
-        dirty(); paint();
-      });
       host.querySelector('[data-cadd]').addEventListener('click', () => {
         if (b.columns.length >= 12) return toast('A patch list can have up to 12 columns');
         b.columns.push('Column ' + (b.columns.length + 1)); b.rows.forEach((r) => r.push('')); dirty(); paint();
@@ -374,6 +377,18 @@ const Blk = (() => {
       host.querySelector('[data-trace]').addEventListener('click', () => traceDialog());
       if (focus) { const f = host.querySelector('input[data-r="' + focus.r + '"][data-c="' + focus.c + '"]'); if (f) f.focus(); }
     };
+    function wireTop() {
+      host.querySelector('[data-f=title]').addEventListener('input', (e) => { b.title = e.target.value; dirty(); });
+      host.querySelectorAll('[data-pm]').forEach((x) => x.addEventListener('click', () => { b._view = x.dataset.pm; paint(); }));
+      host.querySelector('[data-preset]').addEventListener('change', async (e) => {
+        const k = e.target.value;
+        const has = b.rows.some((r) => r.some((v) => String(v || '').trim()));
+        if (has && !await confirmBox('Use the ' + PRESETS[k].title + ' columns?', 'Column names change to ' + PRESETS[k].columns.join(', ') + '. Your rows stay, matched by position.', 'Change columns')) { e.target.value = b.preset; return; }
+        b.preset = k; b.columns = PRESETS[k].columns.slice(); b.trace = PRESETS[k].trace.slice();
+        b.rows = b.rows.map((r) => b.columns.map((_, i) => r[i] || ''));
+        dirty(); paint();
+      });
+    }
     function appendRow() {
       const tb = host.querySelector('.gedit tbody');
       const ri = b.rows.length - 1;
@@ -432,6 +447,224 @@ const Blk = (() => {
       });
     }
     paint();
+  }
+
+  /*
+   * Draw mode for a patch list. The drawing and the table are the same rows:
+   * boxes are the values in each wire-trace column, a line is two of them on one row.
+   */
+  function drawPatch(area, panel, b, dirty, openTrace) {
+    const cols = (b.trace || []).filter((i) => i < b.columns.length);
+    if (cols.length < 2) {
+      area.innerHTML = '<div class="note" style="padding:14px">Pick at least two columns for the wire trace first (for example Source → Stage box → Ch).</div>';
+      const btn = document.createElement('button'); btn.type = 'button'; btn.className = 'btn'; btn.textContent = 'Trace path'; btn.style.margin = '0 14px 14px';
+      btn.addEventListener('click', openTrace); area.appendChild(btn);
+      return;
+    }
+    const CW = 168, GX = 76, NH = 36, GY = 10, TOP = 34;
+    const key = (v) => String(v || '').trim().toLowerCase();
+    let sel = null, pending = null;
+    if (typeof loadDevices === 'function') loadDevices().then(() => { const dl = area.querySelector('datalist'); if (dl && DEV.list) dl.innerHTML = DEV.list.map((d) => '<option value="' + esc(d.name) + '">').join(''); });
+    const dlId = 'pdl-' + Math.random().toString(36).slice(2, 8);
+
+    function model() {
+      const nodes = cols.map(() => new Map());
+      const edges = [];
+      b.rows.forEach((r, ri) => {
+        const present = [];
+        cols.forEach((ci, k) => {
+          const v = String(r[ci] || '').trim();
+          if (!v) return;
+          const kk = key(v);
+          if (!nodes[k].has(kk)) nodes[k].set(kk, { k, key: kk, label: v, rows: [], i: nodes[k].size });
+          nodes[k].get(kk).rows.push(ri);
+          present.push({ k, key: kk });
+        });
+        for (let j = 1; j < present.length; j++) edges.push({ r: ri, a: present[j - 1], z: present[j] });
+      });
+      return { nodes, edges };
+    }
+    const cx = (k) => k * (CW + GX);
+    const cy = (i) => TOP + i * (NH + GY);
+
+    function tidy() {
+      // drop empty rows, and lone single-cell rows whose value already shows on another row
+      b.rows = b.rows.filter((r) => r.some((v) => String(v || '').trim()));
+      b.rows = b.rows.filter((r, ri) => {
+        const filled = b.columns.map((_, ci) => ci).filter((ci) => String(r[ci] || '').trim());
+        if (filled.length !== 1 || !cols.includes(filled[0])) return true;
+        const ci = filled[0], v = key(r[ci]);
+        return !b.rows.some((o, oi) => oi !== ri && key(o[ci]) === v && o.filter((x) => String(x || '').trim()).length > 1);
+      });
+    }
+
+    function connect(a, z) {
+      if (a.k === z.k) return toast('Connect boxes in different columns');
+      if (a.k > z.k) [a, z] = [z, a];
+      const ca = cols[a.k], cz = cols[z.k];
+      const m = model();
+      const la = m.nodes[a.k].get(a.key).label, lz = m.nodes[z.k].get(z.key).label;
+      const between = (r) => cols.slice(a.k + 1, z.k).every((ci) => !String(r[ci] || '').trim());
+      let ri = b.rows.findIndex((r) => key(r[ca]) === a.key && key(r[cz]) === z.key);
+      if (ri >= 0) { toast('Those are already connected'); sel = { type: 'wire', r: ri, a, z }; return draw(); }
+      ri = b.rows.findIndex((r) => key(r[ca]) === a.key && !String(r[cz] || '').trim() && between(r) && cols.slice(z.k + 1).every((ci) => !String(r[ci] || '').trim()));
+      if (ri < 0) ri = b.rows.findIndex((r) => key(r[cz]) === z.key && !String(r[ca] || '').trim() && between(r) && cols.slice(0, a.k).every((ci) => !String(r[ci] || '').trim()));
+      if (ri < 0) {
+        // extend a lone box row on either side, otherwise start a new row
+        ri = b.rows.findIndex((r) => key(r[ca]) === a.key && r.filter((x) => String(x || '').trim()).length === 1);
+        if (ri < 0) ri = b.rows.findIndex((r) => key(r[cz]) === z.key && r.filter((x) => String(x || '').trim()).length === 1);
+      }
+      if (ri < 0) { b.rows.push(b.columns.map(() => '')); ri = b.rows.length - 1; }
+      b.rows[ri][ca] = la; b.rows[ri][cz] = lz;
+      tidy();
+      ri = b.rows.findIndex((r) => key(r[ca]) === a.key && key(r[cz]) === z.key);
+      sel = { type: 'wire', r: ri, a, z };
+      dirty(); draw();
+    }
+
+    function disconnect(ri, z) {
+      const r = b.rows[ri];
+      const after = b.columns.map(() => '');
+      cols.forEach((ci, k) => { if (k >= z.k) { after[ci] = r[ci]; r[ci] = ''; } });
+      b.rows.splice(ri + 1, 0, after);
+      tidy(); sel = null; dirty(); draw();
+    }
+
+    function draw() {
+      const { nodes, edges } = model();
+      const maxN = Math.max(1, ...nodes.map((n) => n.size)) + 1;
+      const W = cols.length * CW + (cols.length - 1) * GX, H = cy(maxN) + 10;
+      const path = (e) => {
+        const na = nodes[e.a.k].get(e.a.key), nz = nodes[e.z.k].get(e.z.key);
+        const x1 = cx(e.a.k) + CW, y1 = cy(na.i) + NH / 2, x2 = cx(e.z.k), y2 = cy(nz.i) + NH / 2, mx = (x2 - x1) / 2;
+        return 'M' + x1 + ' ' + y1 + 'C' + (x1 + mx) + ' ' + y1 + ' ' + (x2 - mx) + ' ' + y2 + ' ' + x2 + ' ' + y2;
+      };
+      const isSelW = (e) => sel && sel.type === 'wire' && sel.r === e.r && sel.a.k === e.a.k && sel.z.k === e.z.k;
+      const isSelN = (n) => sel && sel.type === 'node' && sel.k === n.k && sel.key === n.key;
+      area.style.width = W + 'px'; area.style.height = H + 'px';
+      area.innerHTML = '<datalist id="' + dlId + '">' + (typeof DEV !== 'undefined' && DEV.list ? DEV.list.map((d) => '<option value="' + esc(d.name) + '">').join('') : '') + '</datalist>' +
+        cols.map((ci, k) => '<div class="pdh" style="left:' + cx(k) + 'px;width:' + CW + 'px">' + esc(b.columns[ci]) + '</div>').join('') +
+        '<svg class="pdw" width="' + W + '" height="' + H + '"><g>' + edges.map((e) => '<g class="pw' + (isSelW(e) ? ' sel' : '') + '" data-r="' + e.r + '" data-a="' + e.a.k + '" data-z="' + e.z.k + '"><path class="hit" d="' + path(e) + '"/><path class="ln" d="' + path(e) + '"/></g>').join('') +
+        '</g><path class="tmp" d=""/></svg>' +
+        nodes.map((m, k) => [...m.values()].map((n) => '<div class="pn' + (isSelN(n) ? ' sel' : '') + (pending && pending.k === n.k && pending.key === n.key ? ' pend' : '') + '" data-k="' + k + '" data-key="' + esc(n.key) + '" style="left:' + cx(k) + 'px;top:' + cy(n.i) + 'px;width:' + CW + 'px;height:' + NH + 'px">' +
+          '<span class="pl">' + esc(n.label) + '</span>' + (n.rows.length > 1 ? '<em>' + n.rows.length + '</em>' : '') + '<b class="hd" title="Drag to connect" aria-label="Connect from ' + esc(n.label) + '"></b></div>').join('') +
+          '<button type="button" class="padd" data-k="' + k + '" style="left:' + cx(k) + 'px;top:' + cy(m.size) + 'px;width:' + CW + 'px">+ Add ' + esc(b.columns[cols[k]]) + '</button>').join('');
+      showPanel(nodes);
+    }
+
+    function showPanel(nodes) {
+      if (!sel) { panel.innerHTML = ''; return; }
+      if (sel.type === 'wire') {
+        const r = b.rows[sel.r];
+        if (!r) { sel = null; panel.innerHTML = ''; return; }
+        panel.innerHTML = '<div class="pdp"><div class="pdph"><b>' + esc(r[cols[sel.a.k]] || '') + ' → ' + esc(r[cols[sel.z.k]] || '') + '</b><span class="note">Row ' + (sel.r + 1) + '</span></div>' +
+          '<div class="pdf">' + b.columns.map((c, ci) => '<label>' + esc(c) + '<input data-ci="' + ci + '" value="' + esc(r[ci] || '') + '"' + (cols.includes(ci) ? ' list="' + dlId + '"' : '') + '></label>').join('') + '</div>' +
+          '<div class="acts" style="justify-content:flex-start;margin-top:8px"><button type="button" class="btn" data-disc>Disconnect</button><button type="button" class="btn danger" data-rowdel>Delete row</button></div></div>';
+        panel.querySelectorAll('[data-ci]').forEach((x) => x.addEventListener('change', () => {
+          const ci = Number(x.dataset.ci), r = b.rows[sel.r];
+          r[ci] = x.value.trim();
+          if (cols[sel.a.k] === ci) sel.a.key = key(r[ci]);
+          if (cols[sel.z.k] === ci) sel.z.key = key(r[ci]);
+          tidy(); sel.r = b.rows.indexOf(r); if (sel.r < 0) sel = null; dirty(); draw();
+        }));
+        panel.querySelector('[data-disc]').addEventListener('click', () => disconnect(sel.r, sel.z));
+        panel.querySelector('[data-rowdel]').addEventListener('click', () => { b.rows.splice(sel.r, 1); tidy(); sel = null; dirty(); draw(); });
+      } else {
+        const n = nodes[sel.k] && nodes[sel.k].get(sel.key);
+        if (!n) { sel = null; panel.innerHTML = ''; return; }
+        const ci = cols[sel.k];
+        panel.innerHTML = '<div class="pdp"><div class="pdph"><b>' + esc(b.columns[ci]) + '</b><span class="note">' + n.rows.length + ' row' + (n.rows.length === 1 ? '' : 's') + '</span></div>' +
+          '<div class="pdf"><label>Name<input data-rename value="' + esc(n.label) + '" list="' + dlId + '"></label></div>' +
+          '<div class="acts" style="justify-content:flex-start;margin-top:8px"><button type="button" class="btn" data-from>Connect from here</button><button type="button" class="btn danger" data-ndel>Remove box</button></div></div>';
+        const inp = panel.querySelector('[data-rename]');
+        inp.addEventListener('change', () => {
+          const v = inp.value.trim();
+          if (!v) return;
+          b.rows.forEach((r) => { if (key(r[ci]) === sel.key) r[ci] = v; });
+          sel = { type: 'node', k: sel.k, key: key(v) }; tidy(); dirty(); draw();
+        });
+        panel.querySelector('[data-from]').addEventListener('click', () => { pending = { k: sel.k, key: sel.key }; toast('Now tap the box to connect to'); draw(); });
+        panel.querySelector('[data-ndel]').addEventListener('click', () => {
+          b.rows.forEach((r) => { if (key(r[ci]) === sel.key) r[ci] = ''; });
+          tidy(); sel = null; dirty(); draw();
+        });
+      }
+    }
+
+    // ---- pointer: drag from a dot to a box, or tap dot then box ----
+    let drag = null;
+    const local = (e) => { const r = area.getBoundingClientRect(); return [e.clientX - r.left, e.clientY - r.top]; };
+    area.addEventListener('pointerdown', (e) => {
+      const hd = e.target.closest('.hd');
+      if (!hd) return;
+      e.preventDefault();
+      const pn = hd.closest('.pn');
+      drag = { k: Number(pn.dataset.k), key: pn.dataset.key, moved: false, x0: e.clientX, y0: e.clientY };
+      area.setPointerCapture(e.pointerId);
+    });
+    area.addEventListener('pointermove', (e) => {
+      if (!drag) return;
+      if (Math.abs(e.clientX - drag.x0) + Math.abs(e.clientY - drag.y0) > 6) drag.moved = true;
+      if (!drag.moved) return;
+      const pn = area.querySelector('.pn[data-k="' + drag.k + '"][data-key="' + CSS.escape(drag.key) + '"]');
+      const x1 = pn.offsetLeft + CW, y1 = pn.offsetTop + NH / 2;
+      const [x2, y2] = local(e);
+      area.querySelector('.tmp').setAttribute('d', 'M' + x1 + ' ' + y1 + 'C' + (x1 + 40) + ' ' + y1 + ' ' + (x2 - 40) + ' ' + y2 + ' ' + x2 + ' ' + y2);
+      area.querySelectorAll('.pn.drop').forEach((x) => x.classList.remove('drop'));
+      const over = document.elementFromPoint(e.clientX, e.clientY);
+      const tgt = over && over.closest && over.closest('.pn');
+      if (tgt && Number(tgt.dataset.k) !== drag.k) tgt.classList.add('drop');
+    });
+    area.addEventListener('pointerup', (e) => {
+      if (!drag) return;
+      const d = drag; drag = null;
+      area.querySelector('.tmp').setAttribute('d', '');
+      if (!d.moved) { pending = pending && pending.k === d.k && pending.key === d.key ? null : { k: d.k, key: d.key }; sel = null; draw(); return; }
+      const over = document.elementFromPoint(e.clientX, e.clientY);
+      const tgt = over && over.closest && over.closest('.pn');
+      if (tgt && area.contains(tgt)) connect({ k: d.k, key: d.key }, { k: Number(tgt.dataset.k), key: tgt.dataset.key });
+      else draw();
+    });
+    area.addEventListener('click', (e) => {
+      if (e.target.closest('.hd')) return;
+      const pn = e.target.closest('.pn');
+      if (pn) {
+        const n = { k: Number(pn.dataset.k), key: pn.dataset.key };
+        if (pending && !(pending.k === n.k && pending.key === n.key)) { const p = pending; pending = null; connect(p, n); return; }
+        pending = null; sel = { type: 'node', k: n.k, key: n.key }; draw(); return;
+      }
+      const w = e.target.closest('.pw');
+      if (w) {
+        const ri = Number(w.dataset.r), r = b.rows[ri];
+        sel = { type: 'wire', r: ri, a: { k: Number(w.dataset.a), key: key(r[cols[Number(w.dataset.a)]]) }, z: { k: Number(w.dataset.z), key: key(r[cols[Number(w.dataset.z)]]) } };
+        pending = null; draw(); return;
+      }
+      const add = e.target.closest('.padd');
+      if (add) {
+        const k = Number(add.dataset.k);
+        const inp = document.createElement('input');
+        inp.className = 'padd-in'; inp.style.cssText = add.style.cssText; inp.setAttribute('list', dlId);
+        inp.placeholder = b.columns[cols[k]] + ' name';
+        add.replaceWith(inp); inp.focus();
+        let finished = false;
+        const done = (ok) => {
+          if (finished) return; finished = true;
+          const v = inp.value.trim();
+          if (ok && v) {
+            const m = model();
+            if (m.nodes[k].has(key(v))) toast('That box is already there');
+            else { const row = b.columns.map(() => ''); row[cols[k]] = v; b.rows.push(row); dirty(); }
+            sel = { type: 'node', k, key: key(v) };
+          }
+          draw();
+        };
+        inp.addEventListener('keydown', (ev) => { if (ev.key === 'Enter') { ev.preventDefault(); done(true); } if (ev.key === 'Escape') done(false); });
+        inp.addEventListener('blur', () => done(true));
+        return;
+      }
+      if (e.target === area || e.target.closest('svg')) { sel = null; pending = null; draw(); }
+    });
+    draw();
   }
 
   function editIplist(host, b, dirty) {
@@ -553,6 +786,11 @@ const Blk = (() => {
   function wire(root, page, live) {
     if (live) wireChecklists(root, page.id);
     wirePatch(root, page.blocks);
+    if (live && can('editor')) root.querySelectorAll('.patch[data-pid] .ph').forEach((ph) => {
+      const a = document.createElement('a');
+      a.className = 'btn ghost pdedit'; a.href = '#/p/' + page.id + '/edit?draw=' + ph.parentNode.dataset.pid; a.innerHTML = icon('edit') + 'Draw';
+      ph.appendChild(a);
+    });
   }
 
   return { render, wire, editChecklist, editPatch, editIplist, PRESETS, describe, analyze, ipInt, traceSvg };

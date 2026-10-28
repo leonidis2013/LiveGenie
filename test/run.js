@@ -360,6 +360,58 @@ test('device library: cards, aliases, IPs from IP lists, Used on, import', async
   assert.strictEqual((await editor.del('/api/devices/' + udm)).status, 200);
 });
 
+test('VLANs: registry, checks, import from IP lists, Tech only', async () => {
+  assert.strictEqual((await vol.get('/api/vlans')).status, 403, 'volunteers do not see the VLAN registry');
+  let r = await editor.get('/api/vlans');
+  assert.deepStrictEqual(r.data.suggestions.map((x) => x.vid), [20], 'VLAN 20 from the AVL IP list');
+  r = await editor.post('/api/vlans/import', { vids: [20] });
+  assert.strictEqual(r.data.made, 1);
+  assert.strictEqual((await editor.post('/api/vlans', { vid: 20, name: 'Again' })).status, 400, 'duplicate VLAN ID');
+  assert.strictEqual((await editor.post('/api/vlans', { vid: 30, name: 'Overlap', cidr: '10.10.20.128/25' })).status, 400, 'overlapping subnet');
+  assert.strictEqual((await editor.post('/api/vlans', { vid: 40, name: 'Guest', cidr: '10.10.40.0/24', gateway: '10.10.41.1' })).status, 400, 'gateway outside subnet');
+  assert.strictEqual((await editor.post('/api/vlans', { vid: 5000, name: 'Nope' })).status, 400);
+  r = await editor.post('/api/vlans', { vid: 10, name: 'Office', cidr: '10.10.10.5/24', gateway: '10.10.10.1', dhcp_start: '10.10.10.100', dhcp_end: '10.10.10.199', color: '#2ec4b6' });
+  assert.strictEqual(r.status, 200);
+  const list = (await editor.get('/api/vlans')).data.vlans;
+  const office = list.find((v) => v.vid === 10);
+  assert.strictEqual(office.cidr, '10.10.10.0/24', 'subnet is normalised');
+  assert.strictEqual(office.dhcp, 100);
+  const avl = list.find((v) => v.vid === 20);
+  assert.ok(avl.devices.some((d) => d.name === 'SQ-5'), 'SQ-5 sits in VLAN 20 by its IP');
+});
+
+test('system map: plugged-into links, signal links from patch lists, loops refused, layouts', async () => {
+  const devs = (await editor.get('/api/devices')).data.devices;
+  const sq = devs.find((d) => d.name === 'SQ-5').id, pa2 = devs.find((d) => d.name === 'DriveRack PA2').id;
+  const sw = (await editor.post('/api/devices', { name: 'USW-16-PoE', category: 'network', ip: '10.10.20.2' })).data.id;
+  const amp = (await editor.post('/api/devices', { name: 'Crown XLi 2500', category: 'audio' })).data.id;
+  assert.strictEqual((await editor.put('/api/devices/' + sq, { name: 'SQ-5', aliases: ['FOH desk'], category: 'audio', uplink_id: sw, uplink_port: '3' })).status, 200);
+  assert.strictEqual((await editor.put('/api/devices/' + pa2, { name: 'DriveRack PA2', aliases: ['PA2'], category: 'audio', uplink_id: sw, uplink_port: '4' })).status, 200);
+  let r = await editor.put('/api/devices/' + sw, { name: 'USW-16-PoE', category: 'network', ip: '10.10.20.2', uplink_id: sq });
+  assert.strictEqual(r.status, 400, 'a loop is refused');
+  await editor.post('/api/pages', { title: 'Amp rack wiring', space: 'audio', blocks: [
+    { type: 'patch', preset: 'cable', rows: [['C1', 'FOH desk', 'DriveRack PA2', 'XLR', '30 m'], ['C2', 'DriveRack PA2', 'Crown XLi 2500', 'XLR', '1 m'], ['C3', 'PA2', 'Crown XLi 2500', 'XLR', '1 m']] }] });
+  r = await editor.get('/api/map');
+  assert.strictEqual(r.data.tech, true);
+  const net = r.data.netLinks.map((l) => l.from + '>' + l.to + ':' + l.port).sort();
+  assert.deepStrictEqual(net, [sw + '>' + pa2 + ':4', sw + '>' + sq + ':3'].sort());
+  const sig = r.data.sigLinks.map((l) => l.from + '>' + l.to + 'x' + l.count).sort();
+  assert.deepStrictEqual(sig, [sq + '>' + pa2 + 'x1', pa2 + '>' + amp + 'x2'].sort(), 'aliases count, rows add up: ' + JSON.stringify(r.data.sigLinks.map((l) => [l.from, l.to, l.count])) + ' ids sq=' + sq + ' pa2=' + pa2 + ' amp=' + amp);
+  assert.ok(r.data.nodes.find((n) => n.id === sq).vlans.includes(20));
+  r = await anon.get('/api/map');
+  assert.strictEqual(r.data.tech, false);
+  assert.strictEqual(r.data.netLinks.length, 0, 'guests get the signal map only');
+  assert.ok(r.data.nodes.every((n) => !n.ips.length && !n.vlans.length));
+  assert.strictEqual(r.data.sigLinks.length, 2);
+  assert.strictEqual((await vol.put('/api/map/layout/signal', { positions: {} })).status, 403);
+  assert.strictEqual((await editor.put('/api/map/layout/signal', { positions: { [sq]: [10, 20], bad: [1, 2] } })).status, 200);
+  assert.deepStrictEqual((await editor.get('/api/map')).data.layouts.signal, { [sq]: [10, 20] });
+  r = await editor.get('/api/devices/' + sq);
+  assert.strictEqual(r.data.links.uplink.port, '3');
+  assert.strictEqual(r.data.links.signalOut[0].id, pa2);
+  assert.strictEqual((await editor.get('/api/devices/' + sw)).data.links.children.length, 2);
+});
+
 test('backup, then restore brings the data back after a restart', async () => {
   let r = await admin.post('/api/backups/now');
   assert.strictEqual(r.status, 200);

@@ -4,7 +4,7 @@
 
 The Rolling Hills Community Church AVL knowledge base: one web app where volunteers find how our system works, how to run a service and how to fix what broke. Part of the Live series (LiveMic, LiveCompanion, LivePi, LiveVoice).
 
-Version 0.3.0 · © 2026 Jerod Ulicki
+Version 0.4.0 · © 2026 Jerod Ulicki
 
 ## What it does
 
@@ -18,6 +18,11 @@ Version 0.3.0 · © 2026 Jerod Ulicki
 - **Wire trace.** Every patch list can draw its wiring (for an input patch: Source → Mic / DI → Stage box → Ch). Shared gear becomes one box; tap a box or line to follow the cable. Pick the columns and order in the editor.
 - **Static IP lists.** Network name, VLAN, subnet and gateway, then the addresses. Duplicates, addresses outside the subnet and the gateway are flagged as you type; Next free IP and Fill a range generate addresses; each IP links to the device's web page.
 - **Device library.** One card per device: photo, make and model, location, IP, MAC, manual link, nicknames and notes. Wherever a device's name, nickname or IP appears on any page (text, checklist steps, patch lists, IP lists), it links to its card automatically, with a quick card on hover. Each card lists everywhere it is **Used on**, and picks up its IP from any IP list row with its name. **Create from IP lists** makes cards for device names already in your IP lists.
+- **System map.** Drawn from what is already in LiveGenie, so it is never out of date:
+  - **Signal flow:** every patch list or cable run row that names two devices along its wire trace becomes an arrow (SB1 → SQ-5 → DriveRack PA2 → Crown → CBT tops). Everyone can see it.
+  - **Network:** a tree built from **Plugged into** and **Port** on each device card (UDM Pro → USW-16-PoE → FOH switch → SQ-5), coloured by VLAN, with a VLAN filter. Editors and admins only.
+  - Drag to pan, scroll or pinch to zoom, tap a box for its IP, VLAN, what it connects to and the pages that wire it. Editors can **Arrange** boxes and save the layout for everyone. Export PDF works here too.
+- **VLANs.** A VLAN list with ID, name, subnet, gateway, DHCP range, purpose and colour. LiveGenie checks for duplicate IDs, overlapping subnets and a gateway outside its subnet, shows static/DHCP/free usage, and lists the devices in each VLAN by their IPs. **Create from IP lists** turns the networks in your IP lists into VLANs, and IP lists can fill their network details from a VLAN. Editors and admins only.
 - **Network pages start as Tech only.** New pages in the Network space, and pages that get an IP list, start as Tech only (switch it off if you like).
 - **Export PDF.** Every page has a PDF button with a clean print layout (logo, title, version, print date). On a computer choose Save as PDF; on an iPhone use Print, then Share › Save to Files.
 - **Pictures, search, history, trash.** Phone photos (shrunk to 1600 px), instant search across text, checklists, patch and IP lists, every save kept as a version, deleted pages recoverable.
@@ -80,8 +85,9 @@ Run it on the TrueNAS host and reach it from the AVL and office VLANs through th
 |---|---|
 | 0.1.0 | Foundation: pages, search, history, roles, backups |
 | 0.2.0 | Formatting editor, shared checklists with auto reset, To do list and overdue notices, patch lists with wire trace, IP lists, PDF export |
-| 0.3.0 | Device library with automatic links and Used on lists; Network pages Tech only by default (this release) |
-| next | System map: an interactive LAN and rack map from the IP lists and devices |
+| 0.3.0 | Device library with automatic links and Used on lists; Network pages Tech only by default |
+| 0.4.0 | System map (signal flow and network), VLAN list, Plugged into on device cards (this release) |
+| next | Document library, AI drafts from the Jetson, Bitfocus Companion buttons in checklists |
 | later | Document library, AI drafts from the Jetson with citations, review queue, Ask the Genie |
 | later | Bitfocus Companion buttons inside checklists |
 | 1.0.0 | A new volunteer runs a full Sunday startup from a phone with LiveGenie alone |

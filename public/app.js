@@ -318,7 +318,7 @@ async function viewHome() {
     <div class="bar"><div class="grow"></div>${newBtn}</div>
     ${t.todo.length ? '<div class="section" id="todo"><h2>To do</h2><div class="list">' + t.todo.map(todoRow).join('') + '</div></div>' : ''}
     ${d.pinned.length ? '<div class="section"><h2>Pinned</h2><div class="list">' + d.pinned.map((p) => pageRow(p, { showSpace: true, noPin: true })).join('') + '</div></div>' : ''}
-    <div class="section"><h2>Spaces</h2><div class="spaces">${d.spaces.map((s) => `<a class="space" href="#/s/${esc(s.slug)}"><i></i><b>${esc(s.name)}</b><span>${esc(s.blurb)}</span><em class="n">${s.pages} page${s.pages === 1 ? '' : 's'}</em></a>`).join('')}<a class="space devtile" href="#/devices"><i></i><b>Devices</b><span>Every device, its IP and where it is used</span><em class="n">${devs.length} device${devs.length === 1 ? '' : 's'}</em></a></div></div>
+    <div class="section"><h2>Spaces</h2><div class="spaces">${d.spaces.map((s) => `<a class="space" href="#/s/${esc(s.slug)}"><i></i><b>${esc(s.name)}</b><span>${esc(s.blurb)}</span><em class="n">${s.pages} page${s.pages === 1 ? '' : 's'}</em></a>`).join('')}<a class="space devtile" href="#/devices"><i></i><b>Devices</b><span>Every device, its IP and where it is used</span><em class="n">${devs.length} device${devs.length === 1 ? '' : 's'}</em></a><a class="space maptile" href="#/map"><i></i><b>System map</b><span>Signal flow${can('editor') ? ', network and VLANs' : ''} drawn from your pages</span><em class="n">${icon('net')}</em></a></div></div>
     <div class="section"><h2>Recently updated</h2>${d.recent.length ? '<div class="list">' + d.recent.map((p) => pageRow(p, { showSpace: true })).join('') + '</div>'
       : '<div class="card empty">No pages yet.' + (can('editor') ? ' Start with the Sunday startup checklist or a page about the SQ-5.' : (S.state.user ? '' : ' Editors can sign in to add the first pages.')) + '</div>'}</div>`;
   const nb = $('#newPage');
@@ -873,7 +873,7 @@ async function tabActivity(pane) {
   const what = {
     'page.create': 'created page', 'page.edit': 'edited page', 'page.delete': 'deleted page', 'page.undelete': 'restored page', signin: 'signed in',
     'user.create': 'added user', 'user.edit': 'changed user', 'user.delete': 'removed user', 'backup.make': 'made a backup', 'backup.nightly': 'Nightly backup',
-    'checklist.reset': 'reset a checklist', 'device.create': 'added device', 'device.edit': 'changed device', 'device.delete': 'deleted device', 'notify.overdue': 'Overdue notice', 'settings.notify': 'changed notifications',
+    'checklist.reset': 'reset a checklist', 'device.create': 'added device', 'device.edit': 'changed device', 'device.delete': 'deleted device', 'vlan.create': 'added', 'vlan.edit': 'changed', 'vlan.delete': 'deleted', 'map.layout': 'arranged the map', 'notify.overdue': 'Overdue notice', 'settings.notify': 'changed notifications',
     'backup.upload': 'uploaded a backup', 'backup.restore': 'restored a backup', 'backup.restored': 'Restore finished', 'backup.delete': 'deleted a backup'
   };
   pane.innerHTML = '<div class="card"><h2>Activity</h2>' + (d.activity.length ? d.activity.map((a, i) => setRow(
@@ -922,6 +922,7 @@ async function route() {
     else if (p[0] === 'p' && p[1] && p[2] === 'history') await viewHistory(p[1], p[3]);
     else if (p[0] === 'p' && p[1]) await viewPage(p[1], qs.get('c'));
     else if (p[0] === 'new') await viewEdit(null, qs.get('space'));
+    else if (p[0] === 'map') await viewMap(p[1]);
     else if (p[0] === 'devices' && p[1] === 'new') await viewDeviceEdit(null);
     else if (p[0] === 'devices') await viewDevices(qs);
     else if (p[0] === 'd' && p[1] && p[2] === 'edit') await viewDeviceEdit(p[1]);

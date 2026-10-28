@@ -458,6 +458,7 @@ const Blk = (() => {
     const paint = (focus) => {
       ensureBlank();
       host.innerHTML = '<input class="full" data-f="title" placeholder="List name, e.g. AVL network" value="' + esc(b.title || '') + '">' +
+        '<div class="vpick hide"><select data-vpick aria-label="Use a VLAN"><option value="">Fill in from a VLAN…</option></select></div>' +
         '<div class="netf"><label>Network<input data-n="name" placeholder="AVL" value="' + esc(b.net.name) + '"></label><label>VLAN<input data-n="vlan" placeholder="20" inputmode="numeric" value="' + esc(b.net.vlan) + '"></label>' +
         '<label>Subnet<input data-n="cidr" class="mono" placeholder="10.10.20.0/24" inputmode="decimal" autocapitalize="off" value="' + esc(b.net.cidr) + '"></label>' +
         '<label>Gateway<input data-n="gateway" class="mono" placeholder="10.10.20.1" inputmode="decimal" value="' + esc(b.net.gateway) + '"></label></div>' +
@@ -471,6 +472,19 @@ const Blk = (() => {
         '<button type="button" class="btn" data-next data-needsn>Next free IP</button><button type="button" class="btn" data-range data-needsn>Fill a range</button><button type="button" class="btn" data-sort>Sort by IP</button></div>';
       host.querySelector('[data-f=title]').addEventListener('input', (e) => { b.title = e.target.value; dirty(); });
       host.querySelectorAll('[data-n]').forEach((f) => f.addEventListener('input', () => { b.net[f.dataset.n] = f.value.trim(); dirty(); refresh(); }));
+      if (typeof vlanList === 'function') vlanList().then((vl) => {
+        const sel = host.querySelector('[data-vpick]');
+        if (!sel || !vl.length) return;
+        sel.innerHTML += vl.map((v) => '<option value="' + v.id + '">VLAN ' + v.vid + ' · ' + esc(v.name) + (v.cidr ? ' · ' + esc(v.cidr) : '') + '</option>').join('');
+        sel.parentNode.classList.remove('hide');
+        sel.addEventListener('change', () => {
+          const v = vl.find((x) => String(x.id) === sel.value);
+          if (!v) return;
+          b.net = { name: v.name, vlan: String(v.vid), cidr: v.cidr, gateway: v.gateway };
+          if (!b.title) b.title = v.name + ' network';
+          dirty(); paint();
+        });
+      });
       host.querySelectorAll('input[data-r]').forEach((f) => f.addEventListener('input', () => {
         b.rows[Number(f.dataset.r)][f.dataset.c] = f.value; dirty();
         if (Number(f.dataset.r) === b.rows.length - 1 && f.value) { b.rows.push(blank()); paint({ r: f.dataset.r, c: f.dataset.c, keep: f.selectionStart }); return; }

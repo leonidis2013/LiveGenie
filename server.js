@@ -17,6 +17,7 @@ const Store = require('./lib/store');
 const Backup = require('./lib/backup');
 const Update = require('./lib/update');
 const Devices = require('./lib/devices');
+const Network = require('./lib/network');
 
 const DATA = path.resolve(process.env.LIVEGENIE_DATA || path.join(__dirname, 'data'));
 const PORT = Number(process.env.PORT || 8080);
@@ -36,6 +37,7 @@ const store = Store.create(db, DATA);
 const update = Update.create(pkg.version);
 const devices = Devices.create(db, { UserError: Store.UserError, audit: store.audit });
 const uploadExists = (id) => !!store.upload(id);
+const network = Network.create(db, { UserError: Store.UserError, audit: store.audit, devices, getSetting: store.getSetting, setSetting: store.setSetting });
 if (restoreNote) store.audit(null, 'backup.restored', '', restoreNote);
 
 // ---------- small http helpers ----------
@@ -177,7 +179,7 @@ async function notifyOverdue() {
     const base = store.getSetting('base_url');
     for (const n of store.overdue({ role: 'admin' })) {
       if (store.wasNoticed(n)) continue;
-      if (!url) { store.markNoticed(n, 'no webhook'); continue; }
+      if (!url) continue;              // nothing to send to yet; it goes out once a webhook is saved (while still overdue)
       const message = n.title + ' (' + n.page_title + '): ' + n.left + ' of ' + n.total + ' not done by ' + timeText(n.dueAt) + '. Left: ' + n.items_left.join(', ');
       const r = await postJson(url, {
         event: 'checklist_overdue', source: 'LiveGenie', title: 'Checklist overdue: ' + n.title, message,
@@ -308,10 +310,35 @@ async function api(req, res, url, user, token) {
     if (m === 'POST' && b === 'import') { need(user, 'editor'); const body = await readJson(req); return send(res, 200, { ok: true, made: devices.importFromLists(body.names, user) }); }
     if (m === 'POST' && !b) { need(user, 'editor'); return send(res, 200, { ok: true, id: devices.add(await readJson(req), user, uploadExists) }); }
     if (b && /^\d+$/.test(b)) {
-      if (m === 'GET') { const d = devices.get(b, user); return send(res, 200, { ok: true, device: d, usedOn: devices.usedOn(d, user) }); }
+      if (m === 'GET') {
+        const d = devices.get(b, user);
+        const mp = network.map(user);
+        const node = mp.nodes.find((n) => n.id === d.id) || {};
+        const name = (id) => (mp.nodes.find((n) => n.id === id) || {}).name;
+        const links = {
+          uplink: node.uplink_id ? { id: node.uplink_id, name: name(node.uplink_id), port: node.uplink_port } : null,
+          children: mp.netLinks.filter((l) => l.from === d.id).map((l) => ({ id: l.to, name: name(l.to), port: l.port })).sort((x, y) => String(x.port).localeCompare(String(y.port), undefined, { numeric: true })),
+          vlans: mp.vlans.filter((v) => (node.vlans || []).includes(v.vid)).map((v) => ({ vid: v.vid, name: v.name, color: v.color })),
+          signalIn: mp.sigLinks.filter((l) => l.to === d.id).map((l) => ({ id: l.from, name: name(l.from), count: l.count })),
+          signalOut: mp.sigLinks.filter((l) => l.from === d.id).map((l) => ({ id: l.to, name: name(l.to), count: l.count }))
+        };
+        return send(res, 200, { ok: true, device: d, usedOn: devices.usedOn(d, user), links, tech: mp.tech });
+      }
       if (m === 'PUT') { need(user, 'editor'); devices.edit(b, await readJson(req), user, uploadExists); return send(res, 200, { ok: true }); }
       if (m === 'DELETE') { need(user, 'editor'); devices.remove(b, user); return send(res, 200, { ok: true }); }
     }
+  }
+
+  // ----- VLANs and the system map -----
+  if (a === 'map' && m === 'GET' && !b) return send(res, 200, { ok: true, ...network.map(user) });
+  if (a === 'map' && b === 'layout' && c && m === 'PUT') { need(user, 'editor'); network.saveLayout(c, (await readJson(req)).positions, user); return send(res, 200, { ok: true }); }
+  if (a === 'vlans') {
+    need(user, 'editor');
+    if (m === 'GET' && !b) return send(res, 200, { ok: true, colors: Network.COLORS, vlans: network.vlanDetails(user), suggestions: network.vlanSuggestions(user) });
+    if (m === 'POST' && b === 'import') return send(res, 200, { ok: true, made: network.importVlans((await readJson(req)).vids, user) });
+    if (m === 'POST' && !b) return send(res, 200, { ok: true, id: network.addVlan(await readJson(req), user) });
+    if (m === 'PUT' && b) { network.editVlan(b, await readJson(req), user); return send(res, 200, { ok: true }); }
+    if (m === 'DELETE' && b) { network.removeVlan(b, user); return send(res, 200, { ok: true }); }
   }
 
   // ----- shared checklists -----

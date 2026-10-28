@@ -397,6 +397,72 @@ code a.dev, .mono a.dev { text-decoration-style:dotted; }
 .implist { display:flex; flex-direction:column; gap:6px; max-height:50vh; overflow:auto; }
 .implist .tog { align-items:flex-start; }
 
+/* ===== system map ===== */
+.space.maptile i { background:#b07cff; }
+.space.maptile .n svg { width:16px; height:16px; stroke:var(--dim); fill:none; stroke-width:2; }
+.mtools { display:flex; gap:8px; align-items:center; flex-wrap:wrap; margin-bottom:10px; }
+.mtools .grow { flex:1; }
+.mtools input[type=search] { width:200px; }
+.vchips { display:flex; gap:4px; flex-wrap:wrap; }
+.vchip { display:inline-flex; align-items:center; gap:6px; padding:5px 10px; border-radius:999px; font-size:12.5px; background:var(--card2); color:var(--dim); }
+.vchip.on { background:color-mix(in srgb, var(--acc) 22%, var(--card2)); color:var(--fg); }
+.vchip i, .chip i.sw { width:10px; height:10px; border-radius:50%; display:inline-block; }
+.mapwrap { position:relative; height:max(440px, calc(100vh - var(--hh, 60px) - 210px)); background:var(--inset); border:1px solid var(--line); border-radius:12px; overflow:hidden;
+  background-image:radial-gradient(color-mix(in srgb, var(--fg) 9%, transparent) 1px, transparent 1px); background-size:22px 22px; }
+#msvg { width:100%; height:100%; display:block; touch-action:none; cursor:grab; user-select:none; -webkit-user-select:none; font:13px system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; }
+#msvg:active { cursor:grabbing; }
+#msvg.editing .mn { cursor:move; }
+.mn { cursor:pointer; transition:opacity .15s; }
+.mn rect { fill:var(--card); stroke:var(--line); stroke-width:1.2; }
+.mn .band { stroke:none; }
+.mn .n1 { fill:var(--fg); font-weight:700; font-size:13px; }
+.mn .n2 { fill:var(--dim); font-size:11.5px; }
+.mn:hover rect:first-of-type { stroke:var(--acc); }
+.mn.sel rect:first-of-type { stroke:var(--teal); stroke-width:2.5; }
+.me { transition:opacity .15s; }
+.me .ln { fill:none; stroke:var(--faint); stroke-width:1.6; }
+.me.signal .ln { stroke:var(--teal); opacity:.7; }
+.me .hit { fill:none; stroke:transparent; stroke-width:12; }
+.me text { fill:var(--dim); font-size:11px; font-variant-numeric:tabular-nums; paint-order:stroke; stroke:var(--inset); stroke-width:3px; }
+.marr { fill:var(--teal); }
+#msvg.dim .mn:not(.on) { opacity:.25; }
+#msvg.dim .me:not(.on) { opacity:.12; }
+#msvg.dim .me.on .ln { stroke:var(--teal); stroke-width:2.6; opacity:1; }
+.mside { position:absolute; top:10px; right:10px; width:290px; max-height:calc(100% - 20px); overflow:auto; background:var(--card); border:1px solid var(--line); border-radius:12px; padding:12px 14px; box-shadow:0 10px 30px var(--shadow); }
+.mside .mx { position:absolute; top:6px; right:6px; padding:4px; }
+.mside .mh { display:flex; gap:10px; align-items:center; margin-bottom:8px; padding-right:24px; }
+.mside .mh div { display:flex; flex-direction:column; }
+.mside .mh span { font-size:12px; color:var(--dim); }
+.mside .sr { display:grid; grid-template-columns:96px 1fr; gap:8px; padding:7px 0; border-top:1px solid var(--line); font-size:13px; }
+.mside .sr > span { color:var(--dim); font-size:11.5px; font-weight:600; }
+.mside .btn { display:flex; }
+a.btn.primary { background:var(--acc); color:var(--onacc); border-radius:8px; padding:8px 12px; font-weight:600; text-decoration:none; }
+.mhint { position:absolute; left:12px; bottom:8px; pointer-events:none; }
+.mside:not(.hide) ~ .mhint { display:none; }
+.mlegend { display:flex; gap:14px; flex-wrap:wrap; margin-top:8px; font-size:12px; color:var(--dim); }
+.mlegend i { display:inline-block; width:10px; height:10px; border-radius:3px; margin-right:5px; vertical-align:-1px; }
+/* VLANs */
+.vgrid { display:grid; grid-template-columns:repeat(auto-fill, minmax(320px, 1fr)); gap:12px; }
+.vcard { background:var(--card); border:1px solid var(--line); border-radius:12px; padding:12px 14px; border-top:4px solid var(--vc); display:flex; flex-direction:column; gap:8px; }
+.vcard .vh { display:flex; align-items:center; gap:8px; }
+.vcard .vh b { font-size:12px; letter-spacing:.08em; text-transform:uppercase; color:var(--vc); }
+.vcard .vn { font-weight:800; font-size:16px; }
+.vcard .vh button { padding:4px; }
+.vcard .vf { display:grid; grid-template-columns:auto 1fr; gap:3px 12px; font-size:13px; }
+.vcard .vf span { color:var(--dim); font-size:12px; }
+.vcard .vf b { font-weight:600; }
+.vbar { position:relative; height:8px; border-radius:4px; background:var(--inset); overflow:hidden; }
+.vbar i { position:absolute; left:0; top:0; bottom:0; background:var(--vc); }
+.vbar em { position:absolute; top:0; bottom:0; background:repeating-linear-gradient(45deg, color-mix(in srgb, var(--vc) 45%, transparent) 0 4px, transparent 4px 8px); }
+.vdev { display:flex; flex-wrap:wrap; gap:5px; }
+.vdev .chip { text-decoration:none; color:var(--fg); }
+.two { display:grid; grid-template-columns:1fr 1fr; gap:0 10px; }
+.swatches { display:flex; gap:6px; flex-wrap:wrap; padding-top:4px; }
+.swatches .sw { width:26px; height:26px; border-radius:50%; padding:0; border:2px solid transparent; }
+.swatches .sw.on { border-color:var(--fg); }
+.vpick { margin-bottom:8px; }
+.vpick select { width:100%; }
+
 /* ===== PDF / print ===== */
 .printhead { display:none; }
 @media print {
@@ -427,6 +493,9 @@ code a.dev, .mono a.dev { text-decoration-style:dotted; }
   figure.pic img { max-height:90mm; width:auto; }
   a, a.dev { color:inherit; text-decoration:none; }
   .row.todo, .badge { print-color-adjust:exact; -webkit-print-color-adjust:exact; }
+  .mtools, .mside, .mhint, #mtabs, .bar .note { display:none !important; }
+  .mapwrap { height:175mm; border:1px solid #ccc; background:#fff; print-color-adjust:exact; -webkit-print-color-adjust:exact; }
+  .vcard, .mn, .me { print-color-adjust:exact; -webkit-print-color-adjust:exact; }
   .check, .callout, .chip, .blockbox { print-color-adjust:exact; -webkit-print-color-adjust:exact; }
 }
 
@@ -435,6 +504,10 @@ code a.dev, .mono a.dev { text-decoration-style:dotted; }
   .dform { grid-template-columns:1fr; }
   .fact { grid-template-columns:1fr; gap:2px; }
   .dgrid { grid-template-columns:1fr; }
+  .mapwrap { height:calc(100vh - var(--hh, 100px) - 190px); min-height:380px; }
+  .mside { left:8px; right:8px; top:auto; bottom:8px; width:auto; max-height:55%; }
+  .mtools input[type=search] { width:100%; font-size:16px; }
+  .vgrid { grid-template-columns:1fr; }
   .hide-sm { display:none; }
   .rtb button { min-width:32px; height:34px; padding:0 6px; }
   .rsep { margin:0 2px; }

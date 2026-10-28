@@ -1,0 +1,16 @@
+{
+  "name": "livegenie",
+  "version": "0.1.0",
+  "description": "LiveGenie: the RHCC AVL knowledge base. Pages, search, and (coming) AI-drafted docs and Companion checklists. Part of the Live series.",
+  "main": "server.js",
+  "scripts": {
+    "start": "node --disable-warning=ExperimentalWarning server.js",
+    "test": "node --disable-warning=ExperimentalWarning test/run.js"
+  },
+  "engines": {
+    "node": ">=22.13"
+  },
+  "author": "Jerod Ulicki",
+  "license": "UNLICENSED",
+  "private": true
+}

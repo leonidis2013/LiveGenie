@@ -1,0 +1,23 @@
+# docker compose up -d
+# Then open http://<this machine's IP>:8080 and create the first admin.
+# Pages, users, pictures and backups are kept in the livegenie-data volume.
+services:
+  livegenie:
+    image: ghcr.io/leonidis2013/livegenie:latest
+    pull_policy: always
+    build: .
+    container_name: livegenie
+    restart: unless-stopped
+    ports:
+      - "8080:8080"
+    volumes:
+      - livegenie-data:/data
+    environment:
+      TZ: America/Chicago
+      # nightly backup time (24 h, local time)
+      # LIVEGENIE_BACKUP_AT: "02:30"
+      # turn off the GitHub version check
+      # LIVEGENIE_NO_UPDATE_CHECK: "1"
+
+volumes:
+  livegenie-data:

@@ -1,0 +1,17 @@
+# TrueNAS SCALE: Apps > Discover Apps > Custom App > "Install via YAML", paste this.
+# The container runs as uid 1000 (node): give that user write access to the dataset
+# (ACL entry for user 1000, or chown 1000:1000).
+# Change the host path to a dataset of yours, and the host port if 9090 is taken.
+# pull_policy: always means saving the app in TrueNAS pulls the newest LiveGenie.
+services:
+  livegenie:
+    image: ghcr.io/leonidis2013/livegenie:latest
+    pull_policy: always
+    container_name: livegenie
+    restart: unless-stopped
+    ports:
+      - "9090:8080"
+    volumes:
+      - /mnt/tank/apps/livegenie:/data
+    environment:
+      TZ: America/Chicago

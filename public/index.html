@@ -1,0 +1,46 @@
+<!doctype html>
+<html lang="en" data-theme="dark">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="color-scheme" content="dark light">
+<title>LiveGenie</title>
+<link rel="icon" href="/favicon.ico" sizes="any">
+<link rel="icon" href="/icons/favicon.svg" type="image/svg+xml">
+<link rel="apple-touch-icon" href="/icons/apple-touch-icon.png">
+<link rel="manifest" href="/icons/site.webmanifest">
+<meta name="theme-color" content="#0d1015" media="(prefers-color-scheme: dark)">
+<meta name="theme-color" content="#e9edf2" media="(prefers-color-scheme: light)">
+<script>
+(function () {
+  var p = 'auto';
+  try { p = localStorage.getItem('livegenie-theme') || 'auto'; } catch (e) {}
+  var light = p === 'light' || (p === 'auto' && window.matchMedia && matchMedia('(prefers-color-scheme: light)').matches);
+  document.documentElement.setAttribute('data-theme', light ? 'light' : 'dark');
+})();
+</script>
+<link rel="stylesheet" href="/style.css">
+</head>
+<body>
+<header id="hdr">
+  <a class="brand" href="#/" aria-label="LiveGenie home">
+    <img src="/icons/livegenie-glyph.svg" alt="">
+    <h1>LiveGenie <span class="ver" id="hVer"></span><small>AVL knowledge base</small></h1>
+  </a>
+  <form class="search" id="searchForm" role="search">
+    <svg viewBox="0 0 24 24"><circle cx="11" cy="11" r="7"/><path d="M20 20l-3.5-3.5"/></svg>
+    <input id="q" type="search" placeholder="Search pages" autocomplete="off" aria-label="Search pages">
+  </form>
+  <div class="hright">
+    <button id="updPill" class="pill acc hide" title="A newer LiveGenie is available">Update available</button>
+    <button id="whoBtn" class="who hide"><span class="av" id="whoAv"></span><span class="nm" id="whoName"></span></button>
+    <button id="signBtn" class="ghost hide">Sign in</button>
+    <button id="gear" class="gear" title="Settings" aria-label="Settings"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.7 1.7 0 0 0 .3 1.8l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.7 1.7 0 0 0-1.8-.3 1.7 1.7 0 0 0-1 1.5V21a2 2 0 1 1-4 0v-.1a1.7 1.7 0 0 0-1.1-1.5 1.7 1.7 0 0 0-1.8.3l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.7 1.7 0 0 0 .3-1.8 1.7 1.7 0 0 0-1.5-1H3a2 2 0 1 1 0-4h.1a1.7 1.7 0 0 0 1.5-1.1 1.7 1.7 0 0 0-.3-1.8l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1.7 1.7 0 0 0 1.8.3H9a1.7 1.7 0 0 0 1-1.5V3a2 2 0 1 1 4 0v.1a1.7 1.7 0 0 0 1 1.5 1.7 1.7 0 0 0 1.8-.3l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.7 1.7 0 0 0-.3 1.8V9a1.7 1.7 0 0 0 1.5 1H21a2 2 0 1 1 0 4h-.1a1.7 1.7 0 0 0-1.5 1z"/></svg><span>Done</span></button>
+  </div>
+</header>
+<div class="offbar"><span class="spin"></span>Lost connection to LiveGenie. Retrying…</div>
+<main id="app"><div class="empty">Loading…</div></main>
+<div id="toast" class="toast"></div>
+<script src="/app.js"></script>
+</body>
+</html>

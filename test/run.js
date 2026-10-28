@@ -1,0 +1,266 @@
+'use strict';
+/*
+ * End-to-end tests: start LiveGenie on a temporary data folder and use the API
+ * the way the web page does. Run with: npm test
+ */
+const { spawn } = require('child_process');
+const fs = require('fs');
+const os = require('os');
+const path = require('path');
+const assert = require('assert');
+
+const ROOT = path.join(__dirname, '..');
+const PORT = 18000 + Math.floor(Math.random() * 2000);
+const BASE = 'http://127.0.0.1:' + PORT;
+const DATA = fs.mkdtempSync(path.join(os.tmpdir(), 'livegenie-test-'));
+const PNG = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==', 'base64');
+
+let proc = null;
+function start() {
+  return new Promise((resolve, reject) => {
+    proc = spawn(process.execPath, ['--disable-warning=ExperimentalWarning', 'server.js'], {
+      cwd: ROOT, env: { ...process.env, LIVEGENIE_DATA: DATA, PORT: String(PORT), HOST: '127.0.0.1', LIVEGENIE_NO_UPDATE_CHECK: '1' }, stdio: ['ignore', 'pipe', 'pipe']
+    });
+    let out = '';
+    const onData = (d) => { out += d; if (out.includes('LiveGenie ')) resolve(out); };
+    proc.stdout.on('data', onData);
+    proc.stderr.on('data', (d) => { out += d; });
+    proc.on('exit', (code) => reject(new Error('server exited early (' + code + '):\n' + out)));
+    setTimeout(() => reject(new Error('server did not start:\n' + out)), 8000);
+  });
+}
+function waitExit() { return new Promise((r) => { if (!proc || proc.exitCode !== null) return r(); proc.removeAllListeners('exit'); proc.on('exit', r); }); }
+
+// a tiny client with its own cookie jar
+function client() {
+  let cookie = '';
+  async function req(method, url, body, opts = {}) {
+    const headers = { 'x-livegenie': '1', ...(opts.headers || {}) };
+    if (cookie) headers.cookie = cookie;
+    let payload;
+    if (opts.raw) { payload = body; headers['content-type'] = opts.type; }
+    else if (body !== undefined) { payload = JSON.stringify(body); headers['content-type'] = 'application/json'; }
+    if (opts.noHeader) delete headers['x-livegenie'];
+    const res = await fetch(BASE + url, { method, headers, body: payload });
+    const sc = res.headers.get('set-cookie');
+    if (sc) { const m = /lg_s=([^;]*)/.exec(sc); cookie = m && m[1] ? 'lg_s=' + m[1] : ''; }
+    const type = res.headers.get('content-type') || '';
+    const data = type.includes('json') ? await res.json() : Buffer.from(await res.arrayBuffer());
+    return { status: res.status, data, type };
+  }
+  return { req, get: (u) => req('GET', u), post: (u, b, o) => req('POST', u, b, o), put: (u, b) => req('PUT', u, b), del: (u) => req('DELETE', u) };
+}
+
+const tests = [];
+const test = (name, fn) => tests.push([name, fn]);
+
+const admin = client(), editor = client(), vol = client(), anon = client();
+let pageId, techId;
+
+test('first run needs setup and creates the admin', async () => {
+  let r = await anon.get('/api/state');
+  assert.strictEqual(r.data.setupNeeded, true);
+  r = await admin.post('/api/setup', { name: 'Jerod', pin: '12' });
+  assert.strictEqual(r.status, 400, 'short PIN refused');
+  r = await admin.post('/api/setup', { name: 'Jerod', pin: '2468' });
+  assert.strictEqual(r.status, 200);
+  r = await admin.get('/api/state');
+  assert.strictEqual(r.data.role, 'admin');
+  r = await anon.post('/api/setup', { name: 'Eve', pin: '1111' });
+  assert.strictEqual(r.status, 409, 'second setup refused');
+});
+
+test('changes need the LiveGenie header', async () => {
+  const r = await admin.req('POST', '/api/pages', { title: 'x', space: 'audio', blocks: [] }, { noHeader: true });
+  assert.strictEqual(r.status, 403);
+});
+
+test('admin adds an editor and a volunteer', async () => {
+  let r = await admin.post('/api/users', { name: 'Sam', role: 'editor', pin: '1357' });
+  assert.strictEqual(r.status, 200);
+  r = await admin.post('/api/users', { name: 'Val', role: 'volunteer', pin: '9753' });
+  assert.strictEqual(r.status, 200);
+  r = await admin.post('/api/users', { name: 'val', role: 'volunteer', pin: '9753' });
+  assert.strictEqual(r.status, 400, 'names are unique, ignoring case');
+  assert.strictEqual((await editor.post('/api/signin', { name: 'sam', pin: '1357' })).status, 200);
+  assert.strictEqual((await vol.post('/api/signin', { name: 'Val', pin: '9753' })).status, 200);
+});
+
+test('volunteers and anonymous readers cannot write', async () => {
+  assert.strictEqual((await anon.post('/api/pages', { title: 'x', space: 'audio', blocks: [] })).status, 401);
+  assert.strictEqual((await vol.post('/api/pages', { title: 'x', space: 'audio', blocks: [] })).status, 403);
+  assert.strictEqual((await vol.get('/api/users')).status, 403);
+});
+
+test('editor creates pages with blocks; bad blocks are refused', async () => {
+  let r = await editor.post('/api/pages', { title: 'Bad', space: 'audio', blocks: [{ type: 'script' }] });
+  assert.strictEqual(r.status, 400);
+  r = await editor.post('/api/pages', { title: '', space: 'audio', blocks: [] });
+  assert.strictEqual(r.status, 400);
+  r = await editor.post('/api/pages', {
+    title: 'SQ-5 Sunday startup', space: 'audio', pinned: true,
+    blocks: [
+      { type: 'text', md: '# Power on\nTurn on the **Allen & Heath SQ-5** before the amplifiers.' },
+      { type: 'callout', kind: 'critical', md: 'Amps on last, off first.' },
+      { type: 'checklist', title: 'Startup', items: ['Desk on', '', 'Load scene Sunday', 'Amps on'] },
+      { type: 'divider', extra: 'dropped' }
+    ]
+  });
+  assert.strictEqual(r.status, 200);
+  pageId = r.data.id;
+  r = await editor.post('/api/pages', { title: 'UDM Pro admin', space: 'network', tech_only: true, blocks: [{ type: 'text', md: 'Management VLAN and the admin login live here. Keyword crossover.' }] });
+  techId = r.data.id;
+  const p = (await anon.get('/api/pages/' + pageId)).data.page;
+  assert.strictEqual(p.blocks.length, 4);
+  assert.deepStrictEqual(p.blocks[2].items, ['Desk on', 'Load scene Sunday', 'Amps on'], 'empty steps dropped');
+  assert.strictEqual(p.blocks[3].extra, undefined, 'unknown fields dropped');
+  assert.strictEqual(p.version, 1);
+});
+
+test('Tech only pages are hidden from volunteers and anonymous readers', async () => {
+  assert.strictEqual((await anon.get('/api/pages/' + techId)).status, 404);
+  assert.strictEqual((await vol.get('/api/pages/' + techId)).status, 404);
+  assert.strictEqual((await editor.get('/api/pages/' + techId)).status, 200);
+  const net = (await anon.get('/api/spaces/network')).data;
+  assert.strictEqual(net.pages.length, 0);
+  const home = (await anon.get('/api/home')).data;
+  assert.strictEqual(home.spaces.find((s) => s.slug === 'network').pages, 0);
+  assert.strictEqual(home.pinned.length, 1);
+});
+
+test('search finds words, prefixes and respects Tech only', async () => {
+  let r = await anon.get('/api/search?q=amplif');
+  assert.strictEqual(r.data.results.length, 1, 'prefix match');
+  assert.ok(r.data.results[0].snip.includes('\u0001'), 'snippet marks the match');
+  r = await anon.get('/api/search?q=sq-5 startup');
+  assert.strictEqual(r.data.results[0].id, pageId);
+  assert.strictEqual((await anon.get('/api/search?q=crossover')).data.results.length, 0);
+  assert.strictEqual((await editor.get('/api/search?q=crossover')).data.results.length, 1);
+  assert.strictEqual((await anon.get('/api/search?q=%22)(*')).data.results.length, 0, 'odd characters are safe');
+});
+
+test('saving over someone else\'s change is refused; history and restore work', async () => {
+  let r = await editor.put('/api/pages/' + pageId, { title: 'SQ-5 Sunday startup', space: 'audio', blocks: [{ type: 'text', md: 'Version two' }], baseVersion: 1 });
+  assert.strictEqual(r.data.version, 2);
+  r = await admin.put('/api/pages/' + pageId, { title: 'Stale', space: 'audio', blocks: [], baseVersion: 1 });
+  assert.strictEqual(r.status, 409);
+  r = await anon.get('/api/pages/' + pageId + '/versions');
+  assert.deepStrictEqual(r.data.versions.map((v) => v.version), [2, 1]);
+  r = await editor.post('/api/pages/' + pageId + '/versions/1/restore');
+  assert.strictEqual(r.data.version, 3);
+  const p = (await anon.get('/api/pages/' + pageId)).data.page;
+  assert.strictEqual(p.blocks.length, 4);
+  assert.strictEqual((await anon.get('/api/search?q=amplifiers')).data.results.length, 1, 'search index follows the restore');
+});
+
+test('pictures upload, show on pages, and odd files are refused', async () => {
+  let r = await editor.post('/api/uploads', PNG, { raw: true, type: 'image/png' });
+  assert.strictEqual(r.status, 200);
+  const id = r.data.id;
+  r = await editor.post('/api/uploads', Buffer.from('<svg/>'), { raw: true, type: 'image/svg+xml' });
+  assert.strictEqual(r.status, 415, 'SVG refused');
+  r = await vol.post('/api/uploads', PNG, { raw: true, type: 'image/png' });
+  assert.strictEqual(r.status, 403);
+  r = await editor.post('/api/pages', { title: 'Rack photo', space: 'video', blocks: [{ type: 'image', upload: id, caption: 'Front AV rack' }] });
+  assert.strictEqual(r.status, 200);
+  r = await editor.post('/api/pages', { title: 'Ghost', space: 'video', blocks: [{ type: 'image', upload: 'a'.repeat(24) }] });
+  assert.strictEqual(r.status, 400, 'unknown picture refused');
+  r = await anon.get('/uploads/' + id);
+  assert.strictEqual(r.status, 200);
+  assert.strictEqual(r.type, 'image/png');
+  assert.ok(Buffer.compare(r.data, PNG) === 0);
+});
+
+test('delete moves a page to the trash and it can come back', async () => {
+  const id = (await editor.post('/api/pages', { title: 'Temp page', space: 'lighting', blocks: [{ type: 'text', md: 'zebrafish' }] })).data.id;
+  assert.strictEqual((await editor.del('/api/pages/' + id)).status, 200);
+  assert.strictEqual((await anon.get('/api/pages/' + id)).status, 404);
+  assert.strictEqual((await anon.get('/api/search?q=zebrafish')).data.results.length, 0);
+  assert.ok((await editor.get('/api/trash')).data.pages.some((p) => p.id === id));
+  assert.strictEqual((await editor.post('/api/trash/' + id + '/restore')).status, 200);
+  assert.strictEqual((await anon.get('/api/search?q=zebrafish')).data.results.length, 1);
+});
+
+test('five wrong PINs lock the user', async () => {
+  const c = client();
+  for (let i = 0; i < 4; i++) assert.strictEqual((await c.post('/api/signin', { name: 'Val', pin: '0000' })).data.error, 'Wrong name or PIN');
+  let r = await c.post('/api/signin', { name: 'Val', pin: '0000' });
+  assert.match(r.data.error, /Locked/);
+  r = await c.post('/api/signin', { name: 'Val', pin: '9753' });
+  assert.strictEqual(r.status, 401, 'right PIN still refused while locked');
+  const val = (await admin.get('/api/users')).data.users.find((u) => u.name === 'Val');
+  assert.strictEqual(val.locked, true);
+  await admin.put('/api/users/' + val.id, { unlock: true });
+  assert.strictEqual((await c.post('/api/signin', { name: 'Val', pin: '9753' })).status, 200);
+});
+
+test('role changes sign the person out; the last admin cannot be removed or demoted', async () => {
+  const users = (await admin.get('/api/users')).data.users;
+  const sam = users.find((u) => u.name === 'Sam'), me = users.find((u) => u.name === 'Jerod');
+  await admin.put('/api/users/' + sam.id, { role: 'volunteer' });
+  assert.strictEqual((await editor.get('/api/state')).data.user, null, 'Sam was signed out');
+  assert.strictEqual((await admin.put('/api/users/' + me.id, { role: 'editor' })).status, 400);
+  assert.strictEqual((await admin.del('/api/users/' + me.id)).status, 400);
+  await admin.put('/api/users/' + sam.id, { role: 'editor' });
+  assert.strictEqual((await editor.post('/api/signin', { name: 'Sam', pin: '1357' })).status, 200);
+});
+
+test('users change their own PIN', async () => {
+  assert.strictEqual((await vol.post('/api/me/pin', { current: '0000', pin: '2222' })).status, 400);
+  assert.strictEqual((await vol.post('/api/me/pin', { current: '9753', pin: '2222' })).status, 200);
+  assert.strictEqual((await client().post('/api/signin', { name: 'Val', pin: '2222' })).status, 200);
+});
+
+test('backup, then restore brings the data back after a restart', async () => {
+  let r = await admin.post('/api/backups/now');
+  assert.strictEqual(r.status, 200);
+  const name = r.data.name;
+  r = await admin.get('/api/backups/' + name + '/inspect');
+  assert.strictEqual(r.data.info.pictures, 1);
+  const before = r.data.info.pages;
+  const dl = await admin.get('/api/backups/' + name + '/download');
+  assert.ok(dl.data.length > 1024 && dl.data.toString('ascii', 257, 262) === 'ustar', 'download is a tar file');
+  // a page made after the backup
+  await editor.post('/api/pages', { title: 'After the backup', space: 'audio', blocks: [] });
+  // upload the downloaded file as another backup, then restore that one
+  r = await admin.post('/api/backups/upload', dl.data, { raw: true, type: 'application/x-tar' });
+  assert.strictEqual(r.status, 200);
+  const uploaded = r.data.name;
+  assert.strictEqual((await admin.post('/api/backups/upload', Buffer.from('nope'), { raw: true, type: 'application/x-tar' })).status, 400, 'junk refused');
+  const exited = waitExit();
+  r = await admin.post('/api/backups/' + uploaded + '/restore');
+  assert.strictEqual(r.data.restarting, true);
+  await exited;
+  await start();
+  const home = (await editor.get('/api/home')).data;
+  assert.ok(!home.recent.some((p) => p.title === 'After the backup'), 'the later page is gone');
+  assert.strictEqual(home.recent.length, before);
+  const list = (await admin.get('/api/backups')).data.backups;
+  assert.ok(list.some((b) => b.kind === 'before-restore'), 'data was saved before the restore');
+  const act = (await admin.get('/api/activity')).data.activity;
+  assert.ok(act.some((a) => a.action === 'backup.restored'));
+});
+
+test('static files and icons are served with safe headers', async () => {
+  const r = await fetch(BASE + '/');
+  assert.strictEqual(r.status, 200);
+  assert.ok(r.headers.get('content-security-policy').includes("default-src 'self'"));
+  for (const f of ['/app.js', '/style.css', '/icons/favicon.svg', '/favicon.ico', '/icons/site.webmanifest']) assert.strictEqual((await fetch(BASE + f)).status, 200, f);
+  assert.strictEqual((await fetch(BASE + '/../server.js')).status, 404);
+  assert.strictEqual((await fetch(BASE + '/%2e%2e/package.json')).status, 404);
+});
+
+(async () => {
+  let failed = 0;
+  try {
+    await start();
+    for (const [name, fn] of tests) {
+      try { await fn(); console.log('  ok   ' + name); }
+      catch (e) { failed++; console.log('  FAIL ' + name + '\n       ' + (e.stack || e).toString().split('\n').slice(0, 4).join('\n       ')); }
+    }
+  } catch (e) { failed++; console.error(e); }
+  if (proc && proc.exitCode === null) proc.kill();
+  fs.rmSync(DATA, { recursive: true, force: true });
+  console.log(failed ? '\n' + failed + ' failed' : '\nall ' + tests.length + ' passed');
+  process.exit(failed ? 1 : 0);
+})();

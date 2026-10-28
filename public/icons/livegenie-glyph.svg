@@ -1,0 +1,25 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="56 76 410 384">
+<defs>
+    <linearGradient id="lamp" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#6aa2ff"/>
+      <stop offset="1" stop-color="#2f6fe0"/>
+    </linearGradient>
+    <linearGradient id="smoke" x1="0" y1="1" x2="0.4" y2="0">
+      <stop offset="0" stop-color="#4c8dff"/>
+      <stop offset="1" stop-color="#2ec4b6"/>
+    </linearGradient>
+  </defs>
+  <!-- smoke: audio-wave plume rising from the spout -->
+  <path d="M444 262 C 456 222, 404 216, 374 198 C 340 178, 380 142, 348 118 C 326 102, 300 108, 284 116"
+        fill="none" stroke="url(#smoke)" stroke-width="22" stroke-linecap="round"/>
+  <!-- sparkle -->
+  <path d="M216 88 C 222 120, 230 128, 262 134 C 230 140, 222 148, 216 180 C 210 148, 202 140, 170 134 C 202 128, 210 120, 216 88 Z" fill="#2ec4b6"/>
+  <path d="M138 196 C 141 211, 145 215, 160 218 C 145 221, 141 225, 138 240 C 135 225, 131 221, 116 218 C 131 215, 135 211, 138 196 Z" fill="#8a96a5"/>
+  <!-- lamp -->
+  <path d="M104 344 C 70 340, 64 392, 112 392" fill="none" stroke="url(#lamp)" stroke-width="20" stroke-linecap="round"/>
+  <path d="M188 318 C 192 292, 220 280, 248 280 C 276 280, 304 292, 308 318 Z" fill="url(#lamp)"/>
+  <circle cx="248" cy="270" r="12" fill="#6aa2ff"/>
+  <path d="M96 328 L 360 328 C 380 328, 392 318, 402 306 L 436 268 C 444 260, 456 266, 452 278 L 430 330 C 414 374, 360 412, 248 412 C 150 412, 100 380, 96 328 Z" fill="url(#lamp)"/>
+  <path d="M206 412 L 290 412 L 304 440 L 192 440 Z" fill="#2f6fe0"/>
+  <rect x="180" y="436" width="136" height="14" rx="7" fill="#4c8dff"/>
+</svg>

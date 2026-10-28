@@ -21,13 +21,20 @@ Version 0.1.0 · © 2026 Jerod Ulicki
 
 ## Install on TrueNAS
 
-1. Create a dataset for LiveGenie, for example `/mnt/tank/apps/livegenie`, and give user 1000 write access to it (ACL entry for uid 1000, or `chown 1000:1000`).
-2. Apps › Discover Apps › Custom App › **Install via YAML**, and paste [`truenas-app.yaml`](truenas-app.yaml). Change the host path and port if needed.
-3. Open `http://<truenas-ip>:9090` and create the first admin. Add editors and volunteers in Settings › Users.
+1. Apps › Discover Apps › Custom App › **Install via YAML**, and paste [`truenas-app.yaml`](truenas-app.yaml). Change the port if 9090 is taken.
+2. Open `http://<truenas-ip>:9090` and create the first admin. Add editors and volunteers in Settings › Users.
 
-To update: when LiveGenie shows "Update available", edit the app in TrueNAS and save. The app uses the `latest` tag with `pull_policy: always`, so it pulls the new image. Your data stays in the dataset.
+Data is kept in the `livegenie-data` volume (internal storage, the same way LiveMic does it). It survives updates, restarts and edits of the app.
 
-Keep the dataset in a TrueNAS snapshot schedule too, so a failed disk does not take the backups with it.
+To update: when LiveGenie shows "Update available", edit the app in TrueNAS and save. The app uses the `latest` tag with `pull_policy: always`, so it pulls the new image.
+
+**Keeping the data safe**
+
+- Deleting the LiveGenie app in TrueNAS can delete its volume, and the nightly backups live in that same volume. Download a backup (Settings › Backups) before you ever delete or reinstall the app.
+- Include the `ix-apps` dataset in a TrueNAS snapshot schedule; app volumes live there.
+- Now and then, download a backup and keep it somewhere else (your NAS share, a USB stick at FOH).
+
+Prefer a folder you can browse? Replace `livegenie-data:/data` with a host path such as `/mnt/tank/apps/livegenie:/data` and remove the `volumes:` section at the bottom. Give user 1000 write access to that dataset.
 
 ## Install with Docker Compose
 

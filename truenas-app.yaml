@@ -1,7 +1,6 @@
 # TrueNAS SCALE: Apps > Discover Apps > Custom App > "Install via YAML", paste this.
-# The container runs as uid 1000 (node): give that user write access to the dataset
-# (ACL entry for user 1000, or chown 1000:1000).
-# Change the host path to a dataset of yours, and the host port if 9090 is taken.
+# Data is kept in the livegenie-data volume (internal storage, same as LiveMic):
+# it survives updates and edits of the app. Change the host port if 9090 is taken.
 # pull_policy: always means saving the app in TrueNAS pulls the newest LiveGenie.
 services:
   livegenie:
@@ -12,6 +11,9 @@ services:
     ports:
       - "9090:8080"
     volumes:
-      - /mnt/tank/apps/livegenie:/data
+      - livegenie-data:/data
     environment:
       TZ: America/Chicago
+
+volumes:
+  livegenie-data:

@@ -4,7 +4,7 @@
 
 The Rolling Hills Community Church AVL knowledge base: one web app where volunteers find how our system works, how to run a service and how to fix what broke. Part of the Live series (LiveMic, LiveCompanion, LivePi, LiveVoice).
 
-Version 0.2.0 · © 2026 Jerod Ulicki
+Version 0.3.0 · © 2026 Jerod Ulicki
 
 ## What it does
 
@@ -17,6 +17,8 @@ Version 0.2.0 · © 2026 Jerod Ulicki
 - **Patch lists and cable runs.** Spreadsheet-style grids with ready-made layouts (Input patch, Output patch, Cable runs, or your own columns). Paste rows from a spreadsheet; Enter moves down a row.
 - **Wire trace.** Every patch list can draw its wiring (for an input patch: Source → Mic / DI → Stage box → Ch). Shared gear becomes one box; tap a box or line to follow the cable. Pick the columns and order in the editor.
 - **Static IP lists.** Network name, VLAN, subnet and gateway, then the addresses. Duplicates, addresses outside the subnet and the gateway are flagged as you type; Next free IP and Fill a range generate addresses; each IP links to the device's web page.
+- **Device library.** One card per device: photo, make and model, location, IP, MAC, manual link, nicknames and notes. Wherever a device's name, nickname or IP appears on any page (text, checklist steps, patch lists, IP lists), it links to its card automatically, with a quick card on hover. Each card lists everywhere it is **Used on**, and picks up its IP from any IP list row with its name. **Create from IP lists** makes cards for device names already in your IP lists.
+- **Network pages start as Tech only.** New pages in the Network space, and pages that get an IP list, start as Tech only (switch it off if you like).
 - **Export PDF.** Every page has a PDF button with a clean print layout (logo, title, version, print date). On a computer choose Save as PDF; on an iPhone use Print, then Share › Save to Files.
 - **Pictures, search, history, trash.** Phone photos (shrunk to 1600 px), instant search across text, checklists, patch and IP lists, every save kept as a version, deleted pages recoverable.
 - **People and roles.** Name and PIN sign-in. Admin, Editor and Volunteer roles; **Tech only** pages are hidden from volunteers and anyone not signed in. Five wrong PINs lock that person for five minutes.
@@ -77,8 +79,9 @@ Run it on the TrueNAS host and reach it from the AVL and office VLANs through th
 | Version | Adds |
 |---|---|
 | 0.1.0 | Foundation: pages, search, history, roles, backups |
-| 0.2.0 | Formatting editor, shared checklists with auto reset, To do list and overdue notices, patch lists with wire trace, IP lists, PDF export (this release) |
-| next | Device library that links devices across pages (options under discussion) |
+| 0.2.0 | Formatting editor, shared checklists with auto reset, To do list and overdue notices, patch lists with wire trace, IP lists, PDF export |
+| 0.3.0 | Device library with automatic links and Used on lists; Network pages Tech only by default (this release) |
+| next | System map: an interactive LAN and rack map from the IP lists and devices |
 | later | Document library, AI drafts from the Jetson with citations, review queue, Ask the Genie |
 | later | Bitfocus Companion buttons inside checklists |
 | 1.0.0 | A new volunteer runs a full Sunday startup from a phone with LiveGenie alone |

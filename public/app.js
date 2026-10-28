@@ -311,14 +311,14 @@ async function viewSetup() {
 
 async function viewHome() {
   setTitle('');
-  const [d, t] = await Promise.all([get('/api/home'), get('/api/todo')]);
+  const [d, t, devs] = await Promise.all([get('/api/home'), get('/api/todo'), loadDevices(true)]);
   S.spaces = d.spaces;
   const newBtn = can('editor') ? '<button class="primary btn" id="newPage">' + icon('plus') + 'New page</button>' : '';
   app.innerHTML = `
     <div class="bar"><div class="grow"></div>${newBtn}</div>
     ${t.todo.length ? '<div class="section" id="todo"><h2>To do</h2><div class="list">' + t.todo.map(todoRow).join('') + '</div></div>' : ''}
     ${d.pinned.length ? '<div class="section"><h2>Pinned</h2><div class="list">' + d.pinned.map((p) => pageRow(p, { showSpace: true, noPin: true })).join('') + '</div></div>' : ''}
-    <div class="section"><h2>Spaces</h2><div class="spaces">${d.spaces.map((s) => `<a class="space" href="#/s/${esc(s.slug)}"><i></i><b>${esc(s.name)}</b><span>${esc(s.blurb)}</span><em class="n">${s.pages} page${s.pages === 1 ? '' : 's'}</em></a>`).join('')}</div></div>
+    <div class="section"><h2>Spaces</h2><div class="spaces">${d.spaces.map((s) => `<a class="space" href="#/s/${esc(s.slug)}"><i></i><b>${esc(s.name)}</b><span>${esc(s.blurb)}</span><em class="n">${s.pages} page${s.pages === 1 ? '' : 's'}</em></a>`).join('')}<a class="space devtile" href="#/devices"><i></i><b>Devices</b><span>Every device, its IP and where it is used</span><em class="n">${devs.length} device${devs.length === 1 ? '' : 's'}</em></a></div></div>
     <div class="section"><h2>Recently updated</h2>${d.recent.length ? '<div class="list">' + d.recent.map((p) => pageRow(p, { showSpace: true })).join('') + '</div>'
       : '<div class="card empty">No pages yet.' + (can('editor') ? ' Start with the Sunday startup checklist or a page about the SQ-5.' : (S.state.user ? '' : ' Editors can sign in to add the first pages.')) + '</div>'}</div>`;
   const nb = $('#newPage');
@@ -404,7 +404,7 @@ function exportPdf(title) {
 
 async function viewPage(id, focusChecklist) {
   let d;
-  try { d = await get('/api/pages/' + id); }
+  try { [d] = await Promise.all([get('/api/pages/' + id), loadDevices()]); }
   catch (e) {
     if (e.status === 404) {
       setTitle('Not found');
@@ -430,10 +430,11 @@ async function viewPage(id, focusChecklist) {
     <div class="doc" id="doc">${p.blocks.length ? renderBlocks(p.blocks) : '<p class="note">This page is empty.' + (can('editor') ? ' Tap Edit to add text, steps or pictures.' : '') + '</p>'}</div>
   </div>`;
   wireBlocks($('#doc'), p);
+  linkDevices($('#doc'));
   $('#hB').addEventListener('click', () => { location.hash = '#/p/' + p.id + '/history'; });
   $('#pB').addEventListener('click', () => exportPdf(p.title));
   if (focusChecklist) {
-    const c = document.getElementById('c-' + focusChecklist);
+    const c = document.getElementById('c-' + focusChecklist) || document.querySelector('[data-pid="' + CSS.escape(focusChecklist) + '"], [data-ipid="' + CSS.escape(focusChecklist) + '"]');
     if (c) setTimeout(() => { c.scrollIntoView({ block: 'start', behavior: 'smooth' }); c.classList.add('flash'); }, 60);
     S.noScroll = true;
   }
@@ -487,7 +488,8 @@ async function viewEdit(id, spaceSlug) {
     const p = d.page;
     S.ed = { id: p.id, title: p.title, space: p.space, tech_only: p.tech_only, pinned: p.pinned, blocks: p.blocks.map((b) => ({ ...b, _items: b.items ? b.items.join('\n') : undefined })), baseVersion: p.version };
   } else {
-    S.ed = { id: null, title: '', space: spaceSlug || (S.spaces[0] && S.spaces[0].slug), tech_only: false, pinned: false, blocks: [newBlock('text')], baseVersion: undefined };
+    const sp0 = spaceSlug || (S.spaces[0] && S.spaces[0].slug);
+    S.ed = { id: null, title: '', space: sp0, tech_only: sp0 === 'network', pinned: false, blocks: [newBlock('text')], baseVersion: undefined };
   }
   S.dirty = false;
   setTitle(id ? 'Edit ' + S.ed.title : 'New page');
@@ -508,13 +510,16 @@ async function viewEdit(id, spaceSlug) {
   </div>`;
   const dirty = () => { S.dirty = true; $('#eMsg').textContent = 'Unsaved changes'; };
   $('#eT').addEventListener('input', (e) => { ed.title = e.target.value; dirty(); });
-  $('#eS').addEventListener('change', (e) => { ed.space = e.target.value; dirty(); });
-  $('#eTech').addEventListener('change', (e) => { ed.tech_only = e.target.checked; e.target.closest('.tog').classList.toggle('on', e.target.checked); dirty(); });
+  let techTouched = !!id;
+  const setTech = (on) => { ed.tech_only = on; $('#eTech').checked = on; $('#eTech').closest('.tog').classList.toggle('on', on); };
+  $('#eS').addEventListener('change', (e) => { ed.space = e.target.value; if (!techTouched) setTech(ed.space === 'network'); dirty(); });
+  $('#eTech').addEventListener('change', (e) => { techTouched = true; setTech(e.target.checked); dirty(); });
   $('#ePin').addEventListener('change', (e) => { ed.pinned = e.target.checked; e.target.closest('.tog').classList.toggle('on', e.target.checked); dirty(); });
   $$('[data-add]').forEach((b) => b.addEventListener('click', async () => {
     let preset;
     if (b.dataset.add === 'patch') { preset = await pickPreset(); if (!preset) return; }
     ed.blocks.push(newBlock(b.dataset.add, preset)); dirty(); paintBlocks();
+    if (b.dataset.add === 'iplist' && !ed.tech_only && !techTouched) { setTech(true); toast('Tech only is on: IP lists are hidden from volunteers. Switch it off above if you like.'); }
     const last = $$('#eB .blk').pop();
     if (last) {
       last.scrollIntoView({ block: 'center', behavior: 'smooth' });
@@ -652,6 +657,7 @@ async function viewHistory(id, v) {
       </div>
     </div>`;
   wireBlocks($('#doc'), { id: p.id, blocks: ver.blocks }, false);
+  await loadDevices(); linkDevices($('#doc'));
   const rb = $('#rB');
   if (rb) rb.addEventListener('click', async () => {
     if (!await confirmBox('Restore version ' + ver.version + '?', 'This saves it as a new version on top. Nothing is lost; the current version stays in the history.', 'Restore')) return;
@@ -666,6 +672,7 @@ async function viewSearch(q) {
   setTitle('Search');
   const d = await get('/api/search?q=' + encodeURIComponent(q));
   app.innerHTML = `<div class="bar"><div class="grow"><h2 style="margin:0">Results for “${esc(q)}”</h2></div><span class="note">${d.results.length} page${d.results.length === 1 ? '' : 's'}</span></div>
+    ${d.devices.length ? '<div class="section"><div class="dgrid">' + d.devices.map((v) => '<a class="dcard" href="#/d/' + v.id + '">' + devThumb(v, 40) + '<div class="t"><b>' + esc(v.name) + '</b><span>' + esc([v.make, v.model].filter(Boolean).join(' ')) + '</span><span>' + esc(v.location) + (v.ips.length ? ' <span class="mono">' + esc(v.ips[0]) + '</span>' : '') + '</span></div></a>').join('') + '</div></div>' : ''}
     ${d.results.length ? '<div class="list">' + d.results.map((p) => pageRow(p, { snip: true })).join('') + '</div>'
       : '<div class="card empty">Nothing matches that yet.' + (S.state.user ? '' : ' Some pages are Tech only and need you to sign in.') + (can('editor') ? '<div style="margin-top:12px"><a href="#/new">Write a page about it</a></div>' : '') + '</div>'}`;
 }
@@ -866,7 +873,7 @@ async function tabActivity(pane) {
   const what = {
     'page.create': 'created page', 'page.edit': 'edited page', 'page.delete': 'deleted page', 'page.undelete': 'restored page', signin: 'signed in',
     'user.create': 'added user', 'user.edit': 'changed user', 'user.delete': 'removed user', 'backup.make': 'made a backup', 'backup.nightly': 'Nightly backup',
-    'checklist.reset': 'reset a checklist', 'notify.overdue': 'Overdue notice', 'settings.notify': 'changed notifications',
+    'checklist.reset': 'reset a checklist', 'device.create': 'added device', 'device.edit': 'changed device', 'device.delete': 'deleted device', 'notify.overdue': 'Overdue notice', 'settings.notify': 'changed notifications',
     'backup.upload': 'uploaded a backup', 'backup.restore': 'restored a backup', 'backup.restored': 'Restore finished', 'backup.delete': 'deleted a backup'
   };
   pane.innerHTML = '<div class="card"><h2>Activity</h2>' + (d.activity.length ? d.activity.map((a, i) => setRow(
@@ -915,6 +922,10 @@ async function route() {
     else if (p[0] === 'p' && p[1] && p[2] === 'history') await viewHistory(p[1], p[3]);
     else if (p[0] === 'p' && p[1]) await viewPage(p[1], qs.get('c'));
     else if (p[0] === 'new') await viewEdit(null, qs.get('space'));
+    else if (p[0] === 'devices' && p[1] === 'new') await viewDeviceEdit(null);
+    else if (p[0] === 'devices') await viewDevices(qs);
+    else if (p[0] === 'd' && p[1] && p[2] === 'edit') await viewDeviceEdit(p[1]);
+    else if (p[0] === 'd' && p[1]) await viewDevice(p[1]);
     else if (p[0] === 'search') await viewSearch(qs.get('q') || '');
     else if (p[0] === 'settings') await viewSettings(p[1]);
     else app.innerHTML = '<div class="card empty">Page not found. <a href="#/">Go home</a></div>';

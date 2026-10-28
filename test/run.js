@@ -329,6 +329,37 @@ test('escaped Markdown characters are searchable as words', async () => {
   assert.ok((await anon.get('/api/search?q=only')).data.results.some((x) => x.id === r.data.id));
 });
 
+test('device library: cards, aliases, IPs from IP lists, Used on, import', async () => {
+  assert.strictEqual((await vol.post('/api/devices', { name: 'SQ-5' })).status, 403);
+  let r = await editor.post('/api/devices', { name: 'SQ-5', aliases: 'FOH desk, A&H', category: 'audio', make: 'Allen & Heath', model: 'SQ-5', location: 'FOH' });
+  assert.strictEqual(r.status, 200);
+  const sq = r.data.id;
+  assert.strictEqual((await editor.post('/api/devices', { name: 'Desk', aliases: ['foh desk'] })).status, 400, 'aliases are unique across devices');
+  assert.strictEqual((await editor.post('/api/devices', { name: 'Bad', ip: '10.10.20.300' })).status, 400);
+  r = await editor.post('/api/devices', { name: 'UDM Pro', category: 'network', ip: '10.10.1.1', tech_only: true });
+  const udm = r.data.id;
+  let list = (await anon.get('/api/devices')).data.devices;
+  assert.ok(!list.some((d) => d.id === udm), 'Tech only devices hidden from guests');
+  const card = list.find((d) => d.id === sq);
+  assert.deepStrictEqual(card.ips, ['10.10.20.11'], 'IP comes from the IP list row named SQ-5');
+  r = await anon.get('/api/devices/' + sq);
+  const titles = r.data.usedOn.map((u) => u.title);
+  assert.ok(titles.includes('AVL network'), 'IP list mention');
+  assert.ok(titles.includes('SQ-5 Sunday startup'), 'text mention');
+  const avl = r.data.usedOn.find((u) => u.title === 'AVL network');
+  assert.ok(avl.hits.some((h) => h.kind === 'iplist' && h.text.includes('10.10.20.11')));
+  assert.strictEqual((await anon.get('/api/devices/' + udm)).status, 404);
+  const sug = (await editor.get('/api/devices/suggestions')).data.suggestions.map((x) => x.name);
+  assert.ok(sug.includes('DriveRack PA2') && !sug.includes('SQ-5'));
+  r = await editor.post('/api/devices/import', { names: ['DriveRack PA2'] });
+  assert.strictEqual(r.data.made, 1);
+  list = (await editor.get('/api/devices')).data.devices;
+  assert.deepStrictEqual(list.find((d) => d.name === 'DriveRack PA2').ips, ['10.10.20.12']);
+  assert.strictEqual((await anon.get('/api/search?q=allen')).data.devices[0].name, 'SQ-5');
+  assert.strictEqual((await editor.put('/api/devices/' + sq, { name: 'SQ-5', aliases: ['FOH desk'], category: 'audio' })).status, 200);
+  assert.strictEqual((await editor.del('/api/devices/' + udm)).status, 200);
+});
+
 test('backup, then restore brings the data back after a restart', async () => {
   let r = await admin.post('/api/backups/now');
   assert.strictEqual(r.status, 200);

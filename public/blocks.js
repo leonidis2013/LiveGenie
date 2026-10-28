@@ -52,6 +52,7 @@ const Blk = (() => {
     if (info.lastReset && info.lastReset.at >= info.runStart) parts.push('Reset by ' + info.lastReset.by + ' ' + ago(info.lastReset.at));
     el.querySelector('.cfoot').innerHTML = '<span class="note">' + esc(parts.join(' · ')) + '</span>' +
       (S.state.user ? '<button class="ghost reset">Reset now</button>' : '');
+    if (typeof linkDevices === 'function') linkDevices(el.querySelector('.citems'));
   }
 
   function wireChecklists(root, pageId) {
@@ -157,7 +158,7 @@ const Blk = (() => {
       const ipCell = ipn !== null ? '<a class="mono" href="http://' + esc(r.ip) + '" target="_blank" rel="noopener">' + esc(r.ip) + '</a>' : '<span class="mono">' + esc(r.ip) + '</span>';
       return '<tr class="' + st.cls + '" data-q="' + esc(Object.values(r).join(' ').toLowerCase()) + '"><td>' + ipCell + (st.msg ? '<span class="flag ' + st.cls + '">' + esc(st.msg) + '</span>' : '') + '</td><td>' + esc(r.device) + '</td><td class="mono">' + esc(r.mac) + '</td><td>' + esc(r.location) + '</td><td>' + esc(r.notes) + '</td></tr>';
     }).join('');
-    return '<div class="iplist blockbox"><div class="ph"><b>' + esc(b.title || 'IP list') + '</b><span class="note">' + esc(stats) + '</span></div>' +
+    return '<div class="iplist blockbox" data-ipid="' + esc(b.id || '') + '"><div class="ph"><b>' + esc(b.title || 'IP list') + '</b><span class="note">' + esc(stats) + '</span></div>' +
       (chips ? '<div class="netline">' + chips + '</div>' : '') +
       (a.problems ? '<div class="locknote">' + a.problems + ' address' + (a.problems === 1 ? ' has' : 'es have') + ' a problem (marked in red).</div>' : '') +
       (b.rows.length > 12 ? '<input class="ipq" type="search" placeholder="Filter by IP, device or location">' : '') +

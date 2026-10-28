@@ -16,6 +16,7 @@ const Auth = require('./lib/auth');
 const Store = require('./lib/store');
 const Backup = require('./lib/backup');
 const Update = require('./lib/update');
+const Devices = require('./lib/devices');
 
 const DATA = path.resolve(process.env.LIVEGENIE_DATA || path.join(__dirname, 'data'));
 const PORT = Number(process.env.PORT || 8080);
@@ -33,6 +34,8 @@ const db = DB.open(path.join(DATA, 'livegenie.db'));
 const auth = Auth.create(db);
 const store = Store.create(db, DATA);
 const update = Update.create(pkg.version);
+const devices = Devices.create(db, { UserError: Store.UserError, audit: store.audit });
+const uploadExists = (id) => !!store.upload(id);
 if (restoreNote) store.audit(null, 'backup.restored', '', restoreNote);
 
 // ---------- small http helpers ----------
@@ -251,7 +254,7 @@ async function api(req, res, url, user, token) {
   if (m === 'GET' && a === 'spaces' && b) return send(res, 200, { ok: true, ...store.pagesIn(b, user) });
   if (m === 'GET' && a === 'search') {
     const q = new URL(req.url, 'http://x').searchParams.get('q') || '';
-    return send(res, 200, { ok: true, q, results: store.search(q, user) });
+    return send(res, 200, { ok: true, q, results: store.search(q, user), devices: devices.search(q, user) });
   }
 
   // ----- pages -----
@@ -292,6 +295,23 @@ async function api(req, res, url, user, token) {
     need(user, 'editor');
     if (m === 'GET' && !b) return send(res, 200, { ok: true, pages: store.trash() });
     if (m === 'POST' && b && c === 'restore') { store.undelete(b, user); return send(res, 200, { ok: true }); }
+  }
+
+  // ----- device library -----
+  if (a === 'devices') {
+    if (m === 'GET' && !b) {
+      return send(res, 200, { ok: true, categories: Devices.CATEGORIES, devices: devices.list(user).map((d) => ({
+        id: d.id, name: d.name, aliases: d.aliases, category: d.category, make: d.make, model: d.model, location: d.location,
+        ips: d.ips, photo: d.photo, tech_only: d.tech_only })) });
+    }
+    if (m === 'GET' && b === 'suggestions') { need(user, 'editor'); return send(res, 200, { ok: true, suggestions: devices.suggestions(user) }); }
+    if (m === 'POST' && b === 'import') { need(user, 'editor'); const body = await readJson(req); return send(res, 200, { ok: true, made: devices.importFromLists(body.names, user) }); }
+    if (m === 'POST' && !b) { need(user, 'editor'); return send(res, 200, { ok: true, id: devices.add(await readJson(req), user, uploadExists) }); }
+    if (b && /^\d+$/.test(b)) {
+      if (m === 'GET') { const d = devices.get(b, user); return send(res, 200, { ok: true, device: d, usedOn: devices.usedOn(d, user) }); }
+      if (m === 'PUT') { need(user, 'editor'); devices.edit(b, await readJson(req), user, uploadExists); return send(res, 200, { ok: true }); }
+      if (m === 'DELETE') { need(user, 'editor'); devices.remove(b, user); return send(res, 200, { ok: true }); }
+    }
   }
 
   // ----- shared checklists -----

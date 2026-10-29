@@ -304,7 +304,7 @@ async function api(req, res, url, user, token) {
     if (m === 'GET' && !b) {
       return send(res, 200, { ok: true, categories: Devices.CATEGORIES, devices: devices.list(user).map((d) => ({
         id: d.id, name: d.name, aliases: d.aliases, category: d.category, make: d.make, model: d.model, location: d.location,
-        ips: d.ips, photo: d.photo, tech_only: d.tech_only })) });
+        ips: d.ips, photo: d.photo, tech_only: d.tech_only, inputs: d.inputs, outputs: d.outputs })) });
     }
     if (m === 'GET' && b === 'suggestions') { need(user, 'editor'); return send(res, 200, { ok: true, suggestions: devices.suggestions(user) }); }
     if (m === 'POST' && b === 'import') { need(user, 'editor'); const body = await readJson(req); return send(res, 200, { ok: true, made: devices.importFromLists(body.names, user) }); }

@@ -91,6 +91,7 @@ async function viewDevices(qs) {
   app.innerHTML = `<div class="crumbs"><a href="#/">Home</a><span>/</span></div>
     <div class="bar"><div class="grow"><h1 class="title" style="font-size:22px;letter-spacing:.06em;margin:4px 0 2px">DEVICES</h1>
       <div class="note">Every device name, nickname or IP address typed on a page links to its card here.</div></div>
+      ${can('editor') ? '<a class="btn" href="#/gear-setup">' + icon('spark') + 'Guided setup</a>' : ''}
       ${sug.length ? '<button class="btn" id="imp">' + icon('net') + 'Create from IP lists (' + sug.length + ')</button>' : ''}
       ${can('editor') ? '<button class="primary btn" id="newDev">' + icon('plus') + 'New device</button>' : ''}</div>
     <div class="bar"><input type="search" id="dq" placeholder="Filter by name, model, location or IP" style="flex:1;min-width:200px">
@@ -103,7 +104,7 @@ async function viewDevices(qs) {
       '<div class="t"><b>' + esc(d.name) + '</b><span>' + esc([d.make, d.model].filter(Boolean).join(' ') || CAT[d.category]) + '</span>' +
       '<span>' + esc(d.location) + (d.location && d.ips.length ? ' · ' : '') + (d.ips.length ? '<span class="mono">' + esc(d.ips[0]) + '</span>' + (d.ips.length > 1 ? ' +' + (d.ips.length - 1) : '') : '') + '</span></div>' +
       (d.tech_only ? '<span class="badge tech">Tech only</span>' : '') + '</a>').join('') + '</div>'
-      : '<div class="card empty">' + (list.length ? 'No devices match.' : 'No devices yet.' + (can('editor') ? ' Add the SQ-5, the DriveRack PA2 or a stage box' + (sug.length ? ', or create cards from the names already in your IP lists' : '') + '.' : '')) + '</div>';
+      : '<div class="card empty">' + (list.length ? 'No devices match.' : 'No devices yet.' + (can('editor') ? ' Try the <a href="#/gear-setup">guided setup</a>, or add the SQ-5, the DriveRack PA2 or a stage box' + (sug.length ? ', or create cards from the names already in your IP lists' : '') + '.' : '')) + '</div>';
   };
   if (cat && !$('#dcat [data-c="' + cat + '"]')) cat = '';
   $$('#dcat button').forEach((b) => { b.classList.toggle('on', b.dataset.c === cat); b.addEventListener('click', () => { cat = b.dataset.c; $$('#dcat button').forEach((x) => x.classList.toggle('on', x === b)); paint(); }); });
@@ -150,7 +151,7 @@ async function viewDevice(id) {
     ['VLAN', (L.vlans || []).map((x) => '<a class="chip" href="#/map/vlans"><i class="sw" style="background:' + esc(x.color) + '"></i>' + x.vid + ' ' + esc(x.name) + '</a>').join(' ')],
     ['Connected here', (L.children || []).map((x) => '<div>' + (x.port ? '<span class="mono">' + esc(x.port) + '</span> ' : '') + dl(x) + '</div>').join('')],
     ['Signal from', (L.signalIn || []).map((x) => dl(x) + (x.count > 1 ? ' <span class="note">×' + x.count + '</span>' : '')).join(', ')],
-    ['Signal to', (L.signalOut || []).map((x) => dl(x) + (x.count > 1 ? ' <span class="note">×' + x.count + '</span>' : '')).join(', ')], ['IP address' + (v.ips.length > 1 ? 'es' : ''), ipRows], ['MAC', v.mac ? '<span class="mono">' + esc(v.mac) + '</span>' : ''],
+    ['Signal to', (L.signalOut || []).map((x) => dl(x) + (x.count > 1 ? ' <span class="note">×' + x.count + '</span>' : '')).join(', ')], ['IP address' + (v.ips.length > 1 ? 'es' : ''), ipRows], ['Inputs / outputs', v.inputs || v.outputs ? (v.inputs || 0) + ' in · ' + (v.outputs || 0) + ' out' : ''], ['MAC', v.mac ? '<span class="mono">' + esc(v.mac) + '</span>' : ''],
     ['Also called', esc(v.aliases.join(', '))], ['Manual', v.manual_url ? '<a href="' + esc(v.manual_url) + '" target="_blank" rel="noopener">' + esc(v.manual_url.replace(/^https?:\/\//, '').slice(0, 60)) + '</a>' : '']
   ].filter((f) => f[1]);
   const used = d.usedOn;
@@ -182,7 +183,7 @@ async function viewDevice(id) {
 
 async function viewDeviceEdit(id) {
   if (!can('editor')) { app.innerHTML = '<div class="card empty">Editors and admins can add and change devices.</div>'; if (!S.state.user) signInDialog(() => route()); return; }
-  const d = id ? (await get('/api/devices/' + id)).device : { uplink_id: '', uplink_port: '', name: '', aliases: [], category: 'audio', make: '', model: '', location: '', ip: '', mac: '', photo: '', manual_url: '', notes: '', tech_only: false };
+  const d = id ? (await get('/api/devices/' + id)).device : { inputs: '', outputs: '', uplink_id: '', uplink_port: '', name: '', aliases: [], category: 'audio', make: '', model: '', location: '', ip: '', mac: '', photo: '', manual_url: '', notes: '', tech_only: false };
   setTitle(id ? 'Edit ' + d.name : 'New device');
   S.dirty = false;
   const f = (k, label, ph, extra) => '<label class="dfield' + (extra && extra.wide ? ' wide' : '') + '"><span>' + label + '</span><input data-k="' + k + '" value="' + esc(d[k]) + '" placeholder="' + esc(ph || '') + '"' + (extra && extra.mono ? ' class="mono" autocapitalize="off" spellcheck="false"' : '') + (extra && extra.mode ? ' inputmode="' + extra.mode + '"' : '') + '>' + (extra && extra.hint ? '<em>' + extra.hint + '</em>' : '') + '</label>';
@@ -198,6 +199,8 @@ async function viewDeviceEdit(id) {
         ${f('location', 'Location', 'FOH, front AV rack U4…')}
         ${f('ip', 'IP address', '10.10.20.11', { mono: true, mode: 'decimal', hint: 'Optional. Addresses in IP lists link here too when the device name matches.' })}
         ${f('mac', 'MAC', '', { mono: true })}
+        <label class="dfield"><span>Inputs</span><input data-k="inputs" type="number" min="0" max="512" value="${esc(d.inputs || '')}" placeholder="24"><em>For stage boxes and consoles</em></label>
+        <label class="dfield"><span>Outputs</span><input data-k="outputs" type="number" min="0" max="512" value="${esc(d.outputs || '')}" placeholder="12"></label>
         ${f('manual_url', 'Manual link', 'https://…', { wide: true, mode: 'url' })}
         <label class="dfield"><span>Plugged into</span><select data-k="uplink_id"><option value="">Nothing / not set</option>${(await loadDevices(true)).filter((x) => String(x.id) !== String(id)).map((x) => '<option value="' + x.id + '"' + (String(x.id) === String(d.uplink_id || '') ? ' selected' : '') + '>' + esc(x.name) + '</option>').join('')}</select><em>The switch, router or access point it connects to. Draws the network map.</em></label>
         ${f('uplink_port', 'Port', '5', { mode: 'text', hint: 'Port on that switch (optional)' })}

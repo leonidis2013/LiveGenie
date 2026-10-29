@@ -413,6 +413,24 @@ test('system map: plugged-into links, signal links from patch lists, loops refus
   assert.strictEqual((await editor.get('/api/devices/' + sw)).data.links.children.length, 2);
 });
 
+test('stage box snake lists: roles, spares, I/O counts on devices, map skips port labels', async () => {
+  let r = await editor.post('/api/devices', { name: 'AR2412', category: 'audio', make: 'Allen & Heath', inputs: 24, outputs: 12 });
+  const ar = r.data.id;
+  assert.strictEqual((await editor.get('/api/devices/' + ar)).data.device.inputs, 24);
+  assert.strictEqual((await editor.get('/api/devices')).data.devices.find((d) => d.id === ar).outputs, 12);
+  const rows = [];
+  for (let i = 1; i <= 4; i++) rows.push([String(i), '', '', 'AR2412', String(i), 'SLink', 'SQ-5', '']);
+  rows[0][1] = 'Cajon'; rows[0][2] = 'Beta 91';
+  r = await editor.post('/api/pages', { title: 'Snake test', space: 'audio', blocks: [{ type: 'patch', preset: 'snake', rows }] });
+  const blk = (await editor.get('/api/pages/' + r.data.id)).data.page.blocks[0];
+  assert.deepStrictEqual(blk.roles, { 3: 'shared', 4: 'label', 5: 'label', 6: 'shared' }, 'layout roles come with the preset');
+  assert.deepStrictEqual(blk.assign, [1, 2]);
+  assert.strictEqual(blk.rows.length, 4, 'spare inputs are kept');
+  const sig = (await editor.get('/api/map')).data.sigLinks;
+  const sq = (await editor.get('/api/devices')).data.devices.find((d) => d.name === 'SQ-5').id;
+  assert.ok(sig.some((l) => l.from === ar && l.to === sq), 'AR2412 → SQ-5 over the link (the SLink label is not a box)');
+});
+
 test('backup, then restore brings the data back after a restart', async () => {
   let r = await admin.post('/api/backups/now');
   assert.strictEqual(r.status, 200);

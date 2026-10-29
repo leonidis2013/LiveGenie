@@ -316,6 +316,7 @@ test('patch lists and IP lists are checked and searchable', async () => {
   const p = (await anon.get('/api/pages/' + r.data.id)).data.page;
   assert.deepStrictEqual(p.blocks[0].rows.map((x) => x.ip), ['10.10.20.11', '10.10.20.12'], 'sorted by address, blank rows dropped');
   assert.deepStrictEqual(p.blocks[1].trace, [1, 2, 4, 0]);
+  assert.deepStrictEqual(p.blocks[1].ok, [], 'no intended duplicates yet');
   assert.strictEqual(p.blocks[1].rows.length, 1);
   assert.strictEqual((await anon.get('/api/search?q=driverack')).data.results[0].id, r.data.id);
   assert.strictEqual((await anon.get('/api/search?q=pastor')).data.results.some((x) => x.id === r.data.id), true);

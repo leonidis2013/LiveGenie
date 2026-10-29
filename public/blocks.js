@@ -167,9 +167,52 @@ const Blk = (() => {
 
   // ================= patch lists and the wire trace =================
   const isNum = (v) => /^\d+[a-z]?$/i.test(v);
+
+  /*
+   * Names used more than once in a patch list.
+   *   double patch  rows agree on everything upstream (one source sent to several places): fine
+   *   clash         rows disagree upstream (two different things land on one name, port or channel)
+   *   ok            a clash someone marked as intended
+   * Cable runs only check the cable Label column: devices naturally appear on many cables.
+   * Returns cells: Map "row:col" -> { kind, rows }, plus counts and the clash groups.
+   */
+  function dupInfo(b) {
+    const key = (v) => String(v || '').trim().toLowerCase();
+    const cells = new Map();
+    const groups = [];
+    const okSet = new Set(b.ok || []);
+    const trace = (b.trace || []).filter((i) => i < b.columns.length);
+    const check = b.preset === 'cable' ? [{ ci: 0, up: [] }] : trace.map((ci, p) => ({ ci, up: trace.slice(0, p) }));
+    for (const { ci, up } of check) {
+      if (ci >= b.columns.length) continue;
+      const by = new Map();
+      b.rows.forEach((r, ri) => { const k = key(r[ci]); if (k) { if (!by.has(k)) by.set(k, []); by.get(k).push(ri); } });
+      for (const [k, rows] of by) {
+        if (rows.length < 2) continue;
+        let fanOut = b.preset !== 'cable';
+        if (fanOut) {
+          for (const u of up) {
+            const vals = new Set(rows.map((ri) => key(b.rows[ri][u])).filter(Boolean));
+            if (vals.size > 1) { fanOut = false; break; }
+          }
+        }
+        const kind = fanOut ? 'double' : okSet.has(ci + ':' + k) ? 'ok' : 'clash';
+        rows.forEach((ri) => cells.set(ri + ':' + ci, { kind, rows, ci, key: k }));
+        groups.push({ kind, ci, key: k, label: String(b.rows[rows[0]][ci]).trim(), rows });
+      }
+    }
+    return { cells, groups, clashes: groups.filter((g) => g.kind === 'clash').length, doubles: groups.filter((g) => g.kind === 'double').length };
+  }
+  const dupTitle = (d, b) => {
+    const others = d.rows.map((r) => r + 1).join(', ');
+    return d.kind === 'double' ? 'Double patch: same source on rows ' + others
+      : d.kind === 'ok' ? 'Used on rows ' + others + ' (marked as intended)'
+      : 'Used on rows ' + others + ' by different ' + (b.preset === 'cable' ? 'cables' : 'sources') + '. Rename one, or mark it as intended.';
+  };
   function traceSvg(b) {
     const cols = (b.trace || []).filter((i) => i < b.columns.length);
     if (cols.length < 2) return '';
+    const dups = dupInfo(b);
     const colW = 150, gapX = 54, padX = 8, top = 46, nodeH = 32, gapY = 10;
     const nodes = cols.map(() => new Map());
     const paths = [];
@@ -179,8 +222,10 @@ const Blk = (() => {
         const v = String(row[ci] || '').trim();
         if (!v) return;
         let n = nodes[k].get(v.toLowerCase());
-        if (!n) { n = { label: isNum(v) ? b.columns[ci] + ' ' + v : v, i: nodes[k].size, rows: [] }; nodes[k].set(v.toLowerCase(), n); }
+        if (!n) { n = { label: isNum(v) ? b.columns[ci] + ' ' + v : v, i: nodes[k].size, rows: [], dup: '' }; nodes[k].set(v.toLowerCase(), n); }
         n.rows.push(ri);
+        const d = dups.cells.get(ri + ':' + ci);
+        if (d && (d.kind === 'clash' || !n.dup)) n.dup = d.kind;
         pts.push([k, n]);
       });
       paths.push(pts);
@@ -201,9 +246,9 @@ const Blk = (() => {
     });
     let boxes = '';
     nodes.forEach((m, k) => m.forEach((n) => {
-      boxes += '<g class="tn" data-rows="' + n.rows.join(',') + '"><title>' + esc(n.label) + ' · ' + n.rows.length + ' connection' + (n.rows.length === 1 ? '' : 's') + '</title>' +
+      boxes += '<g class="tn' + (n.dup === 'clash' ? ' clash' : '') + '" data-rows="' + n.rows.join(',') + '"><title>' + esc(n.label) + ' · ' + n.rows.length + ' connection' + (n.rows.length === 1 ? '' : 's') + '</title>' +
         '<rect x="' + cx(k) + '" y="' + cy(n) + '" width="' + colW + '" height="' + nodeH + '" rx="7"/><text x="' + (cx(k) + 10) + '" y="' + (cy(n) + nodeH / 2 + 4.5) + '">' + esc(cut(n.label)) + '</text>' +
-        (n.rows.length > 1 ? '<text class="cnt" x="' + (cx(k) + colW - 9) + '" y="' + (cy(n) + nodeH / 2 + 4) + '" text-anchor="end">' + n.rows.length + '</text>' : '') + '</g>';
+        (n.rows.length > 1 ? '<text class="cnt" x="' + (cx(k) + colW - 9) + '" y="' + (cy(n) + nodeH / 2 + 4) + '" text-anchor="end">' + (n.dup === 'clash' ? '! ' : n.dup === 'double' ? '⇉ ' : '') + n.rows.length + '</text>' : '') + '</g>';
     }));
     const heads = cols.map((ci, k) => '<text class="th" x="' + (cx(k) + 2) + '" y="22">' + esc(b.columns[ci].toUpperCase()) + '</text>' +
       (k ? '<path class="ta" d="M' + (cx(k) - gapX / 2 - 6) + ' 17l6 0m-3 -3l3 3l-3 3"/>' : '')).join('');
@@ -218,11 +263,18 @@ const Blk = (() => {
   function patchView(b) {
     const title = b.title || (PRESETS[b.preset] || PRESETS.custom).title;
     const svg = traceSvg(b);
+    const dups = dupInfo(b);
+    const cell = (ri, ci, v) => {
+      const d = dups.cells.get(ri + ':' + ci);
+      return d ? '<td class="dup ' + d.kind + '" title="' + esc(dupTitle(d, b)) + '">' + esc(v) + '<i class="dupmark">' + (d.kind === 'double' ? '⇉' : d.kind === 'ok' ? '✓' : '!') + '</i></td>' : '<td>' + esc(v) + '</td>';
+    };
     const table = b.rows.length
       ? '<div class="tscroll"><table class="grid"><thead><tr>' + b.columns.map((c) => '<th>' + esc(c) + '</th>').join('') + '</tr></thead><tbody>' +
-        b.rows.map((r, ri) => '<tr data-r="' + ri + '">' + b.columns.map((_, ci) => '<td>' + esc(r[ci] || '') + '</td>').join('') + '</tr>').join('') + '</tbody></table></div>'
+        b.rows.map((r, ri) => '<tr data-r="' + ri + '">' + b.columns.map((_, ci) => cell(ri, ci, r[ci] || '')).join('') + '</tr>').join('') + '</tbody></table></div>'
       : '<div class="note">No rows yet.</div>';
     return '<div class="patch blockbox" data-pid="' + esc(b.id || '') + '"><div class="ph"><b>' + esc(title) + '</b><span class="note">' + b.rows.length + ' row' + (b.rows.length === 1 ? '' : 's') + '</span>' +
+      (dups.clashes ? '<span class="chip warn" title="' + esc(dups.groups.filter((g) => g.kind === 'clash').map((g) => g.label).join(', ')) + '">' + dups.clashes + ' used twice</span>' : '') +
+      (dups.doubles ? '<span class="chip" title="' + esc(dups.groups.filter((g) => g.kind === 'double').map((g) => g.label).join(', ')) + '">' + dups.doubles + ' double patch' + (dups.doubles === 1 ? '' : 'es') + '</span>' : '') +
       (svg && b.rows.length ? '<div class="seg pv"><button data-v="table" class="on">Table</button><button data-v="trace">Trace</button></div>' : '') + '</div>' +
       '<div class="pt">' + table + '</div>' +
       (svg && b.rows.length ? '<div class="ptr hide"><div class="tscroll">' + svg + '</div><div class="note trinfo">Tap a box or a line to follow it.</div></div>' : '') + '</div>';
@@ -349,9 +401,10 @@ const Blk = (() => {
         '<span class="note grow">Wire trace: ' + esc(traceTxt) + '</span><button type="button" class="btn" data-trace>Trace path</button></div>' +
         '<div class="mdhelp">Enter moves down a row. Paste rows straight from a spreadsheet.</div>';
       wireTop();
+      markDups();
       host.querySelectorAll('[data-col]').forEach((f) => f.addEventListener('input', () => { b.columns[Number(f.dataset.col)] = f.value; dirty(); }));
       host.querySelectorAll('input[data-r]').forEach((f) => f.addEventListener('input', () => {
-        b.rows[Number(f.dataset.r)][Number(f.dataset.c)] = f.value; dirty();
+        b.rows[Number(f.dataset.r)][Number(f.dataset.c)] = f.value; dirty(); markDups();
         if (Number(f.dataset.r) === b.rows.length - 1 && f.value) { b.rows.push(b.columns.map(() => '')); appendRow(); }
       }));
       gridKeys(host.querySelector('.gedit'), (c) => { b.rows.push(b.columns.map(() => '')); paint({ r: b.rows.length - 1, c }); });
@@ -377,6 +430,28 @@ const Blk = (() => {
       host.querySelector('[data-trace]').addEventListener('click', () => traceDialog());
       if (focus) { const f = host.querySelector('input[data-r="' + focus.r + '"][data-c="' + focus.c + '"]'); if (f) f.focus(); }
     };
+    /** Colour cells that repeat, with a list of clashes and a Mark as intended switch. */
+    function markDups() {
+      const d = dupInfo(b);
+      host.querySelectorAll('input[data-r]').forEach((f) => {
+        const x = d.cells.get(f.dataset.r + ':' + f.dataset.c);
+        f.classList.toggle('dclash', !!x && x.kind === 'clash');
+        f.classList.toggle('ddouble', !!x && x.kind === 'double');
+        f.classList.toggle('dok', !!x && x.kind === 'ok');
+        f.title = x ? dupTitle(x, b) : '';
+      });
+      let box = host.querySelector('.dupbox');
+      const clashes = d.groups.filter((g) => g.kind !== 'double');
+      if (!clashes.length) { if (box) box.remove(); return; }
+      if (!box) { box = document.createElement('div'); box.className = 'dupbox'; const at = host.querySelector('.tscroll'); if (at) at.after(box); else return; }
+      box.innerHTML = '<b>Used more than once by different ' + (b.preset === 'cable' ? 'cables' : 'sources') + '</b><span class="note"> Rename one (for example “' + esc(clashes[0].label) + ' #2”), or mark it as intended. One source sent to several places is a double patch and is not listed.</span>' +
+        clashes.map((g) => '<label class="tog' + (g.kind === 'ok' ? ' on' : '') + '"><input type="checkbox" data-okk="' + esc(g.ci + ':' + g.key) + '"' + (g.kind === 'ok' ? ' checked' : '') + '><span><b>' + esc(g.label) + '</b> <span class="note">' + esc(b.columns[g.ci]) + ', rows ' + g.rows.map((r) => r + 1).join(', ') + '</span> · intended</span></label>').join('');
+      box.querySelectorAll('[data-okk]').forEach((x) => x.addEventListener('change', () => {
+        b.ok = (b.ok || []).filter((k) => k !== x.dataset.okk);
+        if (x.checked) b.ok.push(x.dataset.okk);
+        dirty(); markDups();
+      }));
+    }
     function wireTop() {
       host.querySelector('[data-f=title]').addEventListener('input', (e) => { b.title = e.target.value; dirty(); });
       host.querySelectorAll('[data-pm]').forEach((x) => x.addEventListener('click', () => { b._view = x.dataset.pm; paint(); }));
@@ -530,7 +605,10 @@ const Blk = (() => {
       tidy(); sel = null; dirty(); draw();
     }
 
+    let dups = dupInfo(b);
+    const dupKind = (k, n) => { let kind = ''; n.rows.forEach((ri) => { const d = dups.cells.get(ri + ':' + cols[k]); if (d && (d.kind === 'clash' || !kind)) kind = d.kind; }); return kind; };
     function draw() {
+      dups = dupInfo(b);
       const { nodes, edges } = model();
       const maxN = Math.max(1, ...nodes.map((n) => n.size)) + 1;
       const W = cols.length * CW + (cols.length - 1) * GX, H = cy(maxN) + 10;
@@ -546,7 +624,7 @@ const Blk = (() => {
         cols.map((ci, k) => '<div class="pdh" style="left:' + cx(k) + 'px;width:' + CW + 'px">' + esc(b.columns[ci]) + '</div>').join('') +
         '<svg class="pdw" width="' + W + '" height="' + H + '"><g>' + edges.map((e) => '<g class="pw' + (isSelW(e) ? ' sel' : '') + '" data-r="' + e.r + '" data-a="' + e.a.k + '" data-z="' + e.z.k + '"><path class="hit" d="' + path(e) + '"/><path class="ln" d="' + path(e) + '"/></g>').join('') +
         '</g><path class="tmp" d=""/></svg>' +
-        nodes.map((m, k) => [...m.values()].map((n) => '<div class="pn' + (isSelN(n) ? ' sel' : '') + (pending && pending.k === n.k && pending.key === n.key ? ' pend' : '') + '" data-k="' + k + '" data-key="' + esc(n.key) + '" style="left:' + cx(k) + 'px;top:' + cy(n.i) + 'px;width:' + CW + 'px;height:' + NH + 'px">' +
+        nodes.map((m, k) => [...m.values()].map((n) => '<div class="pn' + (dupKind(k, n) ? ' d' + dupKind(k, n) : '') + (isSelN(n) ? ' sel' : '') + (pending && pending.k === n.k && pending.key === n.key ? ' pend' : '') + '" data-k="' + k + '" data-key="' + esc(n.key) + '" style="left:' + cx(k) + 'px;top:' + cy(n.i) + 'px;width:' + CW + 'px;height:' + NH + 'px">' +
           '<span class="pl">' + esc(n.label) + '</span>' + (n.rows.length > 1 ? '<em>' + n.rows.length + '</em>' : '') + '<b class="hd" title="Drag to connect" aria-label="Connect from ' + esc(n.label) + '"></b></div>').join('') +
           '<button type="button" class="padd" data-k="' + k + '" style="left:' + cx(k) + 'px;top:' + cy(m.size) + 'px;width:' + CW + 'px">+ Add ' + esc(b.columns[cols[k]]) + '</button>').join('');
       showPanel(nodes);
@@ -573,7 +651,11 @@ const Blk = (() => {
         const n = nodes[sel.k] && nodes[sel.k].get(sel.key);
         if (!n) { sel = null; panel.innerHTML = ''; return; }
         const ci = cols[sel.k];
+        const dk = dupKind(sel.k, n), okKey = ci + ':' + sel.key;
         panel.innerHTML = '<div class="pdp"><div class="pdph"><b>' + esc(b.columns[ci]) + '</b><span class="note">' + n.rows.length + ' row' + (n.rows.length === 1 ? '' : 's') + '</span></div>' +
+          (dk === 'double' ? '<div class="dupnote double">Double patch: the same source goes to ' + n.rows.length + ' places. That is fine.</div>' : '') +
+          (dk === 'clash' || dk === 'ok' ? '<div class="dupnote ' + dk + '">' + (dk === 'clash' ? 'Used by ' + n.rows.length + ' different ' + (b.preset === 'cable' ? 'cables' : 'sources') + '. Rename one (for example “' + esc(n.label) + ' #2”) if they are separate, or mark it as intended.' : 'Used more than once, marked as intended.') +
+            '<label class="tog' + (dk === 'ok' ? ' on' : '') + '" style="margin-top:6px"><input type="checkbox" data-ok' + (dk === 'ok' ? ' checked' : '') + '> Intended</label></div>' : '') +
           '<div class="pdf"><label>Name<input data-rename value="' + esc(n.label) + '" list="' + dlId + '"></label></div>' +
           '<div class="acts" style="justify-content:flex-start;margin-top:8px"><button type="button" class="btn" data-from>Connect from here</button><button type="button" class="btn danger" data-ndel>Remove box</button></div></div>';
         const inp = panel.querySelector('[data-rename]');
@@ -583,6 +665,8 @@ const Blk = (() => {
           b.rows.forEach((r) => { if (key(r[ci]) === sel.key) r[ci] = v; });
           sel = { type: 'node', k: sel.k, key: key(v) }; tidy(); dirty(); draw();
         });
+        const okBox = panel.querySelector('[data-ok]');
+        if (okBox) okBox.addEventListener('change', () => { b.ok = (b.ok || []).filter((k) => k !== okKey); if (okBox.checked) b.ok.push(okKey); dirty(); draw(); });
         panel.querySelector('[data-from]').addEventListener('click', () => { pending = { k: sel.k, key: sel.key }; toast('Now tap the box to connect to'); draw(); });
         panel.querySelector('[data-ndel]').addEventListener('click', () => {
           b.rows.forEach((r) => { if (key(r[ci]) === sel.key) r[ci] = ''; });
@@ -793,5 +877,5 @@ const Blk = (() => {
     });
   }
 
-  return { render, wire, editChecklist, editPatch, editIplist, PRESETS, describe, analyze, ipInt, traceSvg };
+  return { render, wire, editChecklist, editPatch, editIplist, PRESETS, describe, analyze, ipInt, traceSvg, dupInfo };
 })();

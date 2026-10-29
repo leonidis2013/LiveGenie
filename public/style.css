@@ -397,6 +397,29 @@ code a.dev, .mono a.dev { text-decoration-style:dotted; }
 .implist { display:flex; flex-direction:column; gap:6px; max-height:50vh; overflow:auto; }
 .implist .tog { align-items:flex-start; }
 
+/* ===== names used twice ===== */
+.chip.warn { background:color-mix(in srgb, var(--warn) 18%, transparent); color:var(--warn); }
+td.dup { position:relative; }
+td.dup .dupmark { font-style:normal; font-size:10.5px; font-weight:800; margin-left:6px; padding:0 5px; border-radius:6px; }
+td.dup.clash { background:color-mix(in srgb, var(--warn) 13%, transparent); }
+td.dup.clash .dupmark { background:var(--warn); color:#111; }
+td.dup.double .dupmark { color:var(--acc); background:color-mix(in srgb, var(--acc) 16%, transparent); }
+td.dup.ok .dupmark { color:var(--ok); }
+table.gedit input.dclash { border-color:var(--warn); background:color-mix(in srgb, var(--warn) 12%, var(--inset)); }
+table.gedit input.ddouble { border-color:color-mix(in srgb, var(--acc) 55%, var(--line)); }
+table.gedit input.dok { border-color:color-mix(in srgb, var(--ok) 55%, var(--line)); }
+.dupbox { margin-top:8px; padding:9px 12px; border:1px solid color-mix(in srgb, var(--warn) 55%, transparent); background:color-mix(in srgb, var(--warn) 9%, transparent); border-radius:8px; display:flex; flex-direction:column; gap:6px; font-size:13px; }
+.dupbox .tog { color:var(--fg); }
+.dupnote { font-size:12.5px; padding:7px 10px; border-radius:8px; margin-bottom:8px; }
+.dupnote.double { background:color-mix(in srgb, var(--acc) 12%, transparent); }
+.dupnote.clash { background:color-mix(in srgb, var(--warn) 14%, transparent); }
+.dupnote.ok { background:color-mix(in srgb, var(--ok) 12%, transparent); }
+.pn.dclash { border-color:var(--warn); background:color-mix(in srgb, var(--warn) 12%, var(--card)); }
+.pn.dclash::after { content:"!"; position:absolute; left:-7px; top:-7px; width:16px; height:16px; border-radius:50%; background:var(--warn); color:#111; font-size:11px; font-weight:900; display:grid; place-items:center; }
+.pn.ddouble em::before { content:"⇉ "; color:var(--acc); }
+.pn.dok { border-color:color-mix(in srgb, var(--ok) 55%, var(--line)); }
+svg.trace .tn.clash rect { stroke:var(--warn); stroke-width:2; fill:color-mix(in srgb, var(--warn) 12%, var(--card2)); }
+
 /* ===== patch list: draw mode ===== */
 .pmode { margin-left:auto; }
 .pmode button { padding:5px 12px; }
@@ -428,7 +451,7 @@ code a.dev, .mono a.dev { text-decoration-style:dotted; }
 .pdph { display:flex; gap:10px; align-items:baseline; margin-bottom:8px; }
 .pdf { display:grid; grid-template-columns:repeat(auto-fill, minmax(150px, 1fr)); gap:8px; }
 .pdf label { display:flex; flex-direction:column; gap:3px; font-size:11.5px; color:var(--dim); font-weight:600; }
-.pdf input { width:100%; }
+.pdf input { width:100%; background:var(--inset); border:1px solid var(--line); font-weight:400; font-size:14px; }
 .blockbox .ph .pdedit { padding:4px 10px; font-size:13px; }
 @media (max-width:720px) { .pn { font-size:14px; } .pdf input { font-size:16px; } }
 

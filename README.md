@@ -4,7 +4,7 @@
 
 The Rolling Hills Community Church AVL knowledge base: one web app where volunteers find how our system works, how to run a service and how to fix what broke. Part of the Live series (LiveMic, LiveCompanion, LivePi, LiveVoice).
 
-Version 0.5.0 · © 2026 Jerod Ulicki
+Version 0.6.0 · © 2026 Jerod Ulicki
 
 ## What it does
 
@@ -16,6 +16,7 @@ Version 0.5.0 · © 2026 Jerod Ulicki
 - **Overdue notices.** Optional: LiveGenie posts each overdue checklist once to a webhook, for example a Home Assistant automation that sends it to your phone (Settings › Notifications has the automation to paste).
 - **Patch lists and cable runs.** Spreadsheet-style grids with ready-made layouts (Input patch, Output patch, Cable runs, or your own columns). Paste rows from a spreadsheet; Enter moves down a row.
 - **Draw or type, interchangeably.** In the editor every patch list has **Table** and **Draw**. In Draw, the wire-trace columns become lanes of boxes: add boxes, then drag from a box's dot to another box (or tap the dot, then the box) to connect them. Tap a line to fill in the rest of that row (stand, cable type, length, route) or disconnect it; tap a box to rename or remove it. Every line is a row in the table, so you can switch back and forth freely. Device names autocomplete from the device library. On a page, editors get a **Draw** button on each patch list that opens it straight in Draw.
+- **Names used twice.** Patch lists flag repeated names. If the rows agree on everything upstream it is a **double patch** (one source sent to several channels) and gets a quiet ⇉ mark. If different sources land on the same name, port or channel, it is a **clash**: highlighted in the table, the drawing and the trace, with a count on the page. Rename one (KSM137 #2) or tick **Intended**. Cable runs check only the cable label, since devices appear on many cables.
 - **Wire trace.** Every patch list can draw its wiring (for an input patch: Source → Mic / DI → Stage box → Ch). Shared gear becomes one box; tap a box or line to follow the cable. Pick the columns and order in the editor.
 - **Static IP lists.** Network name, VLAN, subnet and gateway, then the addresses. Duplicates, addresses outside the subnet and the gateway are flagged as you type; Next free IP and Fill a range generate addresses; each IP links to the device's web page.
 - **Device library.** One card per device: photo, make and model, location, IP, MAC, manual link, nicknames and notes. Wherever a device's name, nickname or IP appears on any page (text, checklist steps, patch lists, IP lists), it links to its card automatically, with a quick card on hover. Each card lists everywhere it is **Used on**, and picks up its IP from any IP list row with its name. **Create from IP lists** makes cards for device names already in your IP lists.
@@ -88,7 +89,8 @@ Run it on the TrueNAS host and reach it from the AVL and office VLANs through th
 | 0.2.0 | Formatting editor, shared checklists with auto reset, To do list and overdue notices, patch lists with wire trace, IP lists, PDF export |
 | 0.3.0 | Device library with automatic links and Used on lists; Network pages Tech only by default |
 | 0.4.0 | System map (signal flow and network), VLAN list, Plugged into on device cards |
-| 0.5.0 | Draw patch lists and cable runs by connecting boxes; drawing and table edit the same rows (this release) |
+| 0.5.0 | Draw patch lists and cable runs by connecting boxes; drawing and table edit the same rows |
+| 0.6.0 | Names used twice: clashes highlighted, double patches recognised, Intended switch (this release) |
 | next | Document library, AI drafts from the Jetson, Bitfocus Companion buttons in checklists |
 | later | Document library, AI drafts from the Jetson with citations, review queue, Ask the Genie |
 | later | Bitfocus Companion buttons inside checklists |

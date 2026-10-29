@@ -1,6 +1,6 @@
 {
   "name": "livegenie",
-  "version": "0.8.0",
+  "version": "0.9.0",
   "description": "LiveGenie: the RHCC AVL knowledge base. Pages, search, and (coming) AI-drafted docs and Companion checklists. Part of the Live series.",
   "main": "server.js",
   "scripts": {

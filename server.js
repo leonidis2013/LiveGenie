@@ -18,6 +18,7 @@ const Backup = require('./lib/backup');
 const Update = require('./lib/update');
 const Devices = require('./lib/devices');
 const Network = require('./lib/network');
+const Training = require('./lib/training');
 
 const DATA = path.resolve(process.env.LIVEGENIE_DATA || path.join(__dirname, 'data'));
 const PORT = Number(process.env.PORT || 8080);
@@ -39,6 +40,7 @@ const devices = Devices.create(db, { UserError: Store.UserError, audit: store.au
 const uploadExists = (id) => !!store.upload(id);
 const network = Network.create(db, { UserError: Store.UserError, audit: store.audit, devices, getSetting: store.getSetting, setSetting: store.setSetting });
 if (restoreNote) store.audit(null, 'backup.restored', '', restoreNote);
+try { if (Training.seed(store)) console.log('Added the audio training pages to Volunteers'); } catch (e) { console.error('Could not add the training pages:', e.message); }
 
 // ---------- small http helpers ----------
 const SECURITY_HEADERS = {

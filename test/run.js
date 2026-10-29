@@ -20,6 +20,8 @@ const DATA = fs.mkdtempSync(path.join(os.tmpdir(), 'livegenie-test-'));
 const PNG = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==', 'base64');
 
 let proc = null;
+const notTraining = (r) => !/^Audio /.test(r.title);
+
 function start() {
   return new Promise((resolve, reject) => {
     proc = spawn(process.execPath, ['--disable-warning=ExperimentalWarning', 'server.js'], {
@@ -129,12 +131,12 @@ test('Tech only pages are hidden from volunteers and anonymous readers', async (
   assert.strictEqual(net.pages.length, 0);
   const home = (await anon.get('/api/home')).data;
   assert.strictEqual(home.spaces.find((s) => s.slug === 'network').pages, 0);
-  assert.strictEqual(home.pinned.length, 1);
+  assert.strictEqual(home.pinned.filter((p) => !/^Audio training/.test(p.title)).length, 1);
 });
 
 test('search finds words, prefixes and respects Tech only', async () => {
   let r = await anon.get('/api/search?q=amplif');
-  assert.strictEqual(r.data.results.length, 1, 'prefix match');
+  assert.strictEqual(r.data.results.filter(notTraining).length, 1, 'prefix match');
   assert.ok(r.data.results[0].snip.includes('\u0001'), 'snippet marks the match');
   r = await anon.get('/api/search?q=sq-5 startup');
   assert.strictEqual(r.data.results[0].id, pageId);
@@ -154,7 +156,7 @@ test('saving over someone else\'s change is refused; history and restore work', 
   assert.strictEqual(r.data.version, 3);
   const p = (await anon.get('/api/pages/' + pageId)).data.page;
   assert.strictEqual(p.blocks.length, 4);
-  assert.strictEqual((await anon.get('/api/search?q=amplifiers')).data.results.length, 1, 'search index follows the restore');
+  assert.strictEqual((await anon.get('/api/search?q=amplifiers')).data.results.filter(notTraining).length, 1, 'search index follows the restore');
 });
 
 test('pictures upload, show on pages, and odd files are refused', async () => {
@@ -436,7 +438,7 @@ test('backup, then restore brings the data back after a restart', async () => {
   assert.strictEqual(r.status, 200);
   const name = r.data.name;
   r = await admin.get('/api/backups/' + name + '/inspect');
-  assert.strictEqual(r.data.info.pictures, 1);
+  assert.strictEqual(r.data.info.pictures, 1 + 6, 'one picture plus the six training diagrams');
   const before = r.data.info.pages;
   const dl = await admin.get('/api/backups/' + name + '/download');
   assert.ok(dl.data.length > 1024 && dl.data.toString('ascii', 257, 262) === 'ustar', 'download is a tar file');
@@ -454,11 +456,28 @@ test('backup, then restore brings the data back after a restart', async () => {
   await start();
   const home = (await editor.get('/api/home')).data;
   assert.ok(!home.recent.some((p) => p.title === 'After the backup'), 'the later page is gone');
-  assert.strictEqual(home.recent.length, before);
+  assert.strictEqual(home.spaces.reduce((n, sp) => n + sp.pages, 0), before, 'same number of pages as the backup');
+  assert.strictEqual((await admin.get('/api/spaces/volunteers')).data.pages.filter((p) => /^Audio/.test(p.title)).length, 6, 'training pages are not added a second time');
   const list = (await admin.get('/api/backups')).data.backups;
   assert.ok(list.some((b) => b.kind === 'before-restore'), 'data was saved before the restore');
   const act = (await admin.get('/api/activity')).data.activity;
   assert.ok(act.some((a) => a.action === 'backup.restored'));
+});
+
+test('audio training pages are added to Volunteers once, in signal-flow order', async () => {
+  const anon = client();
+  const vol = (await anon.get('/api/spaces/volunteers')).data;
+  const titles = vol.pages.map((p) => p.title);
+  assert.deepStrictEqual(titles.slice(0, 6), ['Audio training: start here', 'Audio 1: Setting gain', 'Audio 2: High pass filter', 'Audio 3: Low pass filter', 'Audio 4: How EQ works', 'Audio 5: How a compressor works']);
+  const start = (await anon.get('/api/pages/' + vol.pages[0].id)).data.page;
+  const links = [...JSON.stringify(start.blocks).matchAll(/#\/p\/(\d+)/g)].map((m) => Number(m[1]));
+  assert.deepStrictEqual(links, vol.pages.slice(1, 6).map((p) => p.id));
+  const gain = (await anon.get('/api/pages/' + links[0])).data.page;
+  assert.ok(gain.blocks.some((b) => b.type === 'image'), 'gain module has its diagram');
+  assert.ok(/\*\*\[ Gain \]\*\*/.test(gain.blocks[0].md), 'shows where it sits in the signal flow');
+  assert.ok(JSON.stringify(gain.blocks).includes('#/p/' + links[1]), 'links to the next module');
+  const s = (await anon.get('/api/search?q=compressor')).data;
+  assert.ok(JSON.stringify(s).includes('How a compressor works'));
 });
 
 test('static files and icons are served with safe headers', async () => {

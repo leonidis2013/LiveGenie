@@ -4,12 +4,13 @@
 
 The Rolling Hills Community Church AVL knowledge base: one web app where volunteers find how our system works, how to run a service and how to fix what broke. Part of the Live series (LiveMic, LiveCompanion, LivePi, LiveVoice).
 
-Version 0.8.0 · © 2026 Jerod Ulicki
+Version 0.9.0 · © 2026 Jerod Ulicki
 
 ## What it does
 
 - **Spaces and pages.** Audio, Video & Stream, Lighting, Network, Volunteers and Services. A page is a stack of blocks: text, callouts (Tip, Warning, Sunday-critical), checklists, patch lists, IP lists, pictures and dividers.
 - **Easy formatting.** The text editor works like a notes app: headings, bold, italic, bullet and numbered lists, links, tables and an **IP** style for addresses, from a toolbar. Typing `- `, `1. ` or `# ` at the start of a line also works. Pages are stored as Markdown; the **MD** button shows it for anyone who prefers typing it.
+- **Audio training.** The Volunteers space starts with five audio training modules in signal-flow order: **Setting gain**, **High pass filter**, **Low pass filter**, **How EQ works** and **How a compressor works**, plus a pinned **Audio training: start here** page. Each has diagrams, starting settings for our sources, something to practise at the desk and check-yourself questions with answers. They are ordinary pages, so editors can change them; they are added once and deleted ones don't come back.
 - **Shared checklists.** Everyone sees the same ticks, with who ticked each step and when (updates every 15 seconds). Anyone who can see the page can tick; signed-in people can reset.
 - **Auto reset and done-by times.** Give a checklist reset times, such as "Sundays at 6:00 AM, done by 9:15 AM" or "Wednesdays at 5:00 PM". At each reset it starts empty.
 - **To do list.** From its reset until the end of that day, a scheduled checklist sits at the top of the home page with its progress and due time. It turns red once the done-by time passes with steps left, and finished ones stay as green Done until the day ends. The header shows how many are open or overdue.
@@ -95,7 +96,8 @@ Run it on the TrueNAS host and reach it from the AVL and office VLANs through th
 | 0.5.0 | Draw patch lists and cable runs by connecting boxes; drawing and table edit the same rows |
 | 0.6.0 | Names used twice: clashes highlighted, double patches recognised, Intended switch |
 | 0.7.0 | Guided equipment setup, stage box snake inputs/outputs with spares, column roles, port-aware checks, stage box and trunk drawing |
-| 0.8.0 | Cleaner patch table: Every row line, narrow number columns, row ⋯ menu, Columns dialog, autocomplete, hidden spares (this release) |
+| 0.8.0 | Cleaner patch table: Every row line, narrow number columns, row ⋯ menu, Columns dialog, autocomplete, hidden spares |
+| 0.9.0 | Audio training modules in Volunteers: gain, high pass, low pass, EQ, compressor (this release) |
 | next | Document library, AI drafts from the Jetson, Bitfocus Companion buttons in checklists |
 | later | Document library, AI drafts from the Jetson with citations, review queue, Ask the Genie |
 | later | Bitfocus Companion buttons inside checklists |

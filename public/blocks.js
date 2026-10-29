@@ -338,17 +338,34 @@ const Blk = (() => {
     }).filter(Boolean).join(' → ').replace(/ → \(/g, ' (').replace(/\) → /g, ') → ');
   }
 
+  /**
+   * How a patch table is laid out: gear or labels that are the same on every row (AR2412, SLink, SQ-5)
+   * fold into one "Every row" line, and number columns (Input, Box input) are narrow.
+   */
+  function tableLayout(b) {
+    const filled = b.rows.filter((r) => r.some((v) => String(v || '').trim()));
+    const same = (ci) => { const vals = new Set(filled.map((r) => String(r[ci] || '').trim())); return filled.length > 1 && vals.size === 1 && !vals.has(''); };
+    const fold = b.columns.map((_, ci) => roleOf(b, ci) !== 'box' && same(ci));
+    const vis = b.columns.map((_, ci) => ci).filter((ci) => !fold[ci]);
+    const narrow = b.columns.map((c, ci) => /^(#|ch|in|input|out|output|box input|box output|port|no\.?|length|stand)$/i.test(String(c).trim()) ||
+      (filled.some((r) => String(r[ci] || '').trim()) && filled.every((r) => !String(r[ci] || '').trim() || /^\d+[a-z]?$/i.test(String(r[ci]).trim()))));
+    const shared = b.columns.map((c, ci) => (fold[ci] ? { ci, name: c, value: String(filled[0][ci]).trim() } : null)).filter(Boolean);
+    return { vis, narrow, shared };
+  }
+
   function patchView(b) {
     const title = b.title || (PRESETS[b.preset] || PRESETS.custom).title;
     const svg = traceSvg(b);
     const dups = dupInfo(b);
+    const L = tableLayout(b);
     const cell = (ri, ci, v) => {
       const d = dups.cells.get(ri + ':' + ci);
       return d ? '<td class="dup ' + d.kind + '" title="' + esc(dupTitle(d, b)) + '">' + esc(v) + '<i class="dupmark">' + (d.kind === 'double' ? '⇉' : d.kind === 'ok' ? '✓' : '!') + '</i></td>' : '<td>' + esc(v) + '</td>';
     };
     const table = b.rows.length
-      ? '<div class="tscroll"><table class="grid"><thead><tr>' + b.columns.map((c) => '<th>' + esc(c) + '</th>').join('') + '</tr></thead><tbody>' +
-        b.rows.map((r, ri) => '<tr data-r="' + ri + '"' + (isSpare(b, r) ? ' class="spare"' : '') + '>' + b.columns.map((_, ci) => cell(ri, ci, r[ci] || '')).join('') + '</tr>').join('') + '</tbody></table></div>' +
+      ? (L.shared.length ? '<div class="pshared"><span class="note">Every row</span>' + L.shared.map((x) => '<span class="chip">' + esc(x.name) + ' <b>' + esc(x.value) + '</b></span>').join('') + '</div>' : '') +
+        '<div class="tscroll"><table class="grid"><thead><tr>' + L.vis.map((ci) => '<th' + (L.narrow[ci] ? ' class="nw"' : '') + '>' + esc(b.columns[ci]) + '</th>').join('') + '</tr></thead><tbody>' +
+        b.rows.map((r, ri) => '<tr data-r="' + ri + '"' + (isSpare(b, r) ? ' class="spare"' : '') + '>' + L.vis.map((ci) => cell(ri, ci, r[ci] || '')).join('') + '</tr>').join('') + '</tbody></table></div>' +
         (b.rows.some((r) => isSpare(b, r)) ? '<button type="button" class="ghost sparebtn">' + b.rows.filter((r) => isSpare(b, r)).length + ' spare ' + (b.preset === 'snakeout' ? 'outputs' : 'inputs') + ' · show</button>' : '')
       : '<div class="note">No rows yet.</div>';
     return '<div class="patch blockbox" data-pid="' + esc(b.id || '') + '"><div class="ph"><b>' + esc(title) + '</b><span class="note">' + b.rows.length + ' row' + (b.rows.length === 1 ? '' : 's') + '</span>' +
@@ -477,46 +494,50 @@ const Blk = (() => {
         return;
       }
       ensureBlank();
-      host.innerHTML = top + '<div class="tscroll"><table class="gedit"><thead><tr><th class="rn">#</th>' +
-        b.columns.map((c, ci) => '<th><div class="colh"><input data-col="' + ci + '" value="' + esc(c) + '" aria-label="Column name"><button type="button" class="ghost" data-cdel="' + ci + '" title="Remove column">' + icon('x') + '</button></div></th>').join('') +
-        '<th class="rt"><button type="button" class="ghost" data-cadd title="Add column">' + icon('plus') + '</button></th></tr></thead><tbody>' +
-        b.rows.map((r, ri) => '<tr><td class="rn">' + (ri + 1) + '</td>' + b.columns.map((_, ci) => '<td><input data-r="' + ri + '" data-c="' + ci + '" value="' + esc(r[ci] || '') + '"></td>').join('') +
-          '<td class="rt"><button type="button" class="ghost" data-rup="' + ri + '" title="Move up"' + (ri ? '' : ' disabled') + '>' + icon('up') + '</button><button type="button" class="ghost" data-rdel="' + ri + '" title="Remove row">' + icon('x') + '</button></td></tr>').join('') +
+      const L = tableLayout(b);
+      const devNames = typeof DEV !== 'undefined' && DEV.list ? DEV.list.map((d) => d.name) : [];
+      const dl = (ci) => 'pdl-' + (b.id || 'new') + '-' + ci;
+      const lists = L.vis.map((ci) => {
+        const vals = new Set(b.rows.map((r) => String(r[ci] || '').trim()).filter(Boolean));
+        if (roleOf(b, ci) !== 'label' && !L.narrow[ci]) devNames.forEach((n) => vals.add(n));
+        return '<datalist id="' + dl(ci) + '">' + [...vals].sort().slice(0, 400).map((v) => '<option value="' + esc(v) + '">').join('') + '</datalist>';
+      }).join('');
+      const showSpare = b._spares !== false;
+      const assign = new Set(b.assign || []);
+      host.innerHTML = top + (L.shared.length ? '<div class="pshared"><span class="note">Every row</span>' + L.shared.map((x) => '<span class="chip">' + esc(x.name) + ' <b>' + esc(x.value) + '</b></span>').join('') + '<button type="button" class="ghost" data-shchg>Change</button></div>' : '') +
+        lists + '<div class="tscroll"><table class="gedit pgrid' + (showSpare ? '' : ' nospare') + '"><thead><tr>' +
+        L.vis.map((ci) => '<th class="' + (L.narrow[ci] ? 'nw' : '') + '">' + esc(b.columns[ci]) + '</th>').join('') + '<th class="rt"></th></tr></thead><tbody>' +
+        b.rows.map((r, ri) => {
+          const sp = isSpare(b, r) && r.some((v) => String(v || '').trim());
+          return '<tr class="' + (sp ? 'spare' : '') + '">' + L.vis.map((ci) => '<td class="' + (L.narrow[ci] ? 'nw' : '') + '"><input data-r="' + ri + '" data-c="' + ci + '" value="' + esc(r[ci] || '') + '" list="' + dl(ci) + '" autocomplete="off"' +
+            (sp && assign.has(ci) ? ' placeholder="spare"' : '') + '></td>').join('') +
+            '<td class="rt"><button type="button" class="ghost rmb" data-rmenu="' + ri + '" title="Row options" aria-label="Row options">⋯</button></td></tr>';
+        }).join('') +
         '</tbody></table></div>' +
-        '<div class="adder" style="padding:8px 0 4px">' + setupBtn + '<button type="button" class="btn" data-radd>' + icon('plus') + 'Row</button><button type="button" class="btn" data-paste>Paste rows</button>' +
-        '<span class="note grow">Wire trace: ' + esc(traceTxt) + (spare ? ' · ' + spare + ' spare' : '') + '</span><button type="button" class="btn" data-trace>Trace path</button></div>' +
-        '<div class="mdhelp">Enter moves down a row. Paste rows straight from a spreadsheet.</div>';
+        '<div class="adder" style="padding:8px 0 4px">' + setupBtn + (isSnake() ? '' : '<button type="button" class="btn" data-radd>' + icon('plus') + 'Row</button>') +
+        '<button type="button" class="btn ghost" data-paste>Paste rows</button><button type="button" class="btn ghost" data-cols>Columns</button>' +
+        (spare ? '<button type="button" class="btn ghost" data-spares>' + (showSpare ? 'Hide' : 'Show') + ' ' + spare + ' spare</button>' : '') +
+        '<span class="note grow">Wire trace: ' + esc(traceTxt) + '</span><button type="button" class="btn ghost" data-trace>Trace path</button></div>' +
+        '<div class="mdhelp">Enter moves down. Names suggest themselves from this list and the device library. ⋯ on a row: duplicate it for a double patch, ' + (isSnake() ? 'make it spare' : 'insert a row') + ', move or delete it.</div>';
       wireTop();
       markDups();
-      host.querySelectorAll('[data-col]').forEach((f) => f.addEventListener('input', () => { b.columns[Number(f.dataset.col)] = f.value; dirty(); }));
       host.querySelectorAll('input[data-r]').forEach((f) => f.addEventListener('input', () => {
-        b.rows[Number(f.dataset.r)][Number(f.dataset.c)] = f.value; dirty(); markDups();
-        if (Number(f.dataset.r) === b.rows.length - 1 && f.value) { prefill(Number(f.dataset.r)); b.rows.push(b.columns.map(() => '')); appendRow(); }
+        const ri = Number(f.dataset.r);
+        b.rows[ri][Number(f.dataset.c)] = f.value; dirty(); markDups();
+        if (ri === b.rows.length - 1 && f.value) { prefill(ri); b.rows.push(b.columns.map(() => '')); paint({ r: ri, c: f.dataset.c, keep: f.selectionStart }); }
       }));
       gridKeys(host.querySelector('.gedit'), (c) => { b.rows.push(b.columns.map(() => '')); paint({ r: b.rows.length - 1, c }); });
-      host.querySelector('[data-cadd]').addEventListener('click', () => {
-        if (b.columns.length >= 12) return toast('A patch list can have up to 12 columns');
-        b.columns.push('Column ' + (b.columns.length + 1)); b.rows.forEach((r) => r.push('')); dirty(); paint();
-        const inputs = host.querySelectorAll('[data-col]'); inputs[inputs.length - 1].select();
-      });
-      host.querySelectorAll('[data-cdel]').forEach((x) => x.addEventListener('click', async () => {
-        const ci = Number(x.dataset.cdel);
-        if (b.columns.length <= 1) return toast('A patch list needs at least one column');
-        if (b.rows.some((r) => String(r[ci] || '').trim()) && !await confirmBox('Remove the ' + (b.columns[ci] || 'column') + ' column?', 'Everything typed in it is removed too.', 'Remove', true)) return;
-        b.columns.splice(ci, 1); b.rows.forEach((r) => r.splice(ci, 1));
-        b.trace = b.trace.filter((i) => i !== ci).map((i) => i > ci ? i - 1 : i);
-        const nr = {}; Object.entries(b.roles || {}).forEach(([k, v]) => { const n = Number(k); if (n !== ci) nr[n > ci ? n - 1 : n] = v; }); b.roles = nr;
-        b.assign = (b.assign || []).filter((i) => i !== ci).map((i) => i > ci ? i - 1 : i);
-        dirty(); paint();
-      }));
-      host.querySelectorAll('[data-rdel]').forEach((x) => x.addEventListener('click', () => { b.rows.splice(Number(x.dataset.rdel), 1); dirty(); paint(); }));
-      host.querySelectorAll('[data-rup]').forEach((x) => x.addEventListener('click', () => {
-        const i = Number(x.dataset.rup); [b.rows[i - 1], b.rows[i]] = [b.rows[i], b.rows[i - 1]]; dirty(); paint();
-      }));
-      host.querySelector('[data-radd]').addEventListener('click', () => { b.rows.push(b.columns.map(() => '')); paint({ r: b.rows.length - 2 < 0 ? 0 : b.rows.length - 2, c: '0' }); });
+      const sh = host.querySelector('[data-shchg]'); if (sh) sh.addEventListener('click', () => sharedDialog(L));
+      host.querySelectorAll('[data-rmenu]').forEach((x) => x.addEventListener('click', () => rowMenu(Number(x.dataset.rmenu), x)));
+      const ra = host.querySelector('[data-radd]'); if (ra) ra.addEventListener('click', () => { const r = b.rows.length - 1; paint({ r, c: String(L.vis[0]) }); });
       host.querySelector('[data-paste]').addEventListener('click', () => pasteRows());
+      host.querySelector('[data-cols]').addEventListener('click', () => columnsDialog());
       host.querySelector('[data-trace]').addEventListener('click', () => traceDialog());
-      if (focus) { const f = host.querySelector('input[data-r="' + focus.r + '"][data-c="' + focus.c + '"]'); if (f) f.focus(); }
+      const spb = host.querySelector('[data-spares]'); if (spb) spb.addEventListener('click', () => { b._spares = !showSpare; paint(); });
+      if (focus) {
+        const f = host.querySelector('input[data-r="' + focus.r + '"][data-c="' + focus.c + '"]');
+        if (f) { f.focus(); if (focus.keep !== undefined) try { f.setSelectionRange(focus.keep, focus.keep); } catch (e) { /* not a text field */ } }
+      }
     };
     /** Colour cells that repeat, with a list of clashes and a Mark as intended switch. */
     function markDups() {
@@ -564,20 +585,6 @@ const Blk = (() => {
         dirty(); paint();
       });
     }
-    function appendRow() {
-      const tb = host.querySelector('.gedit tbody');
-      const ri = b.rows.length - 1;
-      const tr = document.createElement('tr');
-      tr.innerHTML = '<td class="rn">' + (ri + 1) + '</td>' + b.columns.map((_, ci) => '<td><input data-r="' + ri + '" data-c="' + ci + '"></td>').join('') +
-        '<td class="rt"><button type="button" class="ghost" data-rup="' + ri + '" title="Move up">' + icon('up') + '</button><button type="button" class="ghost" data-rdel="' + ri + '" title="Remove row">' + icon('x') + '</button></td>';
-      tb.appendChild(tr);
-      tr.querySelectorAll('input[data-r]').forEach((f) => f.addEventListener('input', () => {
-        b.rows[Number(f.dataset.r)][Number(f.dataset.c)] = f.value; dirty();
-        if (Number(f.dataset.r) === b.rows.length - 1 && f.value) { b.rows.push(b.columns.map(() => '')); appendRow(); }
-      }));
-      tr.querySelector('[data-rdel]').addEventListener('click', () => { b.rows.splice(ri, 1); dirty(); paint(); });
-      tr.querySelector('[data-rup]').addEventListener('click', () => { [b.rows[ri - 1], b.rows[ri]] = [b.rows[ri], b.rows[ri - 1]]; dirty(); paint(); });
-    }
     function pasteRows() {
       modal('<h3>Paste rows</h3><p>Copy rows from Excel, Numbers or Google Sheets and paste them here. Columns are matched left to right: ' + esc(b.columns.join(', ')) + '.</p>' +
         '<textarea id="pr" rows="8" style="font:13px ui-monospace,monospace" placeholder="1\tPastor lav\tSLX-D\t\tSB1-1"></textarea><label class="tog" style="margin-top:10px"><input type="checkbox" id="ph"> The first row is column names</label>' +
@@ -599,6 +606,87 @@ const Blk = (() => {
         });
       });
     }
+    /** Change gear every row shares (the stage box, link or console) in one go. */
+    function sharedDialog(L) {
+      modal('<h3>Every row</h3><p>These are the same on every row, so they are shown once above the table. A change here applies to all rows.</p><form id="shf">' +
+        L.shared.map((x) => '<label for="sh' + x.ci + '">' + esc(x.name) + '</label><input id="sh' + x.ci + '" data-ci="' + x.ci + '" value="' + esc(x.value) + '">').join('') +
+        '<div class="acts"><button type="button" data-close>Cancel</button><button class="primary">Save</button></div></form>', (w, close) => {
+        w.querySelector('#shf').addEventListener('submit', (e) => {
+          e.preventDefault();
+          w.querySelectorAll('[data-ci]').forEach((x) => {
+            const ci = Number(x.dataset.ci), v = x.value.trim();
+            if (!v) return;
+            b.rows.forEach((r) => { if (r.some((c) => String(c || '').trim())) r[ci] = v; });
+          });
+          close(); dirty(); paint();
+        });
+      });
+    }
+
+    /** The ⋯ menu on a row. */
+    function rowMenu(ri, anchor) {
+      document.querySelectorAll('.rmenu').forEach((m) => m.remove());
+      const m = document.createElement('div');
+      m.className = 'rmenu';
+      const endCol = traceCols(b)[traceCols(b).length - 1];
+      const items = [['dup', 'Duplicate (double patch)'], isSnake() ? ['spare', 'Make spare'] : ['ins', 'Insert row below'], ['up', 'Move up'], ['down', 'Move down'], ['del', 'Delete row']];
+      m.innerHTML = items.map((x) => '<button type="button" data-a="' + x[0] + '"' + ((x[0] === 'up' && !ri) || (x[0] === 'down' && ri >= b.rows.length - 2) ? ' disabled' : '') + (x[0] === 'del' ? ' class="danger"' : '') + '>' + x[1] + '</button>').join('');
+      document.body.appendChild(m);
+      const r = anchor.getBoundingClientRect();
+      m.style.top = (r.bottom + window.scrollY + 4) + 'px';
+      m.style.left = Math.max(8, Math.min(window.innerWidth - m.offsetWidth - 8, r.right - m.offsetWidth)) + 'px';
+      const off = (e) => { if (!m.contains(e.target) && e.target !== anchor) { m.remove(); document.removeEventListener('pointerdown', off, true); } };
+      setTimeout(() => document.addEventListener('pointerdown', off, true), 0);
+      m.addEventListener('click', (e) => {
+        const a = e.target.closest('button'); if (!a) return;
+        m.remove(); document.removeEventListener('pointerdown', off, true);
+        const row = b.rows[ri];
+        if (a.dataset.a === 'dup') {
+          const copy = row.slice();
+          if (endCol !== undefined) copy[endCol] = '';
+          b.rows.splice(ri + 1, 0, copy); dirty(); paint({ r: ri + 1, c: String(endCol !== undefined ? endCol : 0) });
+          toast('Copied. Type where the second copy goes' + (endCol !== undefined ? ' (' + b.columns[endCol] + ')' : '') + '.');
+        } else if (a.dataset.a === 'spare') { (b.assign || []).forEach((ci) => { row[ci] = ''; }); dirty(); paint(); }
+        else if (a.dataset.a === 'ins') { b.rows.splice(ri + 1, 0, b.columns.map(() => '')); prefill(ri + 1); dirty(); paint({ r: ri + 1, c: String(tableLayout(b).vis[0]) }); }
+        else if (a.dataset.a === 'up' && ri > 0) { [b.rows[ri - 1], b.rows[ri]] = [b.rows[ri], b.rows[ri - 1]]; dirty(); paint(); }
+        else if (a.dataset.a === 'down' && ri < b.rows.length - 1) { [b.rows[ri + 1], b.rows[ri]] = [b.rows[ri], b.rows[ri + 1]]; dirty(); paint(); }
+        else if (a.dataset.a === 'del') { b.rows.splice(ri, 1); dirty(); paint(); }
+      });
+    }
+
+    /** Rename, add and remove columns (kept out of the table so the table stays clean). */
+    function columnsDialog() {
+      const roleName = { box: 'Box', shared: 'Shared gear', label: 'Label on line' };
+      modal('<h3>Columns</h3><p>Rename, add or remove columns. How each column draws is set under Trace path.</p><div id="cl" class="tlist"></div>' +
+        '<div class="acts" style="justify-content:space-between"><button type="button" class="btn" id="cadd">' + icon('plus') + 'Add column</button><button type="button" class="primary" data-close>Done</button></div>', (w) => {
+        const cl = w.querySelector('#cl');
+        const draw = () => {
+          cl.innerHTML = b.columns.map((c, ci) => '<div class="tli"><input data-cn="' + ci + '" value="' + esc(c) + '" style="flex:1">' +
+            '<span class="note" style="min-width:90px;text-align:right">' + (traceCols(b).includes(ci) ? roleName[roleOf(b, ci)] : 'Not traced') + '</span>' +
+            '<button type="button" class="ghost danger" data-cx="' + ci + '" title="Remove">' + icon('x') + '</button></div>').join('');
+          cl.querySelectorAll('[data-cn]').forEach((x) => x.addEventListener('input', () => { b.columns[Number(x.dataset.cn)] = x.value; dirty(); }));
+          cl.querySelectorAll('[data-cx]').forEach((x) => x.addEventListener('click', async () => {
+            const ci = Number(x.dataset.cx);
+            if (b.columns.length <= 1) return toast('A patch list needs at least one column');
+            if (b.rows.some((r) => String(r[ci] || '').trim()) && !await confirmBox('Remove the ' + (b.columns[ci] || 'column') + ' column?', 'Everything typed in it is removed too.', 'Remove', true)) return;
+            b.columns.splice(ci, 1); b.rows.forEach((r) => r.splice(ci, 1));
+            b.trace = b.trace.filter((i) => i !== ci).map((i) => i > ci ? i - 1 : i);
+            const nr = {}; Object.entries(b.roles || {}).forEach(([k, v]) => { const n = Number(k); if (n !== ci) nr[n > ci ? n - 1 : n] = v; }); b.roles = nr;
+            b.assign = (b.assign || []).filter((i) => i !== ci).map((i) => i > ci ? i - 1 : i);
+            b.ok = [];
+            dirty(); draw(); paint();
+          }));
+        };
+        draw();
+        w.querySelector('#cadd').addEventListener('click', () => {
+          if (b.columns.length >= 12) return toast('A patch list can have up to 12 columns');
+          b.columns.push('Column ' + (b.columns.length + 1)); b.rows.forEach((r) => r.push('')); dirty(); draw(); paint();
+          const ins = cl.querySelectorAll('[data-cn]'); ins[ins.length - 1].select();
+        });
+        w.addEventListener('click', (e) => { if (e.target.closest('[data-close]')) paint(); });
+      });
+    }
+
     /** A new row copies gear that every row shares (stage box, link, console) so you only type what changes. */
     function prefill(ri) {
       const r = b.rows[ri];

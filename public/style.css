@@ -397,6 +397,33 @@ code a.dev, .mono a.dev { text-decoration-style:dotted; }
 .implist { display:flex; flex-direction:column; gap:6px; max-height:50vh; overflow:auto; }
 .implist .tog { align-items:flex-start; }
 
+/* ===== patch table ===== */
+.pshared { display:flex; flex-wrap:wrap; gap:6px; align-items:center; margin:2px 0 8px; font-size:13px; }
+.pshared .chip { font-weight:500; color:var(--dim); } .pshared .chip b { color:var(--fg); font-weight:700; }
+.pshared button { padding:3px 10px; font-size:12.5px; }
+table.pgrid { border-spacing:0; width:100%; }
+table.pgrid th { font-size:10.5px; letter-spacing:.08em; text-transform:uppercase; color:var(--dim); font-weight:700; padding:0 4px 6px; text-align:left; white-space:nowrap; }
+table.pgrid td { padding:1px 2px; }
+table.pgrid input { min-width:120px; height:32px; padding:4px 8px; border-radius:6px; background:transparent; border:1px solid transparent; }
+table.pgrid tr:hover input { background:color-mix(in srgb, var(--inset) 60%, transparent); }
+table.pgrid input:focus { background:var(--inset); border-color:var(--acc); outline:none; }
+table.pgrid td.nw input, table.pgrid th.nw { min-width:0; width:64px; }
+table.pgrid td.nw input { text-align:center; font-variant-numeric:tabular-nums; }
+table.pgrid tbody tr { border-bottom:1px solid var(--line); }
+table.pgrid tbody td { border-bottom:1px solid color-mix(in srgb, var(--line) 70%, transparent); }
+table.pgrid tr.spare input { color:var(--dim); }
+table.pgrid tr.spare input::placeholder { color:var(--faint); font-style:italic; }
+table.pgrid.nospare tr.spare { display:none; }
+table.pgrid .rt { width:34px; }
+.rmb { padding:2px 8px; font-size:18px; line-height:1; color:var(--faint); background:transparent; }
+.rmb:hover { color:var(--fg); }
+.rmenu { position:absolute; z-index:85; background:var(--card); border:1px solid var(--line); border-radius:10px; box-shadow:0 10px 30px var(--shadow); padding:4px; display:flex; flex-direction:column; min-width:200px; }
+.rmenu button { text-align:left; background:transparent; padding:8px 10px; border-radius:6px; font-weight:500; }
+.rmenu button:hover { background:var(--card2); }
+.rmenu button.danger { color:var(--bad); }
+table.grid th.nw { width:56px; }
+.blockbox .pshared { margin:0 0 6px; }
+
 /* ===== spare stage box inputs ===== */
 .patch tr.spare { display:none; }
 .patch.showspare tr.spare { display:table-row; opacity:.55; }

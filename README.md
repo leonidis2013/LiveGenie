@@ -4,7 +4,7 @@
 
 The Rolling Hills Community Church AVL knowledge base: one web app where volunteers find how our system works, how to run a service and how to fix what broke. Part of the Live series (LiveMic, LiveCompanion, LivePi, LiveVoice).
 
-Version 0.7.0 · © 2026 Jerod Ulicki
+Version 0.8.0 · © 2026 Jerod Ulicki
 
 ## What it does
 
@@ -14,7 +14,7 @@ Version 0.7.0 · © 2026 Jerod Ulicki
 - **Auto reset and done-by times.** Give a checklist reset times, such as "Sundays at 6:00 AM, done by 9:15 AM" or "Wednesdays at 5:00 PM". At each reset it starts empty.
 - **To do list.** From its reset until the end of that day, a scheduled checklist sits at the top of the home page with its progress and due time. It turns red once the done-by time passes with steps left, and finished ones stay as green Done until the day ends. The header shows how many are open or overdue.
 - **Overdue notices.** Optional: LiveGenie posts each overdue checklist once to a webhook, for example a Home Assistant automation that sends it to your phone (Settings › Notifications has the automation to paste).
-- **Patch lists and cable runs.** Spreadsheet-style grids with ready-made layouts (Input patch, Output patch, Cable runs, or your own columns). Paste rows from a spreadsheet; Enter moves down a row.
+- **Patch lists and cable runs.** Clean, spreadsheet-style grids with ready-made layouts (Input patch, Output patch, Cable runs, or your own columns). Columns that are the same on every row (the stage box, the link, the console) fold into one **Every row** line above the table, number columns stay narrow, and names autocomplete from the list and the device library. Each row has a **⋯** menu: Duplicate (for a double patch), Insert below, Make spare, Move, Delete. Spare rows hide behind **Show N spare**; rename, add or remove columns in **Columns**. Paste rows from a spreadsheet; typing in the last row adds the next one.
 - **Guided equipment setup.** Devices › Guided setup walks through the console (SQ-5, SQ-6, SQ-7, X32, M32, TF5 or your own), the stage boxes (AR2412, AR84, AB168, DX168, S16, S32, DL16, DL32, Tio1608-D or your own: inputs, outputs, link, first console input) and the rest of the gear (wireless, processor, amps, speakers, in-ears). It creates the device cards with input and output counts and a **Stage patch** page with a Snake inputs and a Snake outputs list for each stage box, plus a starting Main PA cable run list.
 - **Stage boxes and digital snakes.** The **Snake inputs** layout starts with **Set up stage box inputs**: pick the box, its number of inputs, the link (SLink, AES50, Dante, Cat5) and the console, and it makes one row per stage box input already wired to a console input. Then assign a source and mic to each input, by typing or by drawing a source onto the stage box (it takes the next free input). Unassigned inputs stay as spares and fold away on the page. **Snake outputs** works the same way for the box's outputs: assign the mix and where each output goes. The trace draws the stage box with numbered sockets, one thick trunk for the link, and the console breaking out to its inputs.
 - **Column roles.** In Trace path each column is a **Box** (each name comes from one place, like a mic or a channel), **Shared gear** (many signals pass through it, like a stage box or console; never flagged as used twice) or a **Label on the line** (a stage box input number, a link). Ports on shared gear are checked: two sources on AR2412 input 3 is a clash; one source on two console inputs is a double patch. Changing layout keeps columns with the same name.
@@ -94,7 +94,8 @@ Run it on the TrueNAS host and reach it from the AVL and office VLANs through th
 | 0.4.0 | System map (signal flow and network), VLAN list, Plugged into on device cards |
 | 0.5.0 | Draw patch lists and cable runs by connecting boxes; drawing and table edit the same rows |
 | 0.6.0 | Names used twice: clashes highlighted, double patches recognised, Intended switch |
-| 0.7.0 | Guided equipment setup, stage box snake inputs/outputs with spares, column roles, port-aware checks, stage box and trunk drawing (this release) |
+| 0.7.0 | Guided equipment setup, stage box snake inputs/outputs with spares, column roles, port-aware checks, stage box and trunk drawing |
+| 0.8.0 | Cleaner patch table: Every row line, narrow number columns, row ⋯ menu, Columns dialog, autocomplete, hidden spares (this release) |
 | next | Document library, AI drafts from the Jetson, Bitfocus Companion buttons in checklists |
 | later | Document library, AI drafts from the Jetson with citations, review queue, Ask the Genie |
 | later | Bitfocus Companion buttons inside checklists |

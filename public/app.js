@@ -457,7 +457,7 @@ const BLOCK_LABELS = { text: 'Text', callout: 'Callout', checklist: 'Checklist',
 const newBlock = (t, preset) => ({
   text: { type: 'text', md: '' }, callout: { type: 'callout', kind: 'tip', md: '' }, checklist: { type: 'checklist', title: '', items: [], schedule: [] },
   patch: { type: 'patch', title: '', preset: preset || 'input', columns: Blk.PRESETS[preset || 'input'].columns.slice(), rows: [], trace: Blk.PRESETS[preset || 'input'].trace.slice(),
-    roles: { ...(Blk.PRESETS[preset || 'input'].roles || {}) }, assign: (Blk.PRESETS[preset || 'input'].assign || []).slice(), _setup: preset === 'snake' || preset === 'snakeout' },
+    roles: { ...(Blk.PRESETS[preset || 'input'].roles || {}) }, assign: (Blk.PRESETS[preset || 'input'].assign || []).slice(), _setup: ['snake', 'snakeout', 'wireless', 'iem'].includes(preset) },
   iplist: { type: 'iplist', title: '', net: { name: '', vlan: '', cidr: '', gateway: '' }, rows: [] },
   image: { type: 'image', upload: '', caption: '' }, divider: { type: 'divider' }
 }[t]);
@@ -466,7 +466,7 @@ const newBlock = (t, preset) => ({
 function pickPreset() {
   return new Promise((resolve) => {
     const P = Blk.PRESETS;
-    const desc = { snake: 'Set up a stage box (like an AR2412 over SLink), then assign a source to each input', snakeout: 'Stage box outputs fed from the console: assign a mix and destination to each', input: 'Mics and DIs straight into the desk', output: 'Desk outputs to speakers, IEMs, stream', cable: 'Cable labels, from, to, length and route', custom: 'Your own columns' };
+    const desc = { snake: 'Set up a stage box (like an AR2412 over SLink), then assign a source to each input', snakeout: 'Stage box outputs fed from the console: assign a mix and destination to each', wireless: 'Add a receiver, then each channel: who uses it, capsule, transmitter and frequency', iem: 'In-ear transmitters (mono or stereo) fed from the console, with bodypacks and who wears them', input: 'Mics and DIs straight into the desk', output: 'Desk outputs to speakers, IEMs, stream', cable: 'Cable labels, from, to, length and route', custom: 'Your own columns' };
     let picked = null;
     modal('<h3>Add a patch list</h3><p>Pick a starting layout. You can rename or add columns later.</p><div class="plist">' +
       Object.keys(P).map((k) => '<button type="button" class="pchoice" data-k="' + k + '"><b>' + P[k].title + '</b><span>' + desc[k] + '</span><em>' + esc(P[k].columns.join(' · ')) + '</em></button>').join('') +

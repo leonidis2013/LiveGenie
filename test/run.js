@@ -433,6 +433,54 @@ test('stage box snake lists: roles, spares, I/O counts on devices, map skips por
   assert.ok(sig.some((l) => l.from === ar && l.to === sq), 'AR2412 → SQ-5 over the link (the SLink label is not a box)');
 });
 
+test('wireless mics and in-ears: layouts saved, frequency and port checks, dashed radio hop', async () => {
+  // the server keeps the new layouts and the "rf" (wireless link) role
+  const W = [
+    ['9', 'Pastor', 'TL47', 'SLX-D1 #1', '524.125', 'SLX-D4D', '1', 'AR2412', '9', 'SQ-5', ''],
+    ['10', 'Host', 'Beta 58A', 'SLX-D2 #1', '524.125 MHz', 'SLX-D4D', '2', 'AR2412', '10', 'SQ-5', ''],
+    ['11', 'Worship lead', 'Beta 58A', 'SLX-D2 #2', '530.500', 'SLX-D4D #2', '1', 'AR2412', '11', 'SQ-5', ''],
+    ['12', '', '', '', '', 'SLX-D4D #2', '2', 'AR2412', '12', 'SQ-5', '']
+  ];
+  const I = [
+    ['IEM 1', 'SQ-5', '5/6', '', '', 'PSM300', 'Stereo', '518.200', 'P3R #1', 'SE215', 'Keys', ''],
+    ['IEM 1', 'SQ-5', '5/6', '', '', 'PSM300', 'Stereo', '518.200', 'P3R #2', 'SE215', 'Bass', ''],
+    ['IEM 2', 'SQ-5', '7', '', '', 'PSM300 #2', 'Mono', '519.000', 'P3R #3', '', 'Drums', '']
+  ];
+  let r = await editor.post('/api/pages', { title: 'RF test', space: 'audio', blocks: [{ type: 'patch', preset: 'wireless', rows: W }, { type: 'patch', preset: 'iem', rows: I }] });
+  assert.strictEqual(r.status, 200);
+  const [wb, ib] = (await editor.get('/api/pages/' + r.data.id)).data.page.blocks;
+  assert.strictEqual(wb.preset, 'wireless');
+  assert.strictEqual(wb.roles[4], 'rf', 'Frequency is a wireless link');
+  assert.strictEqual(ib.roles[7], 'rf');
+  assert.deepStrictEqual(ib.assign, [0, 10]);
+  r = await editor.post('/api/pages', { title: 'Role check', space: 'audio', blocks: [{ type: 'patch', preset: 'custom', rows: [['a', 'b', 'c']], trace: [0, 1, 2], roles: { 1: 'rf', 2: 'bogus' } }] });
+  assert.deepStrictEqual((await editor.get('/api/pages/' + r.data.id)).data.page.blocks[0].roles, { 1: 'rf' }, 'unknown roles dropped');
+
+  // the browser-side checks, run here in a sandbox
+  const vm = require('vm');
+  const ctx = { esc: (x) => String(x), inline: (x) => String(x), icon: () => '', console };
+  vm.createContext(ctx);
+  vm.runInContext(fs.readFileSync(path.join(ROOT, 'public', 'blocks.js'), 'utf8') + '\nthis.Blk = Blk;', ctx);
+  const Blk = ctx.Blk;
+  let d = Blk.dupInfo(wb);
+  const freq = d.groups.find((g) => g.ci === 4);
+  assert.ok(freq && freq.kind === 'clash' && freq.rows.join() === '0,1', 'two transmitters on 524.125 (written two ways) clash, across receivers');
+  assert.ok(!d.groups.some((g) => g.ci === 2), 'the same capsule model on two handhelds is not a clash');
+  assert.ok(!d.groups.some((g) => g.ci === 6), 'Rx ch 1 on two different receivers is fine');
+  wb.rows[2][5] = 'SLX-D4D'; wb.rows[2][6] = '1';
+  d = Blk.dupInfo(wb);
+  assert.ok(d.groups.some((g) => g.ci === 6 && g.kind === 'clash'), 'two transmitters on channel 1 of one receiver clash');
+  d = Blk.dupInfo(ib);
+  assert.strictEqual(d.clashes, 0, 'two bodypacks on one stereo transmitter are not a clash');
+  assert.ok(d.groups.some((g) => g.ci === 5 && g.kind === 'double'), 'shared transmitter shows as one mix to several people');
+  ib.rows[2][7] = '518.2';
+  assert.ok(Blk.dupInfo(ib).groups.some((g) => g.ci === 7 && g.kind === 'clash'), 'a second transmitter on 518.200 clashes');
+  const svg = Blk.traceSvg(wb);
+  assert.ok(/class="te rf"/.test(svg) && svg.includes('⌁ 524.125'), 'the radio hop is dashed and carries the frequency');
+  assert.ok(Blk.chainText(ib, 0).includes('(⌁ 518.200)'), 'chain text shows the frequency');
+  assert.ok(Blk.RF_GEAR.receivers.find((g) => g.name === 'SLX-D4D').ch === 2);
+});
+
 test('backup, then restore brings the data back after a restart', async () => {
   let r = await admin.post('/api/backups/now');
   assert.strictEqual(r.status, 200);

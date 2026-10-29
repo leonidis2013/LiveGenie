@@ -13,9 +13,24 @@ const Blk = (() => {
     input: { title: 'Input patch', columns: ['Ch', 'Source', 'Mic / DI', 'Stand', 'Stage box', 'Notes'], trace: [1, 2, 4, 0] },
     snake: { title: 'Snake inputs', columns: ['Input', 'Source', 'Mic / DI', 'Stage box', 'Box input', 'Link', 'Console', 'Notes'], trace: [1, 2, 4, 3, 5, 6, 0], roles: { 3: 'shared', 4: 'label', 5: 'label', 6: 'shared' }, assign: [1, 2] },
     snakeout: { title: 'Snake outputs', columns: ['Mix', 'Console', 'Link', 'Stage box', 'Box output', 'Destination', 'Notes'], trace: [0, 1, 2, 3, 4, 5], roles: { 1: 'shared', 2: 'label', 3: 'shared', 4: 'label' }, assign: [0, 5] },
+    wireless: { title: 'Wireless mics', columns: ['Input', 'Person / use', 'Capsule', 'Transmitter', 'Frequency', 'Receiver', 'Rx ch', 'Stage box', 'Box input', 'Console', 'Notes'], trace: [1, 2, 3, 4, 6, 5, 8, 7, 9, 0], roles: { 2: 'label', 4: 'rf', 5: 'shared', 6: 'label', 7: 'shared', 8: 'label', 9: 'shared' }, assign: [1, 2, 3] },
+    iem: { title: 'In-ears', columns: ['Mix', 'Console', 'Console out', 'Stage box', 'Box output', 'Transmitter', 'Mode', 'Frequency', 'Bodypack', 'Earphones', 'Person', 'Notes'], trace: [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10], roles: { 1: 'shared', 2: 'label', 3: 'shared', 4: 'label', 6: 'label', 7: 'rf', 9: 'label' }, assign: [0, 10] },
     output: { title: 'Output patch', columns: ['Out', 'Destination', 'Type', 'Notes'], trace: [0, 1] },
     cable: { title: 'Cable runs', columns: ['Label', 'From', 'To', 'Type', 'Length', 'Route'], trace: [1, 0, 2] },
     custom: { title: 'Patch list', columns: ['Column 1', 'Column 2', 'Column 3'], trace: [0, 1, 2] }
+  };
+  /** Wireless receivers (channels per unit) and in-ear transmitters (transmitters per unit), for the setup dialogs and the guided setup. */
+  const RF_GEAR = {
+    receivers: [
+      { name: 'SLX-D4D', make: 'Shure', model: 'SLX-D4D', ch: 2 }, { name: 'SLX-D4', make: 'Shure', model: 'SLX-D4', ch: 1 },
+      { name: 'ULX-D4D', make: 'Shure', model: 'ULX-D4D', ch: 2 }, { name: 'ULX-D4Q', make: 'Shure', model: 'ULX-D4Q', ch: 4 },
+      { name: 'QLXD4', make: 'Shure', model: 'QLXD4', ch: 1 }, { name: 'AD4D', make: 'Shure', model: 'AD4D', ch: 2 }, { name: 'AD4Q', make: 'Shure', model: 'AD4Q', ch: 4 },
+      { name: 'EW-D EM', make: 'Sennheiser', model: 'EW-D EM', ch: 1 }, { name: 'EW-DX EM 2', make: 'Sennheiser', model: 'EW-DX EM 2', ch: 2 }, { name: 'EW-DX EM 4', make: 'Sennheiser', model: 'EW-DX EM 4', ch: 4 }
+    ],
+    iem: [
+      { name: 'PSM300', make: 'Shure', model: 'P3T', tx: 1 }, { name: 'PSM900', make: 'Shure', model: 'P9T', tx: 1 }, { name: 'PSM1000', make: 'Shure', model: 'P10T', tx: 2 },
+      { name: 'EW IEM G4', make: 'Sennheiser', model: 'SR IEM G4', tx: 1 }, { name: 'Phenyx Pro PTM-10', make: 'Phenyx Pro', model: 'PTM-10', tx: 1 }
+    ]
   };
   const IP_FIELDS = [['ip', 'IP address'], ['device', 'Device'], ['mac', 'MAC'], ['location', 'Location'], ['notes', 'Notes']];
 
@@ -173,7 +188,9 @@ const Blk = (() => {
   // ---- column roles: box (default), shared (stage box, console), label (port or link on the line) ----
   const roleOf = (b, ci) => (b.roles && b.roles[ci]) || 'box';
   const traceCols = (b) => (b.trace || []).filter((i) => i < b.columns.length);
-  const laneCols = (b) => traceCols(b).filter((ci) => roleOf(b, ci) !== 'label');
+  // 'rf' is a label too (a wireless frequency): written on a dashed line and checked across the whole list
+  const onLine = (b, ci) => { const r = roleOf(b, ci); return r === 'label' || r === 'rf'; };
+  const laneCols = (b) => traceCols(b).filter((ci) => !onLine(b, ci));
   const keyOf = (v) => String(v || '').trim().toLowerCase();
   /** A spare stage-box input or output: nothing assigned to it yet. */
   function isSpare(b, r) {
@@ -184,8 +201,23 @@ const Blk = (() => {
   function labelsBetween(b, r, ciA, ciZ) {
     const t = traceCols(b);
     const pa = t.indexOf(ciA), pz = t.indexOf(ciZ);
-    return t.slice(pa + 1, pz).filter((ci) => roleOf(b, ci) === 'label').map((ci) => String(r[ci] || '').trim()).filter(Boolean);
+    return t.slice(pa + 1, pz).filter((ci) => onLine(b, ci)).map((ci) => String(r[ci] || '').trim()).filter(Boolean);
   }
+  /** True when the line between two lanes is a wireless hop (a frequency is filled in, or the transmitter-receiver gap). */
+  function rfBetween(b, r, ciA, ciZ) {
+    const t = traceCols(b);
+    return t.slice(t.indexOf(ciA) + 1, t.indexOf(ciZ)).some((ci) => roleOf(b, ci) === 'rf');
+  }
+  /** The frequency (or frequencies) written on a wireless hop, and the other labels (ports) on it. */
+  function splitRf(b, r, ciA, ciZ) {
+    const t = traceCols(b), between = t.slice(t.indexOf(ciA) + 1, t.indexOf(ciZ));
+    const val = (ci) => String(r[ci] || '').trim();
+    const lab = between.filter((ci) => roleOf(b, ci) === 'label' && val(ci));
+    return { freq: between.filter((ci) => roleOf(b, ci) === 'rf').map(val).filter(Boolean).join(' · '), ports: lab.map(val).join(' · '),
+      named: lab.map((ci) => (isNum(val(ci)) ? b.columns[ci] + ' ' : '') + val(ci)).join(' · ') };
+  }
+  /** A frequency as a comparable key: "524.125 MHz", "524.125" and "524.1250" are the same. */
+  const freqKey = (v) => { const m = /(\d+(?:\.\d+)?)/.exec(String(v || '')); return m ? String(Number(m[1])) : keyOf(v); };
 
   /*
    * Names used more than once in a patch list.
@@ -207,19 +239,21 @@ const Blk = (() => {
     else t.forEach((ci, p) => {
       const role = roleOf(b, ci);
       if (role === 'box') check.push({ ci, up: upstream(p) });
+      // a wireless frequency: two different transmitters on one frequency clash, whichever receiver they are on
+      if (role === 'rf') check.push({ ci, up: upstream(p), rf: true });
       if (role === 'label') {
         // a port: a label right before a shared box, coming from a normal box (or nothing)
-        const next = t.slice(p + 1).find((x) => roleOf(b, x) !== 'label');
-        const prev = t.slice(0, p).reverse().find((x) => roleOf(b, x) !== 'label');
+        const next = t.slice(p + 1).find((x) => !onLine(b, x));
+        const prev = t.slice(0, p).reverse().find((x) => !onLine(b, x));
         if (next !== undefined && roleOf(b, next) === 'shared' && (prev === undefined || roleOf(b, prev) !== 'shared')) check.push({ ci, up: upstream(p), on: next });
-        else if (prev !== undefined && roleOf(b, prev) === 'shared' && (next === undefined || roleOf(b, next) !== 'shared')) check.push({ ci, up: upstream(p), on: prev, out: true });
+        else if (prev !== undefined && roleOf(b, prev) === 'shared' && (next === undefined || roleOf(b, next) !== 'shared')) check.push({ ci, up: upstream(p), on: prev, out: true, down: next });
       }
     });
-    for (const { ci, up, on, cable, out } of check) {
+    for (const { ci, up, on, cable, out, down, rf } of check) {
       const by = new Map();
       b.rows.forEach((r, ri) => {
         if (isSpare(b, r)) return;
-        const k = keyOf(r[ci]);
+        const k = rf ? (String(r[ci] || '').trim() ? freqKey(r[ci]) : '') : keyOf(r[ci]);
         if (!k) return;
         const kk = on === undefined ? k : k + '@' + keyOf(r[on]);
         if (!by.has(kk)) by.set(kk, []);
@@ -227,7 +261,10 @@ const Blk = (() => {
       });
       for (const [k, rows] of by) {
         if (rows.length < 2) continue;
-        let fanOut = !cable && !out;      // one output socket feeding two destinations is a clash, not a double patch
+        // one output socket feeding two destinations is a clash, not a double patch;
+        // the same socket to the same place on several rows (two bodypacks on one IEM transmitter) is one cable
+        const sameDown = out && down !== undefined && new Set(rows.map((ri) => keyOf(b.rows[ri][down]))).size === 1 && keyOf(b.rows[rows[0]][down]);
+        let fanOut = !cable && (!out || !!sameDown);
         if (fanOut) for (const u of up) { if (new Set(rows.map((ri) => keyOf(b.rows[ri][u])).filter(Boolean)).size > 1) { fanOut = false; break; } }
         const okKey = ci + ':' + k;
         const kind = fanOut ? 'double' : okSet.has(okKey) ? 'ok' : 'clash';
@@ -236,12 +273,15 @@ const Blk = (() => {
         groups.push({ kind, ci, key: k, label: String(r0[ci]).trim() + (on !== undefined ? ' on ' + String(r0[on]).trim() : ''), rows });
       }
     }
-    return { cells, groups, clashes: groups.filter((g) => g.kind === 'clash').length, doubles: groups.filter((g) => g.kind === 'double').length };
+    // a double patch shows up in several columns (mix, transmitter, frequency): count it once per set of rows
+    const doubles = new Set(groups.filter((g) => g.kind === 'double').map((g) => g.rows.join(','))).size;
+    return { cells, groups, clashes: groups.filter((g) => g.kind === 'clash').length, doubles };
   }
   const dupTitle = (d, b) => {
     const others = d.rows.map((r) => r + 1).join(', ');
     return d.kind === 'double' ? 'Double patch: same source on rows ' + others
       : d.kind === 'ok' ? 'Used on rows ' + others + ' (marked as intended)'
+      : roleOf(b, d.ci) === 'rf' ? 'Same frequency on rows ' + others + ' for different transmitters. They will interfere: give one a new frequency, or mark it as intended.'
       : 'Used on rows ' + others + ' by different ' + (b.preset === 'cable' ? 'cables' : 'sources') + '. Rename one, or mark it as intended.';
   };
 
@@ -252,10 +292,13 @@ const Blk = (() => {
    * pieces of shared gear are bundled into one thick trunk (the SLink or Cat5 run).
    */
   function traceSvg(b) {
-    const lanes = laneCols(b);
+    // lanes nobody uses (no stage box on an in-ear list) are left out of the drawing
+    const used = b.rows.filter((r) => !isSpare(b, r));
+    const lanes = laneCols(b).filter((ci) => !used.length || used.some((r) => String(r[ci] || '').trim()));
     if (lanes.length < 2) return '';
     const dups = dupInfo(b);
-    const colW = 150, gapX = 70, padX = 8, top = 46, nodeH = 32, gapY = 12, slot = 18;
+    const hasRf = traceCols(b).some((ci) => roleOf(b, ci) === 'rf');
+    const colW = 150, gapX = hasRf ? 124 : 70, padX = 8, top = 46, nodeH = 32, gapY = 12, slot = 18;
     const nodes = lanes.map(() => new Map());
     const bundles = new Map();
     b.rows.forEach((row, ri) => {
@@ -278,7 +321,13 @@ const Blk = (() => {
         const [k1, a, c1] = pts[j - 1], [k2, z, c2] = pts[j];
         const label = labelsBetween(b, row, c1, c2).join(' · ');
         const id = k1 + ':' + keyOf(a.label) + '>' + k2 + ':' + keyOf(z.label) + '|' + keyOf(label);   // the same wire on several rows (a double patch) is drawn once
-        if (!bundles.has(id)) { const e = { a, z, label, rows: [] }; bundles.set(id, e); a.outs.push(e); z.ins.push(e); }
+        if (!bundles.has(id)) {
+          const rf = rfBetween(b, row, c1, c2), sp = rf ? splitRf(b, row, c1, c2) : null;
+          const t = traceCols(b), rfCi = rf ? t.slice(t.indexOf(c1) + 1, t.indexOf(c2)).find((ci) => roleOf(b, ci) === 'rf') : undefined;
+          const fd = rfCi !== undefined ? dups.cells.get(ri + ':' + rfCi) : null;
+          const e = { a, z, label, rows: [], rf, freq: sp ? sp.freq : '', port: sp ? sp.ports : label, named: sp ? sp.named : label, clash: !!fd && fd.kind === 'clash' };
+          bundles.set(id, e); a.outs.push(e); z.ins.push(e);
+        }
         bundles.get(id).rows.push(ri);
       }
     });
@@ -303,15 +352,24 @@ const Blk = (() => {
     const H = Math.max(...allNodes.map((l) => (l.length ? l[l.length - 1].y + l[l.length - 1].h : top))) + 10;
     const cut = (s, n) => (s.length > n ? s.slice(0, n - 1) + '…' : s);
     let edges = '', socks = '';
+    const rfSeen = new Set();
     bundles.forEach((e) => {
       const x1 = cx(e.a.k) + colW, y1 = sockY(e.a, e.a.outs, e), x2 = cx(e.z.k), y2 = sockY(e.z, e.z.ins, e), mx = (x2 - x1) / 2;
       const trunk = e.rows.length > 1 && e.a.shared && e.z.shared;
       const d = 'M' + x1 + ' ' + y1 + 'C' + (x1 + mx) + ' ' + y1 + ' ' + (x2 - mx) + ' ' + y2 + ' ' + x2 + ' ' + y2;
-      edges += '<path class="te' + (trunk ? ' trunk' : '') + '" data-r="' + e.rows.join(',') + '" d="' + d + '"' + (trunk ? ' style="stroke-width:' + Math.min(10, 3 + e.rows.length * 0.35) + 'px"' : '') + '/>';
-      if (trunk) edges += '<text class="tl" x="' + ((x1 + x2) / 2) + '" y="' + (((y1 + y2) / 2) - 8) + '" text-anchor="middle">' + esc(cut((e.label || 'Link') + ' · ' + e.rows.length + ' ch', 26)) + '</text>';
+      edges += '<path class="te' + (trunk ? ' trunk' : '') + (e.rf ? ' rf' : '') + (e.clash ? ' bad' : '') + '" data-r="' + e.rows.join(',') + '" d="' + d + '"' + (trunk ? ' style="stroke-width:' + Math.min(10, 3 + e.rows.length * 0.35) + 'px"' : '') + '/>';
+      if (e.rf) {
+        // a radio hop: the frequency at the transmitter end of the dashed line (once, even when it feeds several bodypacks);
+        // a receiver channel goes on the receiver's socket, anything else (Stereo / Mono) rides along with the frequency
+        const onSock = e.port && e.z.shared && e.z.ins.length > 1;
+        const txt = [e.freq ? '⌁ ' + e.freq : '', onSock ? '' : e.named].filter(Boolean).join(' · ');
+        const seen = e.a.k + ':' + keyOf(e.a.label) + '|' + txt;
+        if (txt && !rfSeen.has(seen)) { rfSeen.add(seen); edges += '<text class="tl rft' + (e.clash ? ' bad' : '') + '" x="' + (x1 + 6) + '" y="' + (y1 - 6) + '">' + esc(cut(txt, 24)) + '</text>'; }
+        if (onSock) socks += '<text class="sock" x="' + (x2 + 7) + '" y="' + (y2 + 4) + '">' + esc(cut(e.port, 6)) + '</text>';
+      } else if (trunk) edges += '<text class="tl" x="' + ((x1 + x2) / 2) + '" y="' + (((y1 + y2) / 2) - 8) + '" text-anchor="middle">' + esc(cut((e.label || 'Link') + ' · ' + e.rows.length + ' ch', 26)) + '</text>';
       else if (e.label && e.z.shared && e.z.ins.length > 1) socks += '<text class="sock" x="' + (x2 + 7) + '" y="' + (y2 + 4) + '">' + esc(cut(e.label, 6)) + '</text>';
       else if (e.label && e.a.shared && e.a.outs.length > 1) socks += '<text class="sock" x="' + (x1 - 7) + '" y="' + (y1 + 4) + '" text-anchor="end">' + esc(cut(e.label, 6)) + '</text>';
-      else if (e.label) edges += '<text class="tl" x="' + (x2 - 6) + '" y="' + (y2 - 5) + '" text-anchor="end">' + esc(cut(e.label, 14)) + '</text>';
+      else if (e.label) edges += '<text class="tl" x="' + (x2 - 6) + '" y="' + (y2 - 5) + '" text-anchor="end">' + esc(cut(e.label, e.rf ? 22 : 14)) + '</text>';
     });
     let boxes = '';
     allNodes.flat().forEach((n) => {
@@ -333,6 +391,7 @@ const Blk = (() => {
     return traceCols(b).map((ci) => {
       const v = String(r[ci] || '').trim();
       if (!v) return null;
+      if (roleOf(b, ci) === 'rf') return '(⌁ ' + v + ')';
       if (roleOf(b, ci) === 'label') return '(' + (isNum(v) ? b.columns[ci].toLowerCase() + ' ' + v : v) + ')';
       return isNum(v) ? b.columns[ci] + ' ' + v : v;
     }).filter(Boolean).join(' → ').replace(/ → \(/g, ' (').replace(/\) → /g, ') → ');
@@ -347,11 +406,13 @@ const Blk = (() => {
     const same = (ci) => { const vals = new Set(filled.map((r) => String(r[ci] || '').trim())); return filled.length > 1 && vals.size === 1 && !vals.has(''); };
     const fold = b.columns.map((_, ci) => roleOf(b, ci) !== 'box' && same(ci));
     const vis = b.columns.map((_, ci) => ci).filter((ci) => !fold[ci]);
-    const narrow = b.columns.map((c, ci) => /^(#|ch|in|input|out|output|box input|box output|port|no\.?|length|stand)$/i.test(String(c).trim()) ||
+    const narrow = b.columns.map((c, ci) => /^(#|ch|in|input|out|output|box input|box output|console out|rx ch|mode|port|no\.?|length|stand)$/i.test(String(c).trim()) ||
       (filled.some((r) => String(r[ci] || '').trim()) && filled.every((r) => !String(r[ci] || '').trim() || /^\d+[a-z]?$/i.test(String(r[ci]).trim()))));
     const shared = b.columns.map((c, ci) => (fold[ci] ? { ci, name: c, value: String(filled[0][ci]).trim() } : null)).filter(Boolean);
     return { vis, narrow, shared };
   }
+
+  const spareWord = (b) => ({ snakeout: 'outputs', wireless: 'receiver channels', iem: 'in-ear rows' })[b.preset] || 'inputs';
 
   function patchView(b) {
     const title = b.title || (PRESETS[b.preset] || PRESETS.custom).title;
@@ -366,11 +427,11 @@ const Blk = (() => {
       ? (L.shared.length ? '<div class="pshared"><span class="note">Every row</span>' + L.shared.map((x) => '<span class="chip">' + esc(x.name) + ' <b>' + esc(x.value) + '</b></span>').join('') + '</div>' : '') +
         '<div class="tscroll"><table class="grid"><thead><tr>' + L.vis.map((ci) => '<th' + (L.narrow[ci] ? ' class="nw"' : '') + '>' + esc(b.columns[ci]) + '</th>').join('') + '</tr></thead><tbody>' +
         b.rows.map((r, ri) => '<tr data-r="' + ri + '"' + (isSpare(b, r) ? ' class="spare"' : '') + '>' + L.vis.map((ci) => cell(ri, ci, r[ci] || '')).join('') + '</tr>').join('') + '</tbody></table></div>' +
-        (b.rows.some((r) => isSpare(b, r)) ? '<button type="button" class="ghost sparebtn">' + b.rows.filter((r) => isSpare(b, r)).length + ' spare ' + (b.preset === 'snakeout' ? 'outputs' : 'inputs') + ' · show</button>' : '')
+        (b.rows.some((r) => isSpare(b, r)) ? '<button type="button" class="ghost sparebtn">' + b.rows.filter((r) => isSpare(b, r)).length + ' spare ' + spareWord(b) + ' · show</button>' : '')
       : '<div class="note">No rows yet.</div>';
     return '<div class="patch blockbox" data-pid="' + esc(b.id || '') + '"><div class="ph"><b>' + esc(title) + '</b><span class="note">' + b.rows.length + ' row' + (b.rows.length === 1 ? '' : 's') + '</span>' +
       (dups.clashes ? '<span class="chip warn" title="' + esc(dups.groups.filter((g) => g.kind === 'clash').map((g) => g.label).join(', ')) + '">' + dups.clashes + ' used twice</span>' : '') +
-      (dups.doubles ? '<span class="chip" title="' + esc(dups.groups.filter((g) => g.kind === 'double').map((g) => g.label).join(', ')) + '">' + dups.doubles + ' double patch' + (dups.doubles === 1 ? '' : 'es') + '</span>' : '') +
+      (dups.doubles ? '<span class="chip" title="' + esc(dups.groups.filter((g) => g.kind === 'double').map((g) => g.label).join(', ')) + '">' + dups.doubles + (b.preset === 'iem' ? ' shared mix' + (dups.doubles === 1 ? '' : 'es') : ' double patch' + (dups.doubles === 1 ? '' : 'es')) + '</span>' : '') +
       (svg && b.rows.length ? '<div class="seg pv"><button data-v="table" class="on">Table</button><button data-v="trace">Trace</button></div>' : '') + '</div>' +
       '<div class="pt">' + table + '</div>' +
       (svg && b.rows.length ? '<div class="ptr hide"><div class="tscroll">' + svg + '</div><div class="note trinfo">Tap a box or a line to follow it.</div></div>' : '') + '</div>';
@@ -474,11 +535,11 @@ const Blk = (() => {
     if (!Array.isArray(b.trace)) b.trace = (PRESETS[b.preset] || PRESETS.custom).trace.filter((i) => i < b.columns.length);
     if (!b.roles || typeof b.roles !== 'object') b.roles = { ...((PRESETS[b.preset] || {}).roles || {}) };
     if (!Array.isArray(b.assign)) b.assign = ((PRESETS[b.preset] || {}).assign || []).slice();
-    const isSnake = () => b.preset === 'snake' || b.preset === 'snakeout';
+    const isSnake = () => ['snake', 'snakeout', 'wireless', 'iem'].includes(b.preset);   // lists made from gear first, then assigned
     const ensureBlank = () => { if (!b.rows.length || b.rows[b.rows.length - 1].some((v) => String(v || '').trim())) b.rows.push(b.columns.map(() => '')); };
     const paint = (focus) => {
-      const traceTxt = b.trace.filter((i) => i < b.columns.length).map((i) => (roleOf(b, i) === 'label' ? '(' + (b.columns[i] || '?') + ')' : b.columns[i] || '?')).join(' → ') || 'not set';
-      const setupBtn = isSnake() ? '<button type="button" class="btn primary" data-setup>' + icon('grid') + (b.preset === 'snake' ? 'Set up stage box inputs' : 'Set up stage box outputs') + '</button>' : '';
+      const traceTxt = b.trace.filter((i) => i < b.columns.length).map((i) => (onLine(b, i) ? '(' + (b.columns[i] || '?') + ')' : b.columns[i] || '?')).join(' → ') || 'not set';
+      const setupBtn = isSnake() ? '<button type="button" class="btn primary" data-setup>' + icon('grid') + ({ snake: 'Set up stage box inputs', snakeout: 'Set up stage box outputs', wireless: 'Add a wireless receiver', iem: 'Add in-ear transmitters' })[b.preset] + '</button>' : '';
       const spare = b.rows.filter((r) => r.some((v) => String(v || '').trim()) && isSpare(b, r)).length;
       const top = '<div class="prow"><input class="full grow" data-f="title" placeholder="' + esc((PRESETS[b.preset] || PRESETS.custom).title) + '" value="' + esc(b.title || '') + '">' +
         '<select data-preset aria-label="Layout">' + Object.keys(PRESETS).map((k) => '<option value="' + k + '"' + (k === b.preset ? ' selected' : '') + '>' + PRESETS[k].title + ' layout</option>').join('') + '</select>' +
@@ -499,7 +560,7 @@ const Blk = (() => {
       const dl = (ci) => 'pdl-' + (b.id || 'new') + '-' + ci;
       const lists = L.vis.map((ci) => {
         const vals = new Set(b.rows.map((r) => String(r[ci] || '').trim()).filter(Boolean));
-        if (roleOf(b, ci) !== 'label' && !L.narrow[ci]) devNames.forEach((n) => vals.add(n));
+        if (!onLine(b, ci) && !L.narrow[ci]) devNames.forEach((n) => vals.add(n));
         return '<datalist id="' + dl(ci) + '">' + [...vals].sort().slice(0, 400).map((v) => '<option value="' + esc(v) + '">').join('') + '</datalist>';
       }).join('');
       const showSpare = b._spares !== false;
@@ -553,7 +614,9 @@ const Blk = (() => {
       const clashes = d.groups.filter((g) => g.kind !== 'double');
       if (!clashes.length) { if (box) box.remove(); return; }
       if (!box) { box = document.createElement('div'); box.className = 'dupbox'; const at = host.querySelector('.tscroll'); if (at) at.after(box); else return; }
-      box.innerHTML = '<b>Used more than once by different ' + (b.preset === 'cable' ? 'cables' : 'sources') + '</b><span class="note"> Rename one (for example “' + esc(clashes[0].label) + ' #2”), or mark it as intended. One source sent to several places is a double patch and is not listed.</span>' +
+      const named = clashes.filter((g) => roleOf(b, g.ci) !== 'rf'), freqs = clashes.length - named.length;
+      box.innerHTML = (named.length ? '<b>Used more than once by different ' + (b.preset === 'cable' ? 'cables' : 'sources') + '</b><span class="note"> Rename one (for example “' + esc(named[0].label) + ' #2”), or mark it as intended. One source sent to several places is a double patch and is not listed.</span>' : '') +
+        (freqs ? '<b' + (named.length ? ' style="display:block;margin-top:6px"' : '') + '>Same frequency on different transmitters</b><span class="note"> They will interfere. Give one a new frequency (run a scan on the receiver), or mark it as intended if they are never on at the same time.</span>' : '') +
         clashes.map((g) => '<label class="tog' + (g.kind === 'ok' ? ' on' : '') + '"><input type="checkbox" data-okk="' + esc(g.ci + ':' + g.key) + '"' + (g.kind === 'ok' ? ' checked' : '') + '><span><b>' + esc(g.label) + '</b> <span class="note">' + esc(b.columns[g.ci]) + ', rows ' + g.rows.map((r) => r + 1).join(', ') + '</span> · intended</span></label>').join('');
       box.querySelectorAll('[data-okk]').forEach((x) => x.addEventListener('change', () => {
         b.ok = (b.ok || []).filter((k) => k !== x.dataset.okk);
@@ -629,7 +692,7 @@ const Blk = (() => {
       const m = document.createElement('div');
       m.className = 'rmenu';
       const endCol = traceCols(b)[traceCols(b).length - 1];
-      const items = [['dup', 'Duplicate (double patch)'], isSnake() ? ['spare', 'Make spare'] : ['ins', 'Insert row below'], ['up', 'Move up'], ['down', 'Move down'], ['del', 'Delete row']];
+      const items = [['dup', b.preset === 'iem' ? 'Duplicate (another listener on this mix)' : 'Duplicate (double patch)'], isSnake() ? ['spare', 'Make spare'] : null, b.preset === 'iem' || !isSnake() ? ['ins', 'Insert row below'] : null, ['up', 'Move up'], ['down', 'Move down'], ['del', 'Delete row']].filter(Boolean);
       m.innerHTML = items.map((x) => '<button type="button" data-a="' + x[0] + '"' + ((x[0] === 'up' && !ri) || (x[0] === 'down' && ri >= b.rows.length - 2) ? ' disabled' : '') + (x[0] === 'del' ? ' class="danger"' : '') + '>' + x[1] + '</button>').join('');
       document.body.appendChild(m);
       const r = anchor.getBoundingClientRect();
@@ -656,7 +719,7 @@ const Blk = (() => {
 
     /** Rename, add and remove columns (kept out of the table so the table stays clean). */
     function columnsDialog() {
-      const roleName = { box: 'Box', shared: 'Shared gear', label: 'Label on line' };
+      const roleName = { box: 'Box', shared: 'Shared gear', label: 'Label on line', rf: 'Wireless link' };
       modal('<h3>Columns</h3><p>Rename, add or remove columns. How each column draws is set under Trace path.</p><div id="cl" class="tlist"></div>' +
         '<div class="acts" style="justify-content:space-between"><button type="button" class="btn" id="cadd">' + icon('plus') + 'Add column</button><button type="button" class="primary" data-close>Done</button></div>', (w) => {
         const cl = w.querySelector('#cl');
@@ -703,6 +766,8 @@ const Blk = (() => {
 
     /** Stage box setup: one row per stage box input (or output), already wired to the console. */
     function setupDialog() {
+      if (b.preset === 'wireless') return wirelessDialog();
+      if (b.preset === 'iem') return iemDialog();
       const out = b.preset === 'snakeout';
       const col = (name) => b.columns.findIndex((c) => keyOf(c) === keyOf(name));
       const C = out ? { mix: col('Mix'), console: col('Console'), link: col('Link'), box: col('Stage box'), port: col('Box output'), dest: col('Destination') }
@@ -750,17 +815,125 @@ const Blk = (() => {
       });
     }
 
+    // ---- wireless gear: shared helpers for the two dialogs below ----
+    const colIx = (name) => b.columns.findIndex((c) => keyOf(c) === keyOf(name));
+    const needCols = (C) => { if (Object.values(C).some((x) => x < 0)) { toast('This layout is missing a column. Switch to the ' + PRESETS[b.preset].title + ' layout again to reset it.', 'bad'); return false; } return true; };
+    const rfDevs = () => (typeof DEV !== 'undefined' && DEV.list) || [];
+    const catalogFor = (list, name) => { const k = keyOf(name); return list.find((g) => k && (k === keyOf(g.name) || k.startsWith(keyOf(g.name) + ' ') || k.startsWith(keyOf(g.model)))); };
+    const optList = (id, extra) => '<datalist id="' + id + '">' + [...new Set([...rfDevs().map((d) => d.name), ...extra])].map((n) => '<option value="' + esc(n) + '">').join('') + '</datalist>';
+    const numOr = (v) => { const n = parseInt(v, 10); return Number.isFinite(n) && n > 0 ? n : 0; };
+    const sortRows = (by, port) => {
+      const num = (v) => { const x = parseInt(v, 10); return Number.isNaN(x) ? 1e9 : x; };
+      b.rows.sort((x, y) => (!String(x[by] || '').trim()) - (!String(y[by] || '').trim()) || keyOf(x[by]).localeCompare(keyOf(y[by]), undefined, { numeric: true }) || num(x[port]) - num(y[port]));
+    };
+
+    /** One row per channel of a wireless receiver, wired on to the stage box and console. Then assign a person, capsule and transmitter. */
+    function wirelessDialog() {
+      const C = { input: colIx('Input'), tx: colIx('Transmitter'), rx: colIx('Receiver'), ch: colIx('Rx ch'), box: colIx('Stage box'), port: colIx('Box input'), console: colIx('Console') };
+      if (!needCols(C)) return;
+      const last = b.rows.slice().reverse().find((r) => String(r[C.rx] || '').trim()) || [];
+      modal('<h3>Add a wireless receiver</h3><p>Makes one row per receiver channel, wired on to the stage box and console. Then fill in who uses each one, the capsule, the transmitter and its frequency. Empty channels stay as spares. Rows you already have are kept.</p>' +
+        '<form id="wf">' + optList('wfdl', RF_GEAR.receivers.map((g) => g.name)) +
+        '<div class="two"><div><label for="w_rx">Receiver</label><input id="w_rx" list="wfdl" placeholder="SLX-D4D"></div>' +
+        '<div><label for="w_n">Channels</label><input id="w_n" type="number" min="1" max="16" value="2"></div></div>' +
+        '<div class="two"><div><label for="w_box">Plugs into stage box <span class="note">(optional)</span></label><input id="w_box" list="wfdl" value="' + esc(last[C.box] || '') + '" placeholder="AR2412"></div>' +
+        '<div><label for="w_port">Box input for channel 1</label><input id="w_port" type="number" min="1" max="128" placeholder="optional"></div></div>' +
+        '<div class="two"><div><label for="w_con">Console</label><input id="w_con" list="wfdl" value="' + esc(last[C.console] || '') + '" placeholder="SQ-5"></div>' +
+        '<div><label for="w_in">Console input for channel 1</label><input id="w_in" type="number" min="1" max="256" placeholder="optional"></div></div>' +
+        '<div class="err" id="we"></div><div class="acts"><button type="button" data-close>Cancel</button><button class="primary">Make rows</button></div></form>', (w, close) => {
+        const rxIn = w.querySelector('#w_rx');
+        rxIn.addEventListener('change', () => {
+          const d = rfDevs().find((x) => keyOf(x.name) === keyOf(rxIn.value));
+          const g = catalogFor(RF_GEAR.receivers, rxIn.value) || (d && catalogFor(RF_GEAR.receivers, d.model));
+          const n = (d && d.outputs) || (g && g.ch);
+          if (n) w.querySelector('#w_n').value = n;
+        });
+        w.querySelector('#wf').addEventListener('submit', (e) => {
+          e.preventDefault();
+          const rx = rxIn.value.trim(), n = Number(w.querySelector('#w_n').value), box = w.querySelector('#w_box').value.trim(), con = w.querySelector('#w_con').value.trim();
+          const port = numOr(w.querySelector('#w_port').value), input = numOr(w.querySelector('#w_in').value);
+          if (!rx) { w.querySelector('#we').textContent = 'Enter the receiver, for example SLX-D4D'; return; }
+          if (!Number.isInteger(n) || n < 1 || n > 16) { w.querySelector('#we').textContent = 'Enter how many channels it has (1 to 16)'; return; }
+          b.rows = b.rows.filter((r) => r.some((v) => String(v || '').trim()));
+          let added = 0;
+          for (let i = 1; i <= n; i++) {
+            let r = b.rows.find((x) => keyOf(x[C.rx]) === keyOf(rx) && keyOf(x[C.ch]) === String(i));
+            if (!r) { r = b.columns.map(() => ''); r[C.rx] = rx; r[C.ch] = String(i); b.rows.push(r); added++; }
+            const fill = (ci, v) => { if (v && !String(r[ci] || '').trim()) r[ci] = v; };
+            fill(C.box, box); fill(C.port, port ? String(port + i - 1) : ''); fill(C.console, con); fill(C.input, input ? String(input + i - 1) : '');
+          }
+          sortRows(C.rx, C.ch);
+          close(); dirty(); paint();
+          toast(added ? added + ' channel' + (added === 1 ? '' : 's') + ' added for ' + rx : 'All ' + n + ' channels were already there', 'ok');
+        });
+      });
+    }
+
+    /** One row per in-ear transmitter, fed from the console (and stage box). Mono or stereo; stereo uses an output pair like 5/6. */
+    function iemDialog() {
+      const C = { mix: colIx('Mix'), console: colIx('Console'), out: colIx('Console out'), box: colIx('Stage box'), port: colIx('Box output'), tx: colIx('Transmitter'), mode: colIx('Mode') };
+      if (!needCols(C)) return;
+      const last = b.rows.slice().reverse().find((r) => String(r[C.tx] || '').trim()) || [];
+      modal('<h3>Add in-ear transmitters</h3><p>Makes one row per transmitter, fed from the console. <b>Stereo</b> takes two outputs (5/6); <b>mono</b> takes one. Then fill in the mix, bodypack and who wears it. For a second person on the same mix, use ⋯ › Duplicate on the row. Rows you already have are kept.</p>' +
+        '<form id="if">' + optList('ifdl', RF_GEAR.iem.map((g) => g.name)) +
+        '<div class="two"><div><label for="i_tx">Transmitter</label><input id="i_tx" list="ifdl" placeholder="PSM300"></div>' +
+        '<div><label for="i_n">How many</label><input id="i_n" type="number" min="1" max="16" value="1"></div></div>' +
+        '<div class="two"><div><label for="i_mode">Mode</label><select id="i_mode"><option>Stereo</option><option>Mono</option></select></div>' +
+        '<div><label for="i_con">Console</label><input id="i_con" list="ifdl" value="' + esc(last[C.console] || '') + '" placeholder="SQ-5"></div></div>' +
+        '<div class="two"><div><label for="i_box">Through stage box <span class="note">(optional)</span></label><input id="i_box" list="ifdl" value="' + esc(last[C.box] || '') + '" placeholder="blank = console outputs"></div>' +
+        '<div><label for="i_first">First output</label><input id="i_first" type="number" min="1" max="128" placeholder="optional"></div></div>' +
+        '<p class="note" id="i_hint"></p>' +
+        '<div class="err" id="ie"></div><div class="acts"><button type="button" data-close>Cancel</button><button class="primary">Make rows</button></div></form>', (w, close) => {
+        const txIn = w.querySelector('#i_tx'), mode = w.querySelector('#i_mode'), boxIn = w.querySelector('#i_box'), first = w.querySelector('#i_first'), nIn = w.querySelector('#i_n');
+        const pairs = (n, start, stereo) => Array.from({ length: n }, (_, i) => (stereo ? (start + 2 * i) + '/' + (start + 2 * i + 1) : String(start + i)));
+        const hint = () => {
+          const n = Number(nIn.value) || 1, st = numOr(first.value), stereo = mode.value === 'Stereo';
+          w.querySelector('#i_hint').textContent = st ? (boxIn.value.trim() ? boxIn.value.trim() + ' outputs ' : 'Console outputs ') + pairs(n, st, stereo).join(', ') : '';
+        };
+        [mode, boxIn, first, nIn].forEach((x) => x.addEventListener('input', hint));
+        txIn.addEventListener('change', () => {
+          const d = rfDevs().find((x) => keyOf(x.name) === keyOf(txIn.value));
+          const g = catalogFor(RF_GEAR.iem, txIn.value) || (d && catalogFor(RF_GEAR.iem, d.model));
+          if (g && g.tx > 1) nIn.value = g.tx;
+          hint();
+        });
+        w.querySelector('#if').addEventListener('submit', (e) => {
+          e.preventDefault();
+          const tx = txIn.value.trim(), n = Number(nIn.value), con = w.querySelector('#i_con').value.trim(), box = boxIn.value.trim(), st = numOr(first.value), stereo = mode.value === 'Stereo';
+          if (!tx) { w.querySelector('#ie').textContent = 'Enter the transmitter, for example PSM300'; return; }
+          if (!Number.isInteger(n) || n < 1 || n > 16) { w.querySelector('#ie').textContent = 'Enter how many transmitters (1 to 16)'; return; }
+          const outs = st ? pairs(n, st, stereo) : [];
+          b.rows = b.rows.filter((r) => r.some((v) => String(v || '').trim()));
+          let added = 0;
+          for (let i = 1; i <= n; i++) {
+            const name = n === 1 || i === 1 ? tx : tx + ' #' + i;
+            const mine = b.rows.filter((x) => keyOf(x[C.tx]) === keyOf(name));
+            if (!mine.length) { const r = b.columns.map(() => ''); r[C.tx] = name; b.rows.push(r); mine.push(r); added++; }
+            for (const r of mine) {
+              const fill = (ci, v) => { if (v && !String(r[ci] || '').trim()) r[ci] = v; };
+              fill(C.mode, stereo ? 'Stereo' : 'Mono'); fill(C.console, con);
+              if (box) { fill(C.box, box); fill(C.port, outs[i - 1] || ''); }
+              else fill(C.out, outs[i - 1] || '');
+            }
+          }
+          sortRows(C.tx, C.tx);
+          close(); dirty(); paint();
+          toast(added ? added + ' transmitter' + (added === 1 ? '' : 's') + ' added' : 'Those transmitters were already there', 'ok');
+        });
+      });
+    }
+
     function traceDialog() {
       let order = b.trace.filter((i) => i < b.columns.length);
       b.columns.forEach((_, i) => { if (!order.includes(i)) order.push(i); });
       let on = new Set(b.trace);
       const roles = { ...(b.roles || {}) };
-      modal('<h3>Wire trace path</h3><p>Pick the columns a signal passes through, in order from where it starts to where it ends. <b>Box</b>: each name comes from one place (a mic, a channel). <b>Shared gear</b>: many signals pass through it (a stage box, a console). <b>Label on line</b>: written on the wire, like a stage box input number or SLink.</p><div id="tl" class="tlist"></div>' +
+      modal('<h3>Wire trace path</h3><p>Pick the columns a signal passes through, in order from where it starts to where it ends. <b>Box</b>: each name comes from one place (a mic, a channel). <b>Shared gear</b>: many signals pass through it (a stage box, a console). <b>Label on line</b>: written on the wire, like a stage box input number or SLink. <b>Wireless link</b>: a frequency, drawn as a dashed radio hop and checked so no two transmitters share it.</p><div id="tl" class="tlist"></div>' +
         '<div class="acts"><button type="button" data-close>Cancel</button><button class="primary" id="tok">Save</button></div>', (w, close) => {
         const tl = w.querySelector('#tl');
         const draw = () => {
           tl.innerHTML = order.map((ci, k) => '<div class="tli"><label class="tog' + (on.has(ci) ? ' on' : '') + '"><input type="checkbox" data-ci="' + ci + '"' + (on.has(ci) ? ' checked' : '') + '>' + esc(b.columns[ci] || 'Column ' + (ci + 1)) + '</label>' +
-            '<span class="grow"></span>' + (on.has(ci) ? '<select data-role="' + ci + '" aria-label="How it draws"><option value="box"' + (roles[ci] ? '' : ' selected') + '>Box</option><option value="shared"' + (roles[ci] === 'shared' ? ' selected' : '') + '>Shared gear</option><option value="label"' + (roles[ci] === 'label' ? ' selected' : '') + '>Label on line</option></select>' : '') + '<button type="button" class="ghost" data-up="' + k + '"' + (k ? '' : ' disabled') + '>' + icon('up') + '</button><button type="button" class="ghost" data-down="' + k + '"' + (k < order.length - 1 ? '' : ' disabled') + '>' + icon('down') + '</button></div>').join('');
+            '<span class="grow"></span>' + (on.has(ci) ? '<select data-role="' + ci + '" aria-label="How it draws"><option value="box"' + (roles[ci] ? '' : ' selected') + '>Box</option><option value="shared"' + (roles[ci] === 'shared' ? ' selected' : '') + '>Shared gear</option><option value="label"' + (roles[ci] === 'label' ? ' selected' : '') + '>Label on line</option><option value="rf"' + (roles[ci] === 'rf' ? ' selected' : '') + '>Wireless link</option></select>' : '') + '<button type="button" class="ghost" data-up="' + k + '"' + (k ? '' : ' disabled') + '>' + icon('up') + '</button><button type="button" class="ghost" data-down="' + k + '"' + (k < order.length - 1 ? '' : ' disabled') + '>' + icon('down') + '</button></div>').join('');
           tl.querySelectorAll('[data-ci]').forEach((x) => x.addEventListener('change', () => { const ci = Number(x.dataset.ci); if (x.checked) on.add(ci); else on.delete(ci); draw(); }));
           tl.querySelectorAll('[data-role]').forEach((x) => x.addEventListener('change', () => { const ci = Number(x.dataset.role); if (x.value === 'box') delete roles[ci]; else roles[ci] = x.value; }));
           tl.querySelectorAll('[data-up]').forEach((x) => x.addEventListener('click', () => { const k = Number(x.dataset.up); [order[k - 1], order[k]] = [order[k], order[k - 1]]; draw(); }));
@@ -769,7 +942,7 @@ const Blk = (() => {
         draw();
         w.querySelector('#tok').addEventListener('click', () => {
           const t = order.filter((ci) => on.has(ci));
-          if (t.filter((ci) => roles[ci] !== 'label').length === 1) return toast('Pick at least two columns that are boxes or shared gear', 'bad');
+          if (t.filter((ci) => roles[ci] !== 'label' && roles[ci] !== 'rf').length === 1) return toast('Pick at least two columns that are boxes or shared gear', 'bad');
           b.trace = t;
           b.roles = {}; t.forEach((ci) => { if (roles[ci]) b.roles[ci] = roles[ci]; });
           close(); dirty(); paint();
@@ -812,7 +985,7 @@ const Blk = (() => {
           nodes[k].get(kk).rows.push(ri);
           present.push({ k, key: kk });
         });
-        for (let j = 1; j < present.length; j++) edges.push({ r: ri, a: present[j - 1], z: present[j], label: labelsBetween(b, r, cols[present[j - 1].k], cols[present[j].k]).join(' · ') });
+        for (let j = 1; j < present.length; j++) edges.push({ r: ri, a: present[j - 1], z: present[j], label: labelsBetween(b, r, cols[present[j - 1].k], cols[present[j].k]).join(' · '), rf: rfBetween(b, r, cols[present[j - 1].k], cols[present[j].k]) });
       });
       return { nodes, edges };
     }
@@ -884,7 +1057,7 @@ const Blk = (() => {
         cols.map((ci, k) => '<div class="pdh" style="left:' + cx(k) + 'px;width:' + CW + 'px">' + esc(b.columns[ci]) + '</div>').join('') +
         '<svg class="pdw" width="' + W + '" height="' + H + '"><g>' + edges.map((e) => {
           const nz = nodes[e.z.k].get(e.z.key);
-          return '<g class="pw' + (isSelW(e) ? ' sel' : '') + '" data-r="' + e.r + '" data-a="' + e.a.k + '" data-z="' + e.z.k + '"><path class="hit" d="' + path(e) + '"/><path class="ln" d="' + path(e) + '"/>' +
+          return '<g class="pw' + (isSelW(e) ? ' sel' : '') + '" data-r="' + e.r + '" data-a="' + e.a.k + '" data-z="' + e.z.k + '"><path class="hit" d="' + path(e) + '"/><path class="ln' + (e.rf ? ' rf' : '') + '" d="' + path(e) + '"/>' +
             (e.label ? '<text x="' + (cx(e.z.k) - 6) + '" y="' + (cy(nz.i) + NH / 2 - 5) + '" text-anchor="end">' + esc(e.label.length > 14 ? e.label.slice(0, 13) + '…' : e.label) + '</text>' : '') + '</g>';
         }).join('') +
         '</g><path class="tmp" d=""/></svg>' +
@@ -1141,5 +1314,5 @@ const Blk = (() => {
     });
   }
 
-  return { render, wire, editChecklist, editPatch, editIplist, PRESETS, describe, analyze, ipInt, traceSvg, dupInfo, chainText };
+  return { render, wire, editChecklist, editPatch, editIplist, PRESETS, RF_GEAR, describe, analyze, ipInt, traceSvg, dupInfo, chainText };
 })();

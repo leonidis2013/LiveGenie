@@ -27,14 +27,16 @@ const GEAR = {
     { model: 'Tio1608-D', make: 'Yamaha', inputs: 16, outputs: 8, link: 'Dante' }
   ],
   other: [
-    { group: 'Wireless', items: [{ name: 'SLX-D4D', make: 'Shure', model: 'SLX-D4D' }, { name: 'ULX-D4D', make: 'Shure', model: 'ULX-D4D' }, { name: 'EW-D', make: 'Sennheiser', model: 'EW-D' }] },
+    { group: 'Wireless', qty: true, items: Blk.RF_GEAR.receivers.filter((g) => ['SLX-D4D', 'ULX-D4D', 'ULX-D4Q', 'QLXD4', 'AD4Q', 'EW-DX EM 2'].includes(g.name)) },
     { group: 'Speaker processor', items: [{ name: 'DriveRack PA2', make: 'dbx', model: 'DriveRack PA2' }, { name: 'DriveRack VENU360', make: 'dbx', model: 'DriveRack VENU360' }] },
     { group: 'Amplifiers', items: [{ name: 'Crown XLi 2500', make: 'Crown', model: 'XLi 2500' }, { name: 'Crown XLS 2502', make: 'Crown', model: 'XLS 2502' }] },
     { group: 'Speakers', items: [{ name: 'JBL CBT 70J-1', make: 'JBL', model: 'CBT 70J-1' }, { name: 'Yamaha DXS12mkII', make: 'Yamaha', model: 'DXS12mkII' }] },
-    { group: 'In-ears and monitors', items: [{ name: 'PSM300', make: 'Shure', model: 'PSM300' }] }
+    { group: 'In-ears', qty: true, items: Blk.RF_GEAR.iem }
   ]
 };
-const GROUP_ROLE = { Wireless: 'wireless', 'Speaker processor': 'processor', Amplifiers: 'amp', Speakers: 'speaker', 'In-ears and monitors': 'monitor' };
+const GROUP_ROLE = { Wireless: 'wireless', 'Speaker processor': 'processor', Amplifiers: 'amp', Speakers: 'speaker', 'In-ears': 'iem' };
+/** Device names for several of the same unit: SLX-D4D, SLX-D4D #2, SLX-D4D #3. */
+const unitNames = (o) => Array.from({ length: Math.max(1, Number(o.qty) || 1) }, (_, i) => (i ? o.name + ' #' + (i + 1) : o.name));
 
 async function viewGearSetup() {
   if (!can('editor')) { app.innerHTML = '<div class="card empty">Editors and admins can run the guided setup.</div>'; if (!S.state.user) signInDialog(() => route()); return; }
@@ -90,19 +92,25 @@ async function viewGearSetup() {
     } else if (st.step === 2) {
       body = '<p class="note">Tick the rest of the gear you have. Each becomes a device card you can add a photo, IP and notes to later.</p>' +
         GEAR.other.map((g) => '<div class="ggroup"><b>' + g.group + '</b><div class="gchips">' + g.items.map((it) => {
-          const on = st.other.some((o) => o.name === it.name);
-          return '<label class="tog' + (on ? ' on' : '') + '"><input type="checkbox" data-o="' + esc(it.name) + '" data-g="' + esc(g.group) + '"' + (on ? ' checked' : '') + '>' + esc(it.name) + (known(it.name) ? ' <span class="note">(have)</span>' : '') + '</label>';
+          const sel = st.other.find((o) => o.name === it.name), on = !!sel;
+          const sub = it.ch ? it.ch + ' ch' : it.tx > 1 ? it.tx + ' transmitters' : '';
+          return '<label class="tog' + (on ? ' on' : '') + '"><input type="checkbox" data-o="' + esc(it.name) + '" data-g="' + esc(g.group) + '"' + (on ? ' checked' : '') + '>' + esc(it.name) +
+            (sub ? ' <span class="note">' + sub + '</span>' : '') + (known(it.name) ? ' <span class="note">(have)</span>' : '') +
+            (g.qty && on ? '<span class="qty">×<input type="number" min="1" max="16" data-q="' + esc(it.name) + '" value="' + (sel.qty || 1) + '" aria-label="How many ' + esc(it.name) + '"></span>' : '') + '</label>';
         }).join('') + '</div></div>').join('') +
         '<div class="ggroup"><b>Something else</b><div class="gform" style="grid-template-columns:2fr 1fr auto"><input id="gname" placeholder="Name, e.g. Crown XLi 1500"><select id="ggrp">' + GEAR.other.map((g) => '<option>' + g.group + '</option>').join('') + '</select><button type="button" class="btn" id="gadd">' + icon('plus') + 'Add</button></div>' +
         (st.other.filter((o) => o.custom).length ? '<div class="gchips" style="margin-top:6px">' + st.other.filter((o) => o.custom).map((o) => '<span class="chip">' + esc(o.name) + ' <button type="button" class="ghost" data-orm="' + esc(o.name) + '" style="padding:0 2px">' + icon('x') + '</button></span>').join('') + '</div>' : '') + '</div>';
     } else {
-      const cards = [st.console.name, ...st.boxes.map((b) => b.name), ...st.other.map((o) => o.name)];
+      const cards = [st.console.name, ...st.boxes.map((b) => b.name), ...st.other.flatMap((o) => (o.role === 'wireless' || o.role === 'iem' ? unitNames(o) : [o.name]))];
+      const rx = st.other.filter((o) => o.role === 'wireless'), iem = st.other.filter((o) => o.role === 'iem');
+      const rxCh = rx.reduce((n, o) => n + (o.ch || 1) * (Number(o.qty) || 1), 0), iemTx = iem.reduce((n, o) => n + (o.tx || 1) * (Number(o.qty) || 1), 0);
+      const lists = [...st.boxes.map((b) => esc(b.name) + ': ' + b.inputs + ' inputs, ' + b.outputs + ' outputs'), rxCh ? 'Wireless mics: ' + rxCh + ' receiver channels' : '', iemTx ? 'In-ears: ' + iemTx + ' transmitter' + (iemTx === 1 ? '' : 's') : ''].filter(Boolean);
       const fresh = cards.filter((n) => !known(n)), kept = cards.filter((n) => known(n));
       const proc = st.other.filter((o) => o.role === 'processor'), amps = st.other.filter((o) => o.role === 'amp'), spk = st.other.filter((o) => o.role === 'speaker');
       body = `<div class="card" style="margin:0 0 12px"><h2>Device cards</h2>
           ${fresh.length ? '<p>New: ' + fresh.map((n) => '<span class="chip">' + esc(n) + '</span>').join(' ') + '</p>' : ''}
           ${kept.length ? '<p class="note">Already have: ' + kept.map(esc).join(', ') + ' (kept, input and output counts filled in if missing)</p>' : ''}</div>
-        <label class="tog ${st.page ? 'on' : ''} gopt"><input type="checkbox" data-opt="page"${st.page ? ' checked' : ''}><span><b>Stage patch page</b><br><span class="note">${st.boxes.length ? st.boxes.map((b) => esc(b.name) + ': ' + b.inputs + ' inputs, ' + b.outputs + ' outputs').join(' · ') + ', ready to assign' : 'Add a stage box to get snake lists'}</span></span></label>
+        <label class="tog ${st.page ? 'on' : ''} gopt"><input type="checkbox" data-opt="page"${st.page ? ' checked' : ''}><span><b>Stage patch page</b><br><span class="note">${lists.length ? lists.join(' · ') + ', ready to assign' : 'Add a stage box, wireless or in-ears to get patch lists'}</span></span></label>
         <label class="tog ${st.cables ? 'on' : ''} gopt"><input type="checkbox" data-opt="cables"${st.cables ? ' checked' : ''}${proc.length || amps.length ? '' : ' disabled'}><span><b>Main PA cable runs</b><br><span class="note">${proc.length || amps.length ? 'A starting list: ' + esc([st.console.name, ...proc.map((x) => x.name), ...amps.map((x) => x.name), ...spk.map((x) => x.name)].join(' → ')) + '. Check it against your rack.' : 'Tick a speaker processor or amplifier to get this'}</span></span></label>`;
     }
     app.innerHTML = `<div class="ed gsetup"><div class="crumbs"><a href="#/">Home</a><span>/</span><a href="#/devices">Devices</a><span>/</span><span>Guided setup</span></div>
@@ -148,9 +156,13 @@ async function viewGearSetup() {
       const all = GEAR.other.flatMap((g) => g.items.map((it) => ({ ...it, group: g.group })));
       const it = all.find((y) => y.name === x.dataset.o);
       st.other = st.other.filter((o) => o.name !== it.name);
-      if (x.checked) st.other.push({ ...it, role: GROUP_ROLE[it.group] });
-      x.closest('.tog').classList.toggle('on', x.checked);
+      if (x.checked) st.other.push({ ...it, role: GROUP_ROLE[it.group], qty: 1 });
+      if (GEAR.other.find((g) => g.group === it.group).qty) render(); else x.closest('.tog').classList.toggle('on', x.checked);
     }));
+    $$('[data-q]').forEach((x) => {
+      x.addEventListener('click', (e) => e.stopPropagation());
+      x.addEventListener('input', () => { const o = st.other.find((y) => y.name === x.dataset.q); if (o) o.qty = Math.max(1, Math.min(16, Number(x.value) || 1)); });
+    });
     const ga = $('#gadd');
     if (ga) ga.addEventListener('click', () => {
       const name = $('#gname').value.trim();
@@ -178,7 +190,11 @@ async function viewGearSetup() {
       const c = st.console;
       await upsert({ name: c.name.trim(), category: 'audio', make: c.make, model: c.model || c.name, location: c.location, ip: c.ip.trim(), inputs: Number(c.inputs) || 0, outputs: Number(c.outputs) || 0 });
       for (const b of st.boxes) await upsert({ name: b.name.trim(), category: 'audio', make: b.make, model: b.model || b.name, location: b.location, inputs: Number(b.inputs) || 0, outputs: Number(b.outputs) || 0, notes: 'Connected to the ' + c.name + ' over ' + b.link + '.' });
-      for (const o of st.other) await upsert({ name: o.name, category: 'audio', make: o.make, model: o.model });
+      for (const o of st.other) {
+        if (o.role === 'wireless') for (const n of unitNames(o)) await upsert({ name: n, category: 'audio', make: o.make, model: o.model, outputs: o.ch || 0, notes: o.ch ? o.ch + '-channel wireless receiver.' : '' });
+        else if (o.role === 'iem') for (const n of unitNames(o)) await upsert({ name: n, category: 'audio', make: o.make, model: o.model, inputs: (o.tx || 1) * 2, notes: 'In-ear transmitter' + (o.tx > 1 ? ' (' + o.tx + ' transmitters)' : '') + '.' });
+        else await upsert({ name: o.name, category: 'audio', make: o.make, model: o.model });
+      }
       const blocks = [];
       if (st.page && st.boxes.length) {
         for (const b of st.boxes) {
@@ -189,6 +205,15 @@ async function viewGearSetup() {
           if (ins.length) blocks.push({ type: 'patch', preset: 'snake', title: b.name + ' inputs', columns: P.columns, trace: P.trace, roles: P.roles, assign: P.assign, rows: ins });
           if (outs.length) blocks.push({ type: 'patch', preset: 'snakeout', title: b.name + ' outputs', columns: Q.columns, trace: Q.trace, roles: Q.roles, assign: Q.assign, rows: outs });
         }
+      }
+      if (st.page) {
+        const W = Blk.PRESETS.wireless, I = Blk.PRESETS.iem;
+        const rx = [];
+        st.other.filter((o) => o.role === 'wireless').forEach((o) => unitNames(o).forEach((n) => { for (let ch = 1; ch <= (o.ch || 1); ch++) rx.push(['', '', '', '', '', n, String(ch), '', '', c.name, '']); }));
+        if (rx.length) blocks.push({ type: 'patch', preset: 'wireless', title: 'Wireless mics', columns: W.columns, trace: W.trace, roles: W.roles, assign: W.assign, rows: rx });
+        const tx = [];
+        st.other.filter((o) => o.role === 'iem').forEach((o) => unitNames(o).forEach((n) => { for (let t = 1; t <= (o.tx || 1); t++) tx.push(['', c.name, '', '', '', (o.tx || 1) > 1 ? n + ' ' + String.fromCharCode(64 + t) : n, 'Stereo', '', '', '', '', '']); }));
+        if (tx.length) blocks.push({ type: 'patch', preset: 'iem', title: 'In-ears', columns: I.columns, trace: I.trace, roles: I.roles, assign: I.assign, rows: tx });
       }
       const proc = st.other.filter((o) => o.role === 'processor'), amps = st.other.filter((o) => o.role === 'amp'), spk = st.other.filter((o) => o.role === 'speaker');
       if (st.cables && (proc.length || amps.length)) {
@@ -204,7 +229,7 @@ async function viewGearSetup() {
       }
       forgetDevices();
       if (blocks.length) {
-        blocks.unshift({ type: 'text', md: 'Made by the guided setup. Tap **Edit**, then a list\'s **Draw** button, and drag from a source to the stage box to assign it to the next free input. Or type sources into the table.' });
+        blocks.unshift({ type: 'text', md: 'Made by the guided setup. Tap **Edit**, then a list\'s **Draw** button, and drag from a source to the stage box to assign it to the next free input. Or type sources into the table. In **Wireless mics**, fill in who uses each receiver channel, the capsule, transmitter and frequency, and where the receiver plugs in. In **In-ears**, fill in the mix, outputs, bodypack and who wears it.' });
         const r = await call('POST', '/api/pages', { title: 'Stage patch', space: 'audio', blocks });
         toast('Setup done', 'ok');
         location.hash = '#/p/' + r.id;

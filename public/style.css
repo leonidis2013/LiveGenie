@@ -469,6 +469,11 @@ table.gedit input.dok { border-color:color-mix(in srgb, var(--ok) 55%, var(--lin
 .pn.ddouble em::before { content:"⇉ "; color:var(--acc); }
 .pn.dok { border-color:color-mix(in srgb, var(--ok) 55%, var(--line)); }
 svg.trace .te.trunk { stroke:var(--teal); opacity:.85; stroke-linecap:round; }
+/* wireless hop: dashed, with the frequency on it */
+svg.trace .te.rf, .pdw .pw .ln.rf { stroke-dasharray:6 5; stroke:var(--warn); opacity:.8; }
+svg.trace .tl.rft { fill:var(--warn); font-weight:600; }
+svg.trace .te.rf.bad { stroke:var(--bad); opacity:1; }
+svg.trace .tl.rft.bad { fill:var(--bad); }
 svg.trace .tl { fill:var(--dim); font-size:11px; font-weight:600; paint-order:stroke; stroke:var(--card); stroke-width:3px; }
 svg.trace .sock { fill:var(--teal); font:700 10.5px ui-monospace, Menlo, monospace; pointer-events:none; }
 svg.trace .tn.shared rect { fill:color-mix(in srgb, var(--teal) 8%, var(--card2)); stroke:color-mix(in srgb, var(--teal) 45%, var(--line)); }
@@ -654,3 +659,8 @@ a.btn.primary { background:var(--acc); color:var(--onacc); border-radius:8px; pa
 }
 @media (max-width:380px) { .spaces { grid-template-columns:1fr; } }
 }
+
+/* how many of a unit, inside a gear chip in the guided setup */
+.tog .qty { display:inline-flex; align-items:center; gap:3px; margin-left:4px; color:var(--fg); }
+.tog .qty input { appearance:auto; -webkit-appearance:auto; width:50px; height:26px; border-radius:6px; padding:0 4px; background:var(--card2); border:1px solid var(--line); font:inherit; color:var(--fg); text-align:center; }
+.tog .qty input::after { content:none; display:none; }

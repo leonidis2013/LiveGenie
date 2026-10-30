@@ -1,6 +1,6 @@
 /*
  * LiveGenie web page. Plain JavaScript, no build step.
- * Routes (after #): /  /s/<space>  /p/<id>  /p/<id>/edit  /p/<id>/history[/<v>]  /new[?space=]  /search?q=  /settings[/<tab>]
+ * Routes (after #): /  /todo  /s/<space>  /p/<id>  /p/<id>/edit  /p/<id>/history[/<v>]  /new[?space=]  /search?q=  /settings[/<tab>]
  */
 'use strict';
 
@@ -42,6 +42,10 @@ const ICONS = {
   bell: '<path d="M6 16V11a6 6 0 0 1 12 0v5l2 2H4z"/><path d="M10 20a2 2 0 0 0 4 0"/>',
   grid: '<rect x="3" y="4" width="18" height="16" rx="2"/><path d="M3 10h18M3 15h18M9 4v16M15 4v16"/>',
   net: '<rect x="9" y="3" width="6" height="5" rx="1"/><rect x="3" y="16" width="6" height="5" rx="1"/><rect x="15" y="16" width="6" height="5" rx="1"/><path d="M12 8v4M6 16v-4h12v4"/>',
+  home: '<path d="M3 11l9-7 9 7"/><path d="M5 10v10h5v-6h4v6h5V10"/>',
+  search: '<circle cx="11" cy="11" r="7"/><path d="M20 20l-3.5-3.5"/>',
+  menu: '<path d="M4 7h16M4 12h16M4 17h16"/>',
+  gear: '<circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.7 1.7 0 0 0 .3 1.8l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.7 1.7 0 0 0-1.8-.3 1.7 1.7 0 0 0-1 1.5V21a2 2 0 1 1-4 0v-.1a1.7 1.7 0 0 0-1.1-1.5 1.7 1.7 0 0 0-1.8.3l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.7 1.7 0 0 0 .3-1.8 1.7 1.7 0 0 0-1.5-1H3a2 2 0 1 1 0-4h.1a1.7 1.7 0 0 0 1.5-1.1 1.7 1.7 0 0 0-.3-1.8l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1.7 1.7 0 0 0 1.8.3H9a1.7 1.7 0 0 0 1-1.5V3a2 2 0 1 1 4 0v.1a1.7 1.7 0 0 0 1 1.5 1.7 1.7 0 0 0 1.8-.3l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.7 1.7 0 0 0-.3 1.8V9a1.7 1.7 0 0 0 1.5 1H21a2 2 0 1 1 0 4h-.1a1.7 1.7 0 0 0-1.5 1z"/>',
   spark: '<path d="M12 3c.6 3.7 1.3 4.4 5 5-3.7.6-4.4 1.3-5 5-.6-3.7-1.3-4.4-5-5 3.7-.6 4.4-1.3 5-5z"/>'
 };
 const icon = (n, cls = 'icon') => '<svg class="' + cls + '" viewBox="0 0 24 24">' + (ICONS[n] || '') + '</svg>';
@@ -196,6 +200,9 @@ function paintHeader() {
   $('#updPill').classList.toggle('hide', !(st.update && st.update.available));
   $('#updPill').textContent = 'Update available' + (st.update && st.update.latest ? ' · ' + st.update.latest : '');
   $('#hdr').classList.toggle('hide', !!st.setupNeeded);
+  $('#sVer').textContent = st.version;
+  document.body.classList.toggle('setupmode', !!st.setupNeeded);
+  Shell.paintSide(); Shell.paintTabs();
   measureHeader();
 }
 function measureHeader() { document.documentElement.style.setProperty('--hh', ($('#hdr').offsetHeight || 0) + 'px'); }
@@ -352,9 +359,26 @@ function todoRow(t) {
     '<div class="t"><b>' + esc(t.title) + '</b><span>' + sub + '</span></div>' + status + '</a>';
 }
 
+/** Everything on the To do list on one screen (the To do tab on a phone). */
+async function viewTodo() {
+  setTitle('To do');
+  const paint = (t) => '<div class="bar"><div class="grow"><h1 class="title" style="font-size:22px;letter-spacing:.06em;margin:4px 0 2px">To do</h1>' +
+    '<div class="note">Scheduled checklists, from their reset time until the end of the day</div></div></div>' +
+    (t.todo.length ? '<div class="list">' + t.todo.map(todoRow).join('') + '</div>'
+      : '<div class="card empty">' + icon('check') + '<div style="margin-top:8px">Nothing to do right now.</div><div class="note" style="margin-top:4px">A checklist with an auto reset shows up here from its reset time, like Sundays at 6:00 AM.</div></div>');
+  app.innerHTML = '<div class="todov">' + paint(await get('/api/todo')) + '</div>';
+  const mine = app.firstElementChild;
+  const timer = setInterval(async () => {
+    if (!mine.isConnected) return clearInterval(timer);
+    if (document.hidden || S.offline) return;
+    try { const t = await get('/api/todo'); if (mine.isConnected) mine.innerHTML = paint(t); } catch (e) { /* offline banner */ }
+  }, 30000);
+}
+
 async function viewSpace(slug) {
   const d = await get('/api/spaces/' + encodeURIComponent(slug));
   setTitle(d.space.name);
+  Shell.setCtx({ space: slug });
   const newBtn = can('editor') ? '<button class="primary btn" id="newPage">' + icon('plus') + 'New page</button>' : '';
   app.innerHTML = `<div class="crumbs"><a href="#/">Home</a><span>/</span></div>
     <div class="bar"><div class="grow"><h1 class="title" style="font-size:22px;letter-spacing:.06em;margin:4px 0 2px">${esc(d.space.name)}</h1><div class="note">${esc(d.space.blurb)}</div></div>${newBtn}</div>
@@ -416,11 +440,12 @@ async function viewPage(id, focusChecklist) {
   }
   const p = d.page;
   setTitle(p.title);
+  Shell.setCtx({ space: p.space, page: p.id });
   const pdf = '<button class="btn ghost" id="pB" title="Export PDF">' + icon('pdf') + '<span class="hide-sm">PDF</span></button>';
   const acts = can('editor')
     ? '<button class="btn" id="eB">' + icon('edit') + 'Edit</button>' + pdf + '<button class="btn ghost" id="hB" title="History">' + icon('clock') + '<span class="hide-sm">History</span></button><button class="ghost danger" id="dB" title="Delete page">' + icon('trash') + '</button>'
     : pdf + '<button class="btn ghost" id="hB" title="History">' + icon('clock') + '<span class="hide-sm">History</span></button>';
-  app.innerHTML = `<div class="page">
+  app.innerHTML = `<div class="pagewrap"><div class="page">
     <div class="printhead"><img src="/icons/livegenie-glyph.svg" alt=""><div><b>LiveGenie</b><span>Rolling Hills Community Church · AVL knowledge base</span></div>
       <div class="pm">${esc(p.space_name)} · version ${p.version} · updated ${esc(when(p.updated_at))}${p.updated_by ? ' by ' + esc(p.updated_by) : ''}<br>Printed ${esc(when(Date.now()))}</div></div>
     <div class="crumbs"><a href="#/">Home</a><span>/</span><a href="#/s/${esc(p.space)}">${esc(p.space_name)}</a></div>
@@ -428,9 +453,10 @@ async function viewPage(id, focusChecklist) {
     <div class="meta">${p.tech_only ? '<span class="badge tech">' + icon('lock', 'icon') + 'Tech only</span>' : ''}${p.pinned ? '<span class="badge pin">Pinned</span>' : ''}
       <span>Updated ${esc(ago(p.updated_at))}${p.updated_by ? ' by ' + esc(p.updated_by) : ''} · version ${p.version}</span></div>
     <div class="doc" id="doc">${p.blocks.length ? renderBlocks(p.blocks) : '<p class="note">This page is empty.' + (can('editor') ? ' Tap Edit to add text, steps or pictures.' : '') + '</p>'}</div>
-  </div>`;
+  </div><nav class="outline" aria-label="On this page"></nav></div>`;
   wireBlocks($('#doc'), p);
   linkDevices($('#doc'));
+  if (Shell.outline($('#doc'), $('.outline'))) $('.pagewrap').classList.add('has-outline');
   $('#hB').addEventListener('click', () => { location.hash = '#/p/' + p.id + '/history'; });
   $('#pB').addEventListener('click', () => exportPdf(p.title));
   if (focusChecklist) {
@@ -676,12 +702,25 @@ async function viewHistory(id, v) {
 // ----- search -----
 async function viewSearch(q) {
   $('#q').value = q;
+  $('#sq').value = q;
   setTitle('Search');
+  const box = '<form class="search psearch" id="pSearch" role="search"><svg viewBox="0 0 24 24"><circle cx="11" cy="11" r="7"/><path d="M20 20l-3.5-3.5"/></svg>' +
+    '<input id="pq" type="search" enterkeyhint="search" placeholder="Search pages, devices, IPs" autocomplete="off" value="' + esc(q) + '"></form>';
+  const wire = () => $('#pSearch').addEventListener('submit', (e) => { e.preventDefault(); const v = $('#pq').value.trim(); if (v) location.hash = '#/search?q=' + encodeURIComponent(v); });
+  if (!q) {
+    const sp = S.spaces || (await get('/api/spaces')).spaces;
+    app.innerHTML = box + '<div class="section"><h2>Spaces</h2><div class="list">' + sp.map((s) => '<a class="row" href="#/s/' + esc(s.slug) + '"><div class="t"><b>' + esc(s.name) + '</b><span>' + esc(s.blurb) + '</span></div><div class="m">' + s.pages + '</div></a>').join('') + '</div></div>' +
+      '<p class="note">Search finds words in page text, checklist steps, patch lists and IP lists, and device names, nicknames and IPs.</p>';
+    wire();
+    const f = $('#pq'); if (f && getComputedStyle(f).display !== 'none' && matchMedia('(pointer: fine)').matches) f.focus();
+    return;
+  }
   const d = await get('/api/search?q=' + encodeURIComponent(q));
-  app.innerHTML = `<div class="bar"><div class="grow"><h2 style="margin:0">Results for “${esc(q)}”</h2></div><span class="note">${d.results.length} page${d.results.length === 1 ? '' : 's'}</span></div>
+  app.innerHTML = box + `<div class="bar"><div class="grow"><h2 style="margin:0">Results for “${esc(q)}”</h2></div><span class="note">${d.results.length} page${d.results.length === 1 ? '' : 's'}</span></div>
     ${d.devices.length ? '<div class="section"><div class="dgrid">' + d.devices.map((v) => '<a class="dcard" href="#/d/' + v.id + '">' + devThumb(v, 40) + '<div class="t"><b>' + esc(v.name) + '</b><span>' + esc([v.make, v.model].filter(Boolean).join(' ')) + '</span><span>' + esc(v.location) + (v.ips.length ? ' <span class="mono">' + esc(v.ips[0]) + '</span>' : '') + '</span></div></a>').join('') + '</div></div>' : ''}
     ${d.results.length ? '<div class="list">' + d.results.map((p) => pageRow(p, { snip: true })).join('') + '</div>'
       : '<div class="card empty">Nothing matches that yet.' + (S.state.user ? '' : ' Some pages are Tech only and need you to sign in.') + (can('editor') ? '<div style="margin-top:12px"><a href="#/new">Write a page about it</a></div>' : '') + '</div>'}`;
+  wire();
 }
 
 // ----- settings -----
@@ -919,6 +958,7 @@ async function route() {
   const qs = new URLSearchParams(query || '');
   const p = pathPart.split('/').filter(Boolean);
   markGear(p[0] === 'settings');
+  Shell.setCtx({});
   if (p[0] !== 'settings') S.lastRoute = h;
   if (p[0] !== 'search') $('#q').value = '';
   try {
@@ -936,13 +976,16 @@ async function route() {
     else if (p[0] === 'd' && p[1] && p[2] === 'edit') await viewDeviceEdit(p[1]);
     else if (p[0] === 'd' && p[1]) await viewDevice(p[1]);
     else if (p[0] === 'search') await viewSearch(qs.get('q') || '');
+    else if (p[0] === 'todo') await viewTodo();
     else if (p[0] === 'settings') await viewSettings(p[1]);
     else app.innerHTML = '<div class="card empty">Page not found. <a href="#/">Go home</a></div>';
     if (n === routing && !S.noScroll) window.scrollTo(0, 0);
     S.noScroll = false;
+    if (n === routing) Shell.update(p);
   } catch (e) {
     if (n !== routing) return;
     if (!S.offline) app.innerHTML = '<div class="card empty">' + esc(e.message) + '<div style="margin-top:12px"><a href="#/">Go home</a></div></div>';
+    Shell.update(p);
   }
 }
 
@@ -957,4 +1000,5 @@ window.addEventListener('hashchange', (e) => {
 });
 window.addEventListener('beforeunload', (e) => { if (S.dirty) { e.preventDefault(); e.returnValue = ''; } });
 
+Shell.init();
 route();

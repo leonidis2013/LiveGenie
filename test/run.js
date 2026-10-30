@@ -529,6 +529,8 @@ test('audio training pages are added to Volunteers once, in signal-flow order', 
 });
 
 test('static files and icons are served with safe headers', async () => {
+  for (const f of ['/shell.js', '/blocks.js', '/setup.js']) assert.strictEqual((await fetch(BASE + f)).status, 200, f + ' is served');
+  assert.ok((await (await fetch(BASE + '/')).text()).includes('id="tabs"'), 'the page has the phone tab bar and desktop sidebar');
   const r = await fetch(BASE + '/');
   assert.strictEqual(r.status, 200);
   assert.ok(r.headers.get('content-security-policy').includes("default-src 'self'"));

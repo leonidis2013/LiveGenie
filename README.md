@@ -4,7 +4,7 @@
 
 The Rolling Hills Community Church AVL knowledge base: one web app where volunteers find how our system works, how to run a service and how to fix what broke. Part of the Live series (LiveMic, LiveCompanion, LivePi, LiveVoice).
 
-Version 0.10.0 · © 2026 Jerod Ulicki
+Version 0.11.0 · © 2026 Jerod Ulicki
 
 ## What it does
 
@@ -35,6 +35,9 @@ Version 0.10.0 · © 2026 Jerod Ulicki
 - **Pictures, search, history, trash.** Phone photos (shrunk to 1600 px), instant search across text, checklists, patch and IP lists, every save kept as a version, deleted pages recoverable.
 - **People and roles.** Name and PIN sign-in. Admin, Editor and Volunteer roles; **Tech only** pages are hidden from volunteers and anyone not signed in. Five wrong PINs lock that person for five minutes.
 - **Backups and updates.** Nightly backups (02:30, kept 14 days), Back up now, download, upload and restore. "Update available" in the header when GitHub has a newer version.
+- **Phone and desktop layouts.** One app, two layouts, picked by screen width (rotate an iPad and it switches):
+  - **Desktop** (computers, and iPad in landscape): a sidebar with search (press **/**), Home, To do with its count, Devices, System map, every space with the one you are in opened to show its pages, New page, Update available, and your account and Settings. On wide screens each page has an **On this page** outline beside it that follows along as you scroll and jumps to a heading, checklist or patch list.
+  - **Phone** (and iPad in portrait): a slim top bar and a bottom tab bar (**Home · To do · Search · Devices · More**) with the To do count on its tab. A **+** button in thumb reach makes a new page, dialogs slide up from the bottom, rows and buttons are bigger, and while editing the tabs make way for a Save bar. **More** holds the spaces, System map, Guided setup, Settings and your account.
 - **Same look as the Live series.** LiveMic's colours, header and LivePi-style settings; Auto / Dark / Light; works one-handed on a phone at FOH.
 
 ## Install on TrueNAS
@@ -99,7 +102,8 @@ Run it on the TrueNAS host and reach it from the AVL and office VLANs through th
 | 0.7.0 | Guided equipment setup, stage box snake inputs/outputs with spares, column roles, port-aware checks, stage box and trunk drawing |
 | 0.8.0 | Cleaner patch table: Every row line, narrow number columns, row ⋯ menu, Columns dialog, autocomplete, hidden spares |
 | 0.9.0 | Audio training modules in Volunteers: gain, high pass, low pass, EQ, compressor |
-| 0.10.0 | Wireless mics and In-ears layouts, wireless link (frequency) checks, receiver and IEM setup, wireless in the guided setup (this release) |
+| 0.10.0 | Wireless mics and In-ears layouts, wireless link (frequency) checks, receiver and IEM setup, wireless in the guided setup |
+| 0.11.0 | Phone layout (bottom tabs, + button, bottom sheets, To do screen) and desktop layout (sidebar with spaces and pages, On this page outline) (this release) |
 | next | Document library, AI drafts from the Jetson, Bitfocus Companion buttons in checklists |
 | later | Document library, AI drafts from the Jetson with citations, review queue, Ask the Genie |
 | later | Bitfocus Companion buttons inside checklists |

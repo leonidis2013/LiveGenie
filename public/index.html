@@ -22,6 +22,18 @@
 <link rel="stylesheet" href="/style.css">
 </head>
 <body>
+<aside id="side" aria-label="LiveGenie">
+  <a class="brand" href="#/" aria-label="LiveGenie home">
+    <img src="/icons/livegenie-glyph.svg" alt="">
+    <h1>LiveGenie <span class="ver" id="sVer"></span><small>AVL knowledge base</small></h1>
+  </a>
+  <form class="search" id="sideSearch" role="search">
+    <svg viewBox="0 0 24 24"><circle cx="11" cy="11" r="7"/><path d="M20 20l-3.5-3.5"/></svg>
+    <input id="sq" type="search" placeholder="Search  ( / )" autocomplete="off" aria-label="Search pages">
+  </form>
+  <nav id="snav"></nav>
+  <div id="sfoot"></div>
+</aside>
 <header id="hdr">
   <a class="brand" href="#/" aria-label="LiveGenie home">
     <img src="/icons/livegenie-glyph.svg" alt="">
@@ -42,12 +54,15 @@
 <div class="offbar"><span class="spin"></span>Lost connection to LiveGenie. Retrying…</div>
 <main id="app"><div class="empty">Loading…</div></main>
 <div id="toast" class="toast"></div>
+<button id="fab" class="fab hide" type="button" aria-label="New page" title="New page"></button>
+<nav id="tabs" aria-label="Sections"></nav>
 <script src="/devmatch.js"></script>
 <script src="/editor.js"></script>
 <script src="/blocks.js"></script>
 <script src="/devices.js"></script>
 <script src="/map.js"></script>
 <script src="/setup.js"></script>
+<script src="/shell.js"></script>
 <script src="/app.js"></script>
 </body>
 </html>

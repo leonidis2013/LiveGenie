@@ -19,19 +19,8 @@ const Blk = (() => {
     cable: { title: 'Cable runs', columns: ['Label', 'From', 'To', 'Type', 'Length', 'Route'], trace: [1, 0, 2] },
     custom: { title: 'Patch list', columns: ['Column 1', 'Column 2', 'Column 3'], trace: [0, 1, 2] }
   };
-  /** Wireless receivers (channels per unit) and in-ear transmitters (transmitters per unit), for the setup dialogs and the guided setup. */
-  const RF_GEAR = {
-    receivers: [
-      { name: 'SLX-D4D', make: 'Shure', model: 'SLX-D4D', ch: 2 }, { name: 'SLX-D4', make: 'Shure', model: 'SLX-D4', ch: 1 },
-      { name: 'ULX-D4D', make: 'Shure', model: 'ULX-D4D', ch: 2 }, { name: 'ULX-D4Q', make: 'Shure', model: 'ULX-D4Q', ch: 4 },
-      { name: 'QLXD4', make: 'Shure', model: 'QLXD4', ch: 1 }, { name: 'AD4D', make: 'Shure', model: 'AD4D', ch: 2 }, { name: 'AD4Q', make: 'Shure', model: 'AD4Q', ch: 4 },
-      { name: 'EW-D EM', make: 'Sennheiser', model: 'EW-D EM', ch: 1 }, { name: 'EW-DX EM 2', make: 'Sennheiser', model: 'EW-DX EM 2', ch: 2 }, { name: 'EW-DX EM 4', make: 'Sennheiser', model: 'EW-DX EM 4', ch: 4 }
-    ],
-    iem: [
-      { name: 'PSM300', make: 'Shure', model: 'P3T', tx: 1 }, { name: 'PSM900', make: 'Shure', model: 'P9T', tx: 1 }, { name: 'PSM1000', make: 'Shure', model: 'P10T', tx: 2 },
-      { name: 'EW IEM G4', make: 'Sennheiser', model: 'SR IEM G4', tx: 1 }, { name: 'Phenyx Pro PTM-10', make: 'Phenyx Pro', model: 'PTM-10', tx: 1 }
-    ]
-  };
+  /** Wireless receivers and in-ear systems from the team's own model list (filled in by GearModels as it loads). */
+  const RF_GEAR = { receivers: [], iem: [] };
   const IP_FIELDS = [['ip', 'IP address'], ['device', 'Device'], ['mac', 'MAC'], ['location', 'Location'], ['notes', 'Notes']];
 
   const tm = (t) => {

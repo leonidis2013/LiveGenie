@@ -47,6 +47,39 @@ async function loadDevices(force) {
 }
 const forgetDevices = () => { DEV.at = 0; };
 
+/**
+ * The team's own list of makes and models. It starts empty and grows as gear is added (stage patch, guided setup),
+ * so next time an SQ-5 or an SLX-D4D is one click, with its inputs, outputs and link already filled in.
+ */
+const GearModels = (() => {
+  let list = null, at = 0;
+  const keyOf = (m) => (m.kind + '|' + (m.make || '') + '|' + m.model).toLowerCase();
+  /** The wireless receivers and in-ear systems feed the older patch list dialogs too. */
+  function sync() {
+    if (typeof Blk === 'undefined' || !Blk.RF_GEAR) return;
+    const R = Blk.RF_GEAR;
+    R.receivers.length = 0; R.iem.length = 0;
+    (list || []).filter((m) => m.kind === 'receiver').forEach((m) => R.receivers.push({ name: m.model, make: m.make, model: m.model, ch: m.nin || 1 }));
+    (list || []).filter((m) => m.kind === 'iemtx').forEach((m) => R.iem.push({ name: m.model, make: m.make, model: m.model, tx: 1 }));
+  }
+  async function load(force) {
+    if (!force && list && Date.now() - at < 30000) return list;
+    try { list = (await get('/api/devices/models')).models; at = Date.now(); } catch (e) { list = list || []; }
+    sync();
+    return list;
+  }
+  async function add(models) {
+    const clean = models.filter((m) => m && m.kind && String(m.model || '').trim());
+    if (!clean.length || !can('admin')) return list || [];
+    try { list = (await call('POST', '/api/devices/models', { add: clean })).models; at = Date.now(); sync(); } catch (e) { /* the gear still gets added */ }
+    return list;
+  }
+  async function remove(m) { list = (await call('POST', '/api/devices/models', { remove: [keyOf(m)] })).models; sync(); return list; }
+  const find = (model, kind) => { const k = String(model || '').trim().toLowerCase(); return k ? (list || []).find((m) => (!kind || m.kind === kind) && m.model.toLowerCase() === k) : null; };
+  const makes = () => [...new Set((list || []).map((m) => m.make).filter(Boolean))].sort((a, b) => a.localeCompare(b));
+  return { load, add, remove, find, makes, keyOf, all: () => list || [] };
+})();
+
 /** Turn device names and IPs inside root into links. */
 function linkDevices(root) {
   if (!root || !DEV.dm || !DEV.dm.size) return;

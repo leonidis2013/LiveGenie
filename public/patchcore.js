@@ -37,7 +37,7 @@
   /*
    * Kinds of gear. col = column it sits in; cat = card colour; ports(g) = default sockets; fields = what it asks for;
    * pass = how a signal gets through it (for tracing): 'same' (input n to output n), 'all' (any input to every output), 'rf' (inputs to its radio link).
-   * card: big gear that gets a device card in the device library.
+   * card: big gear that gets a card in the Gear Locker.
    */
   const KINDS = {
     mic: { label: 'Mic', col: 0, cat: 'source', ports: () => ({ ins: [], outs: ['Out'] }), fields: ['use', 'person', 'model'], counts: false },
@@ -60,46 +60,8 @@
   };
   const FIELD_LABELS = { use: 'Used for', person: 'Who uses it', model: 'Model', capsule: 'Capsule', freq: 'Frequency', mode: 'Mode', phones: 'Earphones', start: 'Console input for In 1', localstart: 'Channel for local In 1', mixes: 'Mixes' };
 
-  /*
-   * The catalog in the right pane: common gear with the right sockets already set.
-   * nin / nout are socket counts; card gear also gets a device card.
-   */
-  const CATALOG = [
-    { group: 'Consoles', items: [
-      { kind: 'console', make: 'Allen & Heath', model: 'SQ-5', nin: 16, nout: 12, link: 'SLink' }, { kind: 'console', make: 'Allen & Heath', model: 'SQ-6', nin: 24, nout: 14, link: 'SLink' },
-      { kind: 'console', make: 'Allen & Heath', model: 'SQ-7', nin: 32, nout: 16, link: 'SLink' }, { kind: 'console', make: 'Behringer', model: 'X32', nin: 32, nout: 16, link: 'AES50' },
-      { kind: 'console', make: 'Midas', model: 'M32', nin: 32, nout: 16, link: 'AES50' }, { kind: 'console', make: 'Yamaha', model: 'TF5', nin: 32, nout: 16, link: 'Dante' },
-      { kind: 'console', make: 'Yamaha', model: 'DM7', nin: 0, nout: 8, link: 'Dante' }, { kind: 'console', make: '', model: 'Console', nin: 16, nout: 8 }] },
-    { group: 'Stage boxes', items: [
-      { kind: 'stagebox', make: 'Allen & Heath', model: 'AR2412', nin: 24, nout: 12, link: 'SLink' }, { kind: 'stagebox', make: 'Allen & Heath', model: 'AR84', nin: 8, nout: 4, link: 'SLink' },
-      { kind: 'stagebox', make: 'Allen & Heath', model: 'AB168', nin: 16, nout: 8, link: 'SLink' }, { kind: 'stagebox', make: 'Allen & Heath', model: 'DX168', nin: 16, nout: 8, link: 'SLink' },
-      { kind: 'stagebox', make: 'Behringer', model: 'S16', nin: 16, nout: 8, link: 'AES50' }, { kind: 'stagebox', make: 'Behringer', model: 'S32', nin: 32, nout: 16, link: 'AES50' },
-      { kind: 'stagebox', make: 'Midas', model: 'DL16', nin: 16, nout: 8, link: 'AES50' }, { kind: 'stagebox', make: 'Midas', model: 'DL32', nin: 32, nout: 16, link: 'AES50' },
-      { kind: 'stagebox', make: 'Yamaha', model: 'Rio3224-D3', nin: 32, nout: 24, link: 'Dante' }, { kind: 'stagebox', make: 'Yamaha', model: 'Rio1608-D2', nin: 16, nout: 8, link: 'Dante' },
-      { kind: 'stagebox', make: 'Yamaha', model: 'Tio1608-D', nin: 16, nout: 8, link: 'Dante' }] },
-    { group: 'Wireless', items: [
-      { kind: 'receiver', make: 'Shure', model: 'SLX-D4D', nin: 2 }, { kind: 'receiver', make: 'Shure', model: 'SLX-D4', nin: 1 }, { kind: 'receiver', make: 'Shure', model: 'ULX-D4D', nin: 2 },
-      { kind: 'receiver', make: 'Shure', model: 'ULX-D4Q', nin: 4 }, { kind: 'receiver', make: 'Shure', model: 'QLXD4', nin: 1 }, { kind: 'receiver', make: 'Shure', model: 'AD4Q', nin: 4 },
-      { kind: 'receiver', make: 'Sennheiser', model: 'EW-DX EM 2', nin: 2 },
-      { kind: 'txmic', make: 'Shure', model: 'Handheld', capsule: 'Beta 58A' }, { kind: 'txmic', make: 'Shure', model: 'Bodypack', capsule: 'Lav' },
-      { kind: 'txmic', make: '', model: 'Headset', capsule: 'Headset' }] },
-    { group: 'In-ears', items: [
-      { kind: 'iemtx', make: 'Shure', model: 'PSM300', mode: 'Stereo' }, { kind: 'iemtx', make: 'Shure', model: 'PSM900', mode: 'Stereo' },
-      { kind: 'iemtx', make: 'Phenyx Pro', model: 'PTM-10', mode: 'Stereo' }, { kind: 'iemtx', make: 'Sennheiser', model: 'EW IEM G4', mode: 'Stereo' },
-      { kind: 'bodypack', make: '', model: 'IEM pack' }, { kind: 'headamp', make: '', model: 'Wired IEM amp' }] },
-    { group: 'Mics and DIs', items: [
-      { kind: 'mic', make: 'Shure', model: 'SM58' }, { kind: 'mic', make: 'Shure', model: 'Beta 58A' }, { kind: 'mic', make: 'Shure', model: 'SM57' },
-      { kind: 'mic', make: 'Shure', model: 'Beta 91A' }, { kind: 'mic', make: 'Shure', model: 'Beta 52A' }, { kind: 'mic', make: 'Shure', model: 'KSM137' },
-      { kind: 'mic', make: '', model: 'Mic' }, { kind: 'di', make: '', model: 'DI', nout: 1 }, { kind: 'di', make: '', model: 'Stereo DI', nout: 2 },
-      { kind: 'source', make: '', model: 'Keys', nout: 2 }, { kind: 'source', make: '', model: 'Playback', nout: 2 }] },
-    { group: 'PA and processing', items: [
-      { kind: 'processor', make: 'dbx', model: 'DriveRack PA2', nin: 2, nout: 6 }, { kind: 'processor', make: 'dbx', model: 'DriveRack VENU360', nin: 3, nout: 6 },
-      { kind: 'amp', make: 'Crown', model: 'XLi 2500', nin: 2 }, { kind: 'amp', make: 'Crown', model: 'XLS 2502', nin: 2 }, { kind: 'amp', make: '', model: 'Amplifier', nin: 2 },
-      { kind: 'speaker', make: 'JBL', model: 'CBT 70J-1' }, { kind: 'speaker', make: 'Yamaha', model: 'DXS12mkII' }, { kind: 'speaker', make: '', model: 'Speaker' },
-      { kind: 'wedge', make: '', model: 'Wedge' }] },
-    { group: 'Other', items: [
-      { kind: 'network', make: '', model: 'Dante network' }, { kind: 'computer', make: '', model: 'Computer', nin: 2, nout: 2 }, { kind: 'other', make: '', model: 'Other', nin: 1, nout: 1 }] }
-  ];
+  /** Kinds in the order the "New gear" form offers them. Makes and models come from the team's own list (it starts empty). */
+  const KIND_ORDER = ['console', 'stagebox', 'receiver', 'txmic', 'mic', 'di', 'source', 'iemtx', 'bodypack', 'headamp', 'processor', 'amp', 'speaker', 'wedge', 'network', 'computer', 'other'];
 
   const str = (v, n) => String(v == null ? '' : v).slice(0, n || 200);
   const key = (v) => String(v || '').trim().toLowerCase();
@@ -127,6 +89,12 @@
       if (g0.kind === 'stagebox' && Number(g0.start) >= 1 && !(g0.chmap && Object.keys(g0.chmap).length)) g._start = Math.min(512, Math.floor(Number(g0.start)));   // older drawings: becomes a channel map below
       for (const f of ['x', 'y']) if (g0[f] != null && g0[f] !== '' && Number.isFinite(Number(g0[f]))) g[f] = Math.round(Math.max(-20000, Math.min(20000, Number(g0[f]))));
       if (g0.open) g.open = true;
+      // the console channel this source is on: its name and colour on the desk (WMIC-1, Kyle; Red)
+      if (str(g0.chname, 32).trim()) g.chname = str(g0.chname, 32).trim();
+      if (str(g0.chcolor, 24).trim()) g.chcolor = str(g0.chcolor, 24).trim();
+      // a console: how long a channel name can be, and the colours it has (set when it was added)
+      if (Number(g0.namelen) >= 1) g.namelen = Math.min(64, Math.floor(Number(g0.namelen)));
+      if (Array.isArray(g0.colors)) { const c = g0.colors.map((x) => str(x, 24).trim()).filter(Boolean).slice(0, 32); if (c.length) g.colors = c; }
       g.order = Number.isFinite(Number(g0.order)) ? Number(g0.order) : 0;
       if (Array.isArray(g0.mixes)) g.mixes = g0.mixes.map((x) => str(x, 40).trim()).filter(Boolean).slice(0, 96);
       g.ins = (Array.isArray(g0.ins) ? g0.ins : portsFor(g0).ins).slice(0, 128).map((x) => str(x, 24));
@@ -187,7 +155,8 @@
   function addGear(doc, item) {
     const kind = KINDS[item.kind] ? item.kind : 'other';
     const g = { id: uid('g'), kind, name: uniqueName(doc, String(item.name || item.model || KINDS[kind].label).trim()) };
-    for (const f of ['make', 'model', 'group', 'use', 'person', 'capsule', 'freq', 'mode', 'phones', 'notes', 'localstart', 'device_id', 'x', 'y']) if (item[f] != null && item[f] !== '') g[f] = item[f];
+    for (const f of ['make', 'model', 'group', 'use', 'person', 'capsule', 'freq', 'mode', 'phones', 'notes', 'localstart', 'device_id', 'x', 'y', 'chname', 'chcolor', 'namelen']) if (item[f] != null && item[f] !== '') g[f] = item[f];
+    if (Array.isArray(item.colors) && item.colors.length) g.colors = item.colors.slice();
     if (kind === 'console') g.mixes = (item.mixes || DEFAULT_MIXES).slice();
     if (kind === 'iemtx' && !g.mode) g.mode = 'Stereo';
     const p = portsFor({ ...g, nin: item.nin, nout: item.nout });
@@ -318,8 +287,8 @@
       if (!g) break;
       r.chain.unshift(g);
       if (g.kind === 'receiver') { r.receiver = g; r.rxch = g.ins[c.ap] || ''; c = ix.into.get(g.id + ':' + c.ap); continue; }
-      if (g.kind === 'txmic') { r.tx = g; r.source = g.use || ''; r.person = g.person || ''; r.mic = g.name; r.capsule = g.capsule || ''; r.freq = g.freq || ''; break; }
-      if (g.kind === 'mic' || g.kind === 'di' || g.kind === 'source') { r.source = g.use || (g.kind === 'source' ? g.name : ''); r.mic = (g.model && g.model !== g.name ? g.model : g.name) + (g.outs.length > 1 ? ' ' + g.outs[c.ap] : ''); r.model = g.model || ''; r.person = g.person || ''; break; }
+      if (g.kind === 'txmic') { r.tx = g; r.src = g; r.source = g.use || ''; r.person = g.person || ''; r.mic = g.name; r.capsule = g.capsule || ''; r.freq = g.freq || ''; break; }
+      if (g.kind === 'mic' || g.kind === 'di' || g.kind === 'source') { r.source = g.use || (g.kind === 'source' ? g.name : ''); r.mic = (g.model && g.model !== g.name ? g.model : g.name) + (g.outs.length > 1 ? ' ' + g.outs[c.ap] : ''); r.model = g.model || ''; r.person = g.person || ''; r.src = g; break; }
       if (g.kind === 'amp' || g.kind === 'processor' || g.kind === 'other' || g.kind === 'computer') { r.source = r.source || g.name; r.mic = r.mic || g.name; break; }
       break;
     }
@@ -408,6 +377,25 @@
       return { tx, feeds, mix: [...new Set(feeds.filter(Boolean).map((f) => f.mix).filter(Boolean))].join(' / '), packs };
     });
   }
+  /** The console channels a source lands on (a stereo DI lands on two). */
+  function landing(doc, g) { return inputs(doc).filter((r) => r.used && r.up.src && r.up.src.id === g.id); }
+  /** Suggested channel names: who uses it, what it is for, or numbered by type (WMIC-1, MIC-2, DI-1, LINE-1). */
+  const PREFIX = { txmic: 'WMIC', mic: 'MIC', di: 'DI', source: 'LINE' };
+  function suggestNames(doc, con, how) {
+    const rows = inputs(doc).filter((r) => r.used && r.up.src && r.console.id === con.id);
+    const count = {};
+    const out = new Map();
+    rows.forEach((r) => {
+      const s = r.up.src;
+      let n = '';
+      if (how === 'person') n = s.person || s.use || '';
+      else if (how === 'use') n = s.use || s.person || '';
+      else { const p = PREFIX[s.kind] || 'CH'; if (!out.has(s.id)) { count[p] = (count[p] || 0) + 1; n = p + '-' + count[p]; } else return; }
+      if (!out.has(s.id) && n) out.set(s.id, con.namelen ? n.slice(0, con.namelen) : n);
+    });
+    return out;
+  }
+
   function cableList(doc) {
     const G = gearBy(doc);
     return doc.cables.map((c) => {
@@ -433,6 +421,12 @@
     const ins = inputs(doc);
     ins.filter((r) => r.used && r.ch != null).forEach((r) => { const k = r.console.id + ':' + r.ch; if (!chans.has(k)) chans.set(k, []); chans.get(k).push(r); });
     for (const [, list] of chans) if (list.length > 1) out.push({ level: 'bad', text: list[0].console.name + ' input ' + list[0].ch + ' gets ' + list.map((r) => r.via.name + ' ' + r.port).join(' and ') + '. Assign one of them another channel.', gear: list.map((r) => r.via.id) });
+    // channel names and colours that the console cannot take
+    ins.filter((r) => r.used && r.up.src).forEach((r) => {
+      const s = r.up.src, con = r.console;
+      if (s.chname && con.namelen && s.chname.length > con.namelen) out.push({ level: 'warn', text: con.name + ' ch ' + (r.ch == null ? '?' : r.ch) + ': "' + s.chname + '" is ' + s.chname.length + ' letters; the ' + con.name + ' shows ' + con.namelen + '.', gear: [s.id] });
+      if (s.chcolor && con.colors && !con.colors.some((c) => key(c) === key(s.chcolor))) out.push({ level: 'warn', text: con.name + ' ch ' + (r.ch == null ? '?' : r.ch) + ': ' + s.chcolor + ' is not one of the ' + con.name + "'s colours.", gear: [s.id] });
+    });
     ins.filter((r) => r.used && r.ch == null).forEach((r) => out.push({ level: 'warn', text: r.via.name + ' ' + r.port + (r.up.source ? ' (' + r.up.source + ')' : '') + ' is not on a ' + r.console.name + ' channel yet. Assign it on the stage box.', gear: [r.via.id] }));
     doc.gear.filter((g) => g.kind === 'stagebox' && !ix.consolesOf(g.id).length).forEach((g) => out.push({ level: 'warn', text: g.name + ' is not linked to a console. Draw its link to the console.', gear: [g.id] }));
     doc.gear.filter((g) => g.kind === 'txmic' && !(ix.from.get(g.id + ':0') || []).length).forEach((g) => out.push({ level: 'note', text: g.name + ' is not on a receiver channel yet.', gear: [g.id] }));
@@ -441,7 +435,7 @@
   }
 
   /** Short text for search and the device "used on" list. */
-  function searchText(g) { return [g.name, g.use, g.person, g.model, g.make, g.capsule, g.freq, g.group, g.phones, g.notes].filter(Boolean).join(' '); }
+  function searchText(g) { return [g.name, g.use, g.person, g.chname, g.model, g.make, g.capsule, g.freq, g.group, g.phones, g.notes].filter(Boolean).join(' '); }
 
-  return { COLS, CATS, CABLES, KINDS, CATALOG, FIELD_LABELS, DEFAULT_MIXES, clean, portsFor, addGear, resize, removeGear, connect, members, hostOf, addMember, assignChannels, chanOf, guessCable, findGear, freeIn, uniqueName, index, upstream, downstream, chainText, inputs, outputs, wireless, inears, cableList, checks, searchText, colOf: (g) => (KINDS[g.kind] || KINDS.other).col };
+  return { COLS, CATS, CABLES, KINDS, KIND_ORDER, FIELD_LABELS, DEFAULT_MIXES, clean, portsFor, addGear, resize, removeGear, connect, members, hostOf, addMember, assignChannels, chanOf, landing, suggestNames, guessCable, findGear, freeIn, uniqueName, index, upstream, downstream, chainText, inputs, outputs, wireless, inears, cableList, checks, searchText, colOf: (g) => (KINDS[g.kind] || KINDS.other).col };
 });

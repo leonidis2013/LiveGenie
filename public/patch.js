@@ -22,6 +22,10 @@ const PatchView = (() => {
   const key = (v) => String(v || '').trim().toLowerCase();
   const snap = (v) => Math.round(v / GRID) * GRID;
   const who = (g) => [g.person, g.use].filter(Boolean).join(' · ');
+  /** A console colour name as a colour on screen (Red, Lt Blue, Magenta, Off…). */
+  const COLOR_CSS = { red: '#ef4444', green: '#22c55e', yellow: '#eab308', blue: '#3b82f6', 'light blue': '#38bdf8', 'lt blue': '#38bdf8', cyan: '#06b6d4', purple: '#a855f7', magenta: '#d946ef', pink: '#ec4899', orange: '#f97316', white: '#e5e7eb', black: '#111827', grey: '#9ca3af', gray: '#9ca3af', brown: '#92400e', off: 'transparent' };
+  const colorCss = (c) => COLOR_CSS[key(c)] || COLOR_CSS[key(c).replace(/^(dark|light|lt|dk)\s*/, '')] || '#9ca3af';
+  const SRC_KINDS = ['mic', 'di', 'source', 'txmic'];
 
   // ================= cards =================
   /** Gear drawn as cards: everything except mics and packs that live inside a wireless system. */
@@ -309,6 +313,7 @@ const PatchView = (() => {
         t = (u.source && u.source !== a.name ? u.source + ' · ' : '') + a.name + (a.outs.length > 1 ? ' ' + a.outs[c.ap] : '');
       }
       if (g.kind === 'stagebox') { const ch = P.chanOf(g, i); if (ch != null) t = (t ? t + ' ' : '') + '→ Ch ' + ch; else if (c) t += ' · no ch'; }
+      if (g.kind === 'console' && c) { const u = P.upstream(doc, ix, g.id, i); if (u.src && u.src.chname) t = u.src.chname + ' ← ' + t; }
       return t;
     }
     const to = (ix.from.get(g.id + ':' + i) || []).map((c) => { const b = ix.G.get(c.b); return b ? b.name + (b.ins.length > 1 ? ' ' + b.ins[c.bp] : '') : ''; }).filter(Boolean);
@@ -364,8 +369,9 @@ const PatchView = (() => {
       if (r.head) { s += '<text class="chd" x="' + (x + 12) + '" y="' + (ry + 4) + '">' + esc(r.head.toUpperCase()) + '</text>'; return; }
       if (r.slink) {
         const sl = r.slink, u = P.upstream(doc, ix, sl.sb.id, sl.i);
-        const t = sl.sb.name + ' ' + sl.sb.ins[sl.i] + (u.source ? ' · ' + u.source : u.mic ? ' · ' + u.mic : '');
-        s += '<g class="crow slk' + (sl.used ? ' used' : '') + '" data-g="' + sl.sb.id + '"><text x="' + (x + 12) + '" y="' + (ry + 4) + '"><tspan class="pn">Ch ' + sl.ch + '</tspan> ← ' + esc(cut(t, Math.floor((w - 60) / 6.1))) + '</text></g>';
+        const nm = u.src && u.src.chname ? u.src.chname : '';
+        const t = (nm ? nm + ' ← ' : '← ') + sl.sb.name + ' ' + sl.sb.ins[sl.i] + (!nm && u.source ? ' · ' + u.source : !nm && u.mic ? ' · ' + u.mic : '');
+        s += '<g class="crow slk' + (sl.used ? ' used' : '') + '" data-g="' + sl.sb.id + '">' + (u.src && u.src.chcolor ? '<rect class="chc" x="' + (x + 6) + '" y="' + (ry - 6) + '" width="3" height="12" rx="1.5" fill="' + colorCss(u.src.chcolor) + '"/>' : '') + '<text x="' + (x + 12) + '" y="' + (ry + 4) + '"><tspan class="pn">Ch ' + sl.ch + '</tspan> ' + esc(cut(t, Math.floor((w - 60) / 6.1))) + '</text></g>';
         return;
       }
       if (r.pack) {
@@ -514,10 +520,12 @@ const PatchView = (() => {
       const all = P.inputs(doc).filter((r) => match(r.console.name, r.via.name, r.up.source, r.up.mic));
       const used = all.filter((r) => r.used || opts.spares);
       const spare = all.length - all.filter((r) => r.used).length;
-      return T([['Ch', 1], ['Source'], ['Mic / DI'], ['Wireless'], ['Stage box'], ['Console']], used.map((r) => {
+      return T([['Ch', 1], ['Name', 1], ['Source'], ['Mic / DI'], ['Wireless'], ['Stage box'], ['Console']], used.map((r) => {
         const u = r.up;
         const wl = u.tx ? esc([u.capsule, u.freq && u.freq + ' MHz', u.receiver && u.receiver.name + ' ' + u.rxch].filter(Boolean).join(' · ')) : '';
-        return tr([r.via.id, ...u.chain.map((g) => g.id)], ['<b>' + ch(r) + '</b>', esc([u.source, u.person].filter(Boolean).join(' · ') || (r.used ? '' : '—')), esc(u.mic || ''), wl, esc(r.via.kind === 'console' ? r.port : r.via.name + ' ' + r.port), esc(r.console.name)]);
+        const src = u.src;
+        const nm = src && (src.chname || src.chcolor) ? '<span class="chn">' + (src.chcolor ? '<i style="background:' + colorCss(src.chcolor) + '" title="' + esc(src.chcolor) + '"></i>' : '') + esc(src.chname || '') + '</span>' : '';
+        return tr([r.via.id, ...u.chain.map((g) => g.id)], ['<b>' + ch(r) + '</b>', nm, esc([u.source, u.person].filter(Boolean).join(' · ') || (r.used ? '' : '—')), esc(u.mic || ''), wl, esc(r.via.kind === 'console' ? r.port : r.via.name + ' ' + r.port), esc(r.console.name)]);
       }), 'No inputs yet. Draw a mic or receiver to a stage box or the console.') + (spare && !opts.spares && !opts.noSpare ? '<div class="note" style="margin-top:6px">' + spare + ' spare stage box input' + (spare === 1 ? '' : 's') + ' not listed.</div>' : '');
     }
     if (report === 'outputs') {
@@ -546,7 +554,7 @@ const PatchView = (() => {
   async function view(qs) {
     setTitle('Stage patch');
     let data = await get('/api/patch');
-    await loadDevices();
+    await Promise.all([loadDevices(), GearModels.load()]);
     const st = {
       doc: data.doc, version: data.version, edit: false, sel: [], selCable: null, selSocket: null,
       undo: [], redo: [], tf: null, report: 'inputs', saving: false, dirtySave: false, pending: null, spares: false,
@@ -861,6 +869,7 @@ const PatchView = (() => {
           if (g.kind === 'receiver') it('Add a mic to a channel', () => memberDialog(g));
           if (g.kind === 'iemtx') it('Add an IEM pack', () => memberDialog(g));
           if (g.kind === 'stagebox') it('Assign console channels…', () => channelDialog(g));
+          if (g.kind === 'console') it('Channel names and colours…', () => namesDialog(g));
           const m = D.models.get(g.id);
           if (m && !m.small) it(g.open ? 'Show used sockets only' : 'Show every socket', () => change(() => { g.open = !g.open; if (!g.open) delete g.open; }, null, true));
           if (host) it('Take out of ' + host.name, () => change(() => { st.doc.cables = st.doc.cables.filter((c) => !((c.a === g.id || c.b === g.id) && c.kind === 'rf')); delete g.x; delete g.y; }, g.name + ' is on its own now'));
@@ -929,7 +938,7 @@ const PatchView = (() => {
       picker(a, b, { port, toIn: sk ? Number(sk.dataset.p) : null });
     }
     function linkLabel(a, b) {
-      const it = P.CATALOG.flatMap((g) => g.items).find((x) => (x.model === a.model || x.model === b.model) && x.link);
+      const it = [a, b].map((g) => GearModels.find(g.model, g.kind)).find((m) => m && m.link);
       return it ? it.link : (a.kind === 'network' || b.kind === 'network' ? 'Dante' : '');
     }
     const linked = (a, b) => st.doc.cables.some((c) => c.ap === 'link' && ((c.a === a.id && c.b === b.id) || (c.a === b.id && c.b === a.id)));
@@ -1055,6 +1064,7 @@ const PatchView = (() => {
         '<div><label>first channel</label><input id="pc_1" type="number" min="1" value="' + (con ? freeChannel(con) : 1) + '"></div></div><div class="acts" style="justify-content:flex-start;margin-top:6px"><button type="button" class="btn" id="pc_go">Fill in</button><button type="button" class="ghost" id="pc_clr">Clear these</button></div></div>' +
         '<form id="pcm"><div class="pchgrid">' + sb.ins.map((p, i) => { const u = P.upstream(st.doc, ix, sb.id, i); return '<label class="' + (u.chain.length ? 'used' : '') + '"><span><b>' + esc(p) + '</b> ' + esc(cut(u.source || u.mic || '', 18)) + '</span><input type="number" min="1" max="512" data-i="' + i + '" value="' + (P.chanOf(sb, i) || '') + '" placeholder="—"></label>'; }).join('') + '</div>' +
         '<div class="acts"><button type="button" data-close>Cancel</button><button class="primary">Save</button></div></form>', (w, close) => {
+        w.classList.add('mwide');
         $('#pc_go', w).addEventListener('click', () => { const f = Number($('#pc_f', w).value), t = Number($('#pc_t', w).value), c1 = Math.max(1, Number($('#pc_1', w).value) || 1); for (let i = Math.min(f, t); i <= Math.max(f, t); i++) $('[data-i="' + i + '"]', w).value = c1 + i - Math.min(f, t); });
         $('#pc_clr', w).addEventListener('click', () => { const f = Number($('#pc_f', w).value), t = Number($('#pc_t', w).value); for (let i = Math.min(f, t); i <= Math.max(f, t); i++) $('[data-i="' + i + '"]', w).value = ''; });
         $('#pcm', w).addEventListener('submit', (e) => {
@@ -1062,6 +1072,47 @@ const PatchView = (() => {
           const map = {}; $$('[data-i]', w).forEach((inp) => { const v = Number(inp.value); if (v >= 1) map[Number(inp.dataset.i)] = Math.floor(v); });
           close();
           change(() => { gearOf(sb.id).chmap = map; }, 'Channels saved');
+        });
+      });
+    }
+    /**
+     * Every channel on a console with its name and colour, the way the desk will show them.
+     * Fill names from who uses it, what it is for, or numbered by type (WMIC-1, MIC-1, DI-1); download as a list.
+     */
+    function namesDialog(con) {
+      const rows = P.inputs(st.doc).filter((r) => r.console.id === con.id && r.used && r.up.src);
+      const seen = new Set();
+      const list = rows.filter((r) => { if (seen.has(r.up.src.id + ':' + r.ch)) return false; seen.add(r.up.src.id + ':' + r.ch); return true; });
+      const pal = con.colors || null, len = con.namelen || 0;
+      const ro = !st.edit;
+      const colorSel = (r) => pal ? '<select data-cc="' + r.up.src.id + '"' + (ro ? ' disabled' : '') + '><option value="">—</option>' + pal.map((c) => '<option' + (key(c) === key(r.up.src.chcolor) ? ' selected' : '') + '>' + esc(c) + '</option>').join('') + '</select>' : '<input data-cc="' + r.up.src.id + '" value="' + esc(r.up.src.chcolor || '') + '" placeholder="Red"' + (ro ? ' disabled' : '') + '>';
+      modal('<h3>' + esc(con.name) + ' channel names</h3><p class="note">' + (len ? 'Names up to ' + len + ' letters' : 'Set the most letters a name can have on the console card, so names fit the desk') + (pal ? ' · colours: ' + esc(pal.join(', ')) : ' · no colour list set on the console yet') + '.</p>' +
+        (ro ? '' : '<div class="pkbox"><span class="note">Fill empty names from</span> <button type="button" class="btn sm" data-fill="person">Who uses it</button><button type="button" class="btn sm" data-fill="use">Used for</button><button type="button" class="btn sm" data-fill="type">Numbered (WMIC-1, MIC-1, DI-1)</button> <label class="tog sm"><input type="checkbox" id="pn_all"> Replace all</label></div>') +
+        (list.length ? '<div class="pnames"><div class="pnh"><span>Ch</span><span>Source</span><span>Name</span><span>Colour</span></div>' + list.map((r) => '<div class="pnr"><b>' + (r.ch == null ? '—' : r.ch) + '</b><span class="note">' + esc(cut([r.up.source, r.up.person, r.up.mic].filter(Boolean).join(' · ') || r.via.name + ' ' + r.port, 34)) + '</span>' +
+          '<span class="pnn"><i class="sw" data-sw="' + r.up.src.id + '" style="background:' + (r.up.src.chcolor ? colorCss(r.up.src.chcolor) : 'transparent') + '"></i><input data-cn="' + r.up.src.id + '" value="' + esc(r.up.src.chname || '') + '"' + (len ? ' maxlength="' + len + '"' : '') + (ro ? ' disabled' : '') + '></span>' + colorSel(r) + '</div>').join('') + '</div>'
+          : '<p class="note">Nothing is on a ' + esc(con.name) + ' channel yet.</p>') +
+        '<div class="acts"><button type="button" class="ghost" id="pn_csv">' + icon('download') + 'Download list</button><span class="grow"></span><button type="button" data-close>' + (ro ? 'Close' : 'Cancel') + '</button>' + (ro ? '' : '<button class="primary" id="pn_ok">Save</button>') + '</div>', (w, close) => {
+        w.classList.add('mwide');
+        $$('[data-cc]', w).forEach((x) => x.addEventListener('change', () => { const sw = $('[data-sw="' + x.dataset.cc + '"]', w); if (sw) sw.style.background = x.value ? colorCss(x.value) : 'transparent'; }));
+        $$('[data-fill]', w).forEach((b) => b.addEventListener('click', () => {
+          const sug = P.suggestNames(st.doc, con, b.dataset.fill), all = $('#pn_all', w).checked;
+          sug.forEach((n, id) => { const inp = $('[data-cn="' + id + '"]', w); if (inp && (all || !inp.value.trim())) inp.value = n; });
+        }));
+        $('#pn_csv', w).addEventListener('click', () => {
+          const q = (v) => '"' + String(v == null ? '' : v).replace(/"/g, '""') + '"';
+          const lines = [['Channel', 'Name', 'Colour', 'Source', 'Who', 'Mic / DI', 'Socket'].map(q).join(',')].concat(list.map((r) => {
+            const id = r.up.src.id, n = $('[data-cn="' + id + '"]', w), c = $('[data-cc="' + id + '"]', w);
+            return [r.ch, n ? n.value : r.up.src.chname, c ? c.value : r.up.src.chcolor, r.up.source, r.up.person, r.up.mic, r.via.kind === 'console' ? r.port : r.via.name + ' ' + r.port].map(q).join(',');
+          }));
+          const a = document.createElement('a');
+          a.href = URL.createObjectURL(new Blob([lines.join('\r\n')], { type: 'text/csv' }));
+          a.download = con.name.replace(/[^\w-]+/g, '_') + '-channels.csv'; a.click(); setTimeout(() => URL.revokeObjectURL(a.href), 2000);
+        });
+        const ok = $('#pn_ok', w);
+        if (ok) ok.addEventListener('click', () => {
+          const vals = list.map((r) => ({ id: r.up.src.id, n: ($('[data-cn="' + r.up.src.id + '"]', w) || {}).value, c: ($('[data-cc="' + r.up.src.id + '"]', w) || {}).value }));
+          close();
+          change(() => vals.forEach((v) => { const g = gearOf(v.id); if (!g) return; const n = String(v.n || '').trim(), c = String(v.c || '').trim(); if (n) g.chname = n; else delete g.chname; if (c) g.chcolor = c; else delete g.chcolor; }), 'Channel names saved');
         });
       });
     }
@@ -1171,20 +1222,73 @@ const PatchView = (() => {
         '<p class="note">' + st.doc.gear.length + ' pieces of gear, ' + st.doc.cables.length + ' cables.' + (canEdit ? ' Tap <b>Edit</b> to add gear and draw cables.' : '') + '</p>';
     }
 
+    /*
+     * Adding equipment. No built-in catalog: the "New gear" form takes a type, make and model (and its sockets),
+     * adds it to the drawing and remembers the model, so the list below grows with the team's own gear.
+     */
+    const NEWF = {
+      console: [['nin', 'Local inputs', 16], ['nout', 'Local outputs', 12], ['link', 'Link to stage boxes', 'SLink'], ['namelen', 'Channel name: most letters', ''], ['colors', 'Channel colours (comma between)', '']],
+      stagebox: [['nin', 'Inputs', 16], ['nout', 'Outputs', 8], ['link', 'Link to the console', 'SLink']],
+      receiver: [['nin', 'Channels', 2]], amp: [['nin', 'Channels', 2]],
+      processor: [['nin', 'Inputs', 2], ['nout', 'Outputs', 6]], source: [['nout', 'Outputs', 2]],
+      computer: [['nin', 'Inputs', 2], ['nout', 'Outputs', 2]], other: [['nin', 'Inputs', 1], ['nout', 'Outputs', 1]],
+      di: [['nout', 'Outputs (1 mono, 2 stereo)', 1]], txmic: [['capsule', 'Capsule', '']], iemtx: [['mode', 'Mode', 'Stereo']]
+    };
     function addPane(host) {
       const onPatch = new Set(st.doc.gear.map((g) => g.device_id).filter(Boolean));
       const devs = ((typeof DEV !== 'undefined' && DEV.list) || []).filter((d) => !onPatch.has(d.id) && d.category === 'audio');
-      host.innerHTML = '<div class="pph"><b>Add equipment</b></div>' + (st.placeAt ? '<p class="note">It goes where you right-clicked.</p>' : '') + '<input type="search" id="pfind" placeholder="Find gear: SM58, AR2412, PSM…" class="pfind">' +
+      const pre = st.prefill || {};
+      const kind = pre.kind || st.newKind || 'mic';
+      const models = GearModels.all();
+      const byKind = P.KIND_ORDER.map((k) => [k, models.filter((m) => m.kind === k).sort((a, b) => (a.make + a.model).localeCompare(b.make + b.model))]).filter(([, l]) => l.length);
+      const fields = (NEWF[kind] || []).map(([f, label, def]) => {
+        const v = pre[f] != null ? pre[f] : def;
+        if (f === 'mode') return '<label>' + label + '<select data-nf="mode"><option>Stereo</option><option' + (v === 'Mono' ? ' selected' : '') + '>Mono</option></select></label>';
+        const num = ['nin', 'nout', 'namelen'].includes(f);
+        return '<label>' + label + '<input data-nf="' + f + '"' + (num ? ' type="number" min="0" max="128"' : '') + ' value="' + esc(Array.isArray(v) ? v.join(', ') : v) + '"' + (f === 'colors' ? ' placeholder="Red, Green, Yellow, Blue, Purple, Cyan, White"' : f === 'namelen' ? ' placeholder="no limit"' : '') + '></label>';
+      }).join('');
+      host.innerHTML = '<div class="pph"><b>Add equipment</b></div>' + (st.placeAt ? '<p class="note">It goes where you right-clicked.</p>' : '') +
+        '<form class="pnew" id="pnew"><div class="pch">New gear' + (pre.device_id ? ' · from the Gear Locker' : '') + '</div>' +
+        '<label>Type<select id="pn_k">' + P.KIND_ORDER.map((k) => '<option value="' + k + '"' + (k === kind ? ' selected' : '') + '>' + esc(P.KINDS[k].label) + '</option>').join('') + '</select></label>' +
+        '<div class="two"><label>Make<input id="pn_mk" list="pn_mks" value="' + esc(pre.make || '') + '" placeholder="Allen &amp; Heath"></label><label>Model<input id="pn_md" value="' + esc(pre.model || '') + '" placeholder="SQ-5" required></label></div>' +
+        '<datalist id="pn_mks">' + GearModels.makes().map((m) => '<option value="' + esc(m) + '">').join('') + '</datalist>' +
+        (fields ? '<div class="two pnf">' + fields + '</div>' : '') +
+        '<div class="acts"><span class="note grow">Saved to your list for next time</span>' + (pre.device_id ? '<button type="button" class="ghost" id="pn_x">Cancel</button>' : '') + '<button class="primary">' + icon('plus') + 'Add</button></div></form>' +
+        '<input type="search" id="pfind" placeholder="Find in your list and Gear Locker" class="pfind">' +
         (devs.length ? '<div class="pcat"><div class="pch">From your Gear Locker</div><div class="pitems">' + devs.map((d) => '<button class="pitem" data-dev="' + d.id + '"><b>' + esc(d.name) + '</b><span>' + esc([d.make, d.model].filter(Boolean).join(' ')) + '</span></button>').join('') + '</div></div>' : '') +
-        P.CATALOG.map((grp, gi) => '<div class="pcat"><div class="pch">' + esc(grp.group) + '</div><div class="pitems">' + grp.items.map((it, ii) => '<button class="pitem cat-' + P.KINDS[it.kind].cat + '" data-cat="' + gi + ':' + ii + '"><b>' + esc(it.model) + '</b><span>' + esc([it.make, P.KINDS[it.kind].label].filter(Boolean).join(' · ')) + '</span></button>').join('') + '</div></div>').join('');
+        (byKind.length ? byKind.map(([k, l]) => '<div class="pcat"><div class="pch">' + esc(P.KINDS[k].label) + '</div><div class="pitems">' + l.map((m) => '<div class="pitemw"><button class="pitem cat-' + P.KINDS[k].cat + '" data-mod="' + esc(GearModels.keyOf(m)) + '"><b>' + esc(m.model) + '</b><span>' + esc([m.make, m.nin != null && k !== 'receiver' && k !== 'amp' ? m.nin + ' in' : '', m.nout ? m.nout + ' out' : '', (k === 'receiver' || k === 'amp') && m.nin ? m.nin + ' ch' : '', m.link].filter(Boolean).join(' · ')) + '</span></button><button type="button" class="pforget2" data-forget="' + esc(GearModels.keyOf(m)) + '" title="Take off your list">' + icon('x') + '</button></div>').join('') + '</div></div>').join('')
+          : '<p class="note pempty2">Your list is empty. Each make and model you add above is kept here, so next time it is one tap.</p>');
       const find = $('#pfind', host);
       find.addEventListener('input', () => {
         const q = key(find.value);
-        $$('.pitem', host).forEach((b) => b.classList.toggle('hide', !!q && !key(b.textContent).includes(q)));
-        $$('.pcat', host).forEach((c) => c.classList.toggle('hide', !!q && !c.querySelector('.pitem:not(.hide)')));
+        $$('.pitem', host).forEach((b) => (b.closest('.pitemw') || b).classList.toggle('hide', !!q && !key(b.textContent).includes(q)));
+        $$('.pcat', host).forEach((c) => c.classList.toggle('hide', !!q && !c.querySelector('.pitem:not(.hide)') && !c.querySelector('.pitemw:not(.hide)')));
       });
-      $$('[data-cat]', host).forEach((b) => b.addEventListener('click', () => { const [gi, ii] = b.dataset.cat.split(':').map(Number); addItem({ ...P.CATALOG[gi].items[ii] }); }));
-      $$('[data-dev]', host).forEach((b) => b.addEventListener('click', () => { const d = DEV.list.find((x) => x.id === Number(b.dataset.dev)); addDevice(d); }));
+      $('#pn_k', host).addEventListener('change', (e) => { st.newKind = e.target.value; st.prefill = { ...(st.prefill || {}), kind: e.target.value, make: $('#pn_mk', host).value, model: $('#pn_md', host).value }; addPane(host); });
+      const px = $('#pn_x', host); if (px) px.addEventListener('click', () => { st.prefill = null; addPane(host); });
+      $('#pnew', host).addEventListener('submit', async (e) => {
+        e.preventDefault();
+        const k = $('#pn_k', host).value, make = $('#pn_mk', host).value.trim(), model = $('#pn_md', host).value.trim();
+        if (!model) return toast('Type the model', 'bad');
+        const m = { kind: k, make, model };
+        $$('[data-nf]', host).forEach((x) => {
+          const f = x.dataset.nf, v = x.value.trim();
+          if (['nin', 'nout', 'namelen'].includes(f)) { if (v !== '') m[f] = Math.max(0, Math.min(128, Number(v) || 0)); }
+          else if (f === 'colors') { const c = v.split(',').map((y) => y.trim()).filter(Boolean); if (c.length) m.colors = c; }
+          else if (v) m[f] = v;
+        });
+        const p0 = st.prefill; st.prefill = null; st.newKind = k;
+        await GearModels.add([m]);
+        if (p0 && p0.device_id) placeItem({ ...m, name: p0.name, device_id: p0.device_id }, p0.name);
+        else addItem(m);
+      });
+      $$('[data-mod]', host).forEach((b) => b.addEventListener('click', () => { const m = GearModels.all().find((x) => GearModels.keyOf(x) === b.dataset.mod); if (m) addItem({ ...m }); }));
+      $$('[data-forget]', host).forEach((b) => b.addEventListener('click', async () => {
+        const m = GearModels.all().find((x) => GearModels.keyOf(x) === b.dataset.forget); if (!m) return;
+        try { await GearModels.remove(m); toast((m.make ? m.make + ' ' : '') + m.model + ' taken off your list'); addPane(host); } catch (e) { toast(e.message, 'bad'); }
+      }));
+      $$('[data-dev]', host).forEach((b) => b.addEventListener('click', () => { const d = DEV.list.find((x) => x.id === Number(b.dataset.dev)); addDevice(d, host); }));
+      if (st.prefill) setTimeout(() => { const f = $('#pn_k', host); if (f) f.focus(); }, 30);
     }
     /** Where new gear goes: where you right-clicked, else the middle of what you can see, in a free spot. */
     function newSpot(item) {
@@ -1195,14 +1299,22 @@ const PatchView = (() => {
       const h = HEAD + Math.min(6, (item.nin || 1)) * ROW + FOOT;
       return freeSpot(rects, CW, h, c.x, c.y);
     }
-    function catalogFor(name) { const k = key(name); return P.CATALOG.flatMap((g) => g.items).find((it) => k && (k === key(it.model) || k.startsWith(key(it.model)) || k.includes(key(it.model)))); }
-    function addDevice(d) {
-      const it = catalogFor(d.model) || catalogFor(d.name) || { kind: d.inputs && d.outputs ? 'other' : d.outputs ? 'receiver' : 'other', make: d.make, model: d.model };
-      const item = { ...it, name: d.name, make: d.make || it.make, model: d.model || it.model, device_id: d.id };
-      if (d.inputs) item.nin = d.inputs; if (d.outputs) item.nout = d.outputs;
-      if (it.kind === 'receiver' && d.outputs) item.nin = d.outputs;
+    /** A card from the Gear Locker: its model from your list when it is there, else the New gear form asks what it is. */
+    function addDevice(d, host) {
+      const m = GearModels.find(d.model) || GearModels.find(d.name);
+      if (!m && !d.kind) {
+        st.prefill = { make: d.make, model: d.model || d.name, name: d.name, device_id: d.id, nin: d.inputs || undefined, nout: d.outputs || undefined };
+        if (host) addPane(host); else paintPane();
+        toast('What type of gear is ' + d.name + '? Pick it in the form.');
+        return;
+      }
+      const item = { ...(m || { kind: d.kind }), name: d.name, make: d.make || (m && m.make), model: d.model || (m && m.model), device_id: d.id };
+      if (!m && d.inputs) item.nin = d.inputs; if (!m && d.outputs) item.nout = d.outputs;
+      placeItem(item, d.name);
+    }
+    function placeItem(item, name) {
       Object.assign(item, newSpot(item));
-      const g = change(() => P.addGear(st.doc, item), 'Added ' + d.name);
+      const g = change(() => P.addGear(st.doc, item), 'Added ' + name);
       select({ gear: [g.id] }, { noSheet: true }); closeSheet();
       focusGear(g.id);
     }
@@ -1247,7 +1359,7 @@ const PatchView = (() => {
         ['In', host2 ? host2.name + (g.kind === 'txmic' ? ' ' + host2.ins[(st.doc.cables.find((c) => c.a === g.id && c.kind === 'rf') || {}).bp] : '') : ''], ['Section', g.group], ['Notes', g.notes]].filter((f) => f[1]);
       let html = '<div class="pph"><button class="ghost pback" id="pbk" title="Back">' + icon('x') + '</button><span class="pkind cat-' + k.cat + '">' + esc(k.label) + '</span>' + (host2 ? '<button class="linkbtn" id="phost">in ' + esc(host2.name) + '</button>' : '') + '</div>' +
         (ro ? '<h3 class="pname">' + esc(g.name) + '</h3><div class="pfacts">' + facts.map((f) => '<div><span>' + f[0] + '</span><b>' + esc(f[1]) + '</b></div>').join('') + '</div>' : '<div class="pform">' + fld('name', 'Name', g.name) +
-        (k.fields.includes('person') ? fld('person', 'Who uses it', g.person, ' list="pppl" placeholder="Sarah"') + '<datalist id="pppl">' + peopleList().map((p) => '<option value="' + esc(p) + '">').join('') + '</datalist>' : '') +
+        (k.fields.includes('person') ? fld('person', 'Who uses it', g.person, ' list="pppl" placeholder="Name"') + '<datalist id="pppl">' + peopleList().map((p) => '<option value="' + esc(p) + '">').join('') + '</datalist>' : '') +
         (k.fields.includes('use') ? fld('use', 'Used for', g.use, ' placeholder="Kick, Pastor, Keys L"') : '') +
         fld('make', 'Make', g.make) + (k.fields.includes('model') ? fld('model', 'Model', g.model) : '') +
         (k.fields.includes('capsule') ? fld('capsule', 'Capsule', g.capsule, ' placeholder="Beta 58A, TL47"') : '') +
@@ -1255,6 +1367,7 @@ const PatchView = (() => {
         (k.fields.includes('mode') ? '<label>Mode<select data-f="mode"' + (ro ? ' disabled' : '') + '><option' + (g.mode !== 'Mono' ? ' selected' : '') + '>Stereo</option><option' + (g.mode === 'Mono' ? ' selected' : '') + '>Mono</option></select></label>' : '') +
         (k.fields.includes('phones') ? fld('phones', 'Earphones', g.phones) : '') +
         (k.fields.includes('localstart') ? fld('localstart', 'Channel for local In 1', g.localstart || 1, ' type="number" min="1"') : '') +
+        (g.kind === 'console' ? '<div class="two">' + fld('namelen', 'Channel name: most letters', g.namelen || '', ' type="number" min="0" max="64" placeholder="no limit"') + fld('colors', 'Channel colours (comma between)', (g.colors || []).join(', '), ' placeholder="Red, Green, Yellow, Blue"') + '</div>' : '') +
         (k.fields.includes('mixes') ? '<label>Mixes <span class="note">(comma between)</span><textarea data-f="mixes" rows="2"' + (ro ? ' disabled' : '') + '>' + esc((g.mixes || P.DEFAULT_MIXES).join(', ')) + '</textarea></label>' : '') +
         (k.counts === 'both' ? '<div class="two">' + fld('nin', 'Inputs', g.ins.length, ' type="number" min="0" max="128"') + fld('nout', 'Outputs', g.outs.length, ' type="number" min="0" max="128"') + '</div>' : '') +
         (k.counts === 'ch' ? fld('nch', 'Channels', g.ins.length, ' type="number" min="1" max="' + (g.kind === 'amp' ? 4 : 16) + '"') : '') +
@@ -1287,7 +1400,19 @@ const PatchView = (() => {
         html += '<div class="pmem"><div class="pch">Console channels</div><p class="note">' + (mapped ? mapped + ' of ' + g.ins.length + ' inputs assigned' + (con ? ' to ' + esc(con.name) : '') : 'No inputs assigned to console channels yet.') + '</p>' +
           (st.edit ? '<button class="btn" id="pchan">' + icon('list') + 'Assign console channels</button>' : '') + '</div>';
       }
+      if (SRC_KINDS.includes(g.kind)) {
+        // the console channel it lands on: name and colour on the desk
+        const land = P.landing(st.doc, g);
+        const con = land.length ? land[0].console : st.doc.gear.find((x) => x.kind === 'console');
+        const pal = con && con.colors ? con.colors : null;
+        html += '<div class="pmem"><div class="pch">On the console</div><p class="note">' + (land.length ? esc(con.name) + ' ' + land.map((r) => 'ch ' + (r.ch == null ? '(not assigned)' : r.ch)).join(', ') : 'Not on a console channel yet.') + '</p>' +
+          (ro ? (g.chname || g.chcolor ? '<p class="chn big">' + (g.chcolor ? '<i style="background:' + colorCss(g.chcolor) + '"></i>' : '') + esc(g.chname || '') + (g.chcolor ? ' <span class="note">' + esc(g.chcolor) + '</span>' : '') + '</p>' : '')
+            : '<div class="pform two"><label>Channel name' + (con && con.namelen ? ' <span class="note">(' + con.namelen + ' letters)</span>' : '') + '<input data-f="chname" value="' + esc(g.chname || '') + '"' + (con && con.namelen ? ' maxlength="' + con.namelen + '"' : '') + ' placeholder="' + esc(cut((g.person || g.use || 'WMIC-1'), con && con.namelen ? con.namelen : 12)) + '"></label>' +
+              '<label>Colour' + (pal ? '<select data-f="chcolor"><option value="">None</option>' + pal.map((c) => '<option' + (key(c) === key(g.chcolor) ? ' selected' : '') + '>' + esc(c) + '</option>').join('') + (g.chcolor && !pal.some((c) => key(c) === key(g.chcolor)) ? '<option selected>' + esc(g.chcolor) + '</option>' : '') + '</select>' : '<input data-f="chcolor" value="' + esc(g.chcolor || '') + '" placeholder="Red">') + '</label></div>') + '</div>';
+      }
       if (g.kind === 'console') {
+        html += '<div class="pmem"><div class="pch">Channel names</div><p class="note">' + (g.namelen ? 'Up to ' + g.namelen + ' letters' : 'No length limit set') + ' · ' + (g.colors ? g.colors.length + ' colours: ' + esc(g.colors.join(', ')) : 'no colours set') + '</p>' +
+          '<button class="btn" id="pnames">' + icon('edit') + (st.edit ? 'Channel names and colours' : 'Channel list') + '</button></div>';
         const rows = P.inputs(st.doc).filter((r) => r.console.id === g.id && r.via.kind === 'stagebox' && r.ch != null && r.used);
         if (rows.length) html += '<div class="pmem"><div class="pch">Over the link</div>' + rows.map((r) => '<div class="psk"><b>Ch ' + r.ch + '</b><span>' + esc(r.via.name + ' ' + r.port) + (r.up.source ? ' <span class="note">' + esc(r.up.source) + '</span>' : '') + '</span></div>').join('') + '</div>';
       }
@@ -1322,6 +1447,7 @@ const PatchView = (() => {
       const ph2 = $('#phost', host); if (ph2) ph2.addEventListener('click', () => select({ gear: [host2.id] }));
       $$('[data-sel]', host).forEach((b) => b.addEventListener('click', () => select({ gear: [b.dataset.sel] })));
       const pr = $('#prep', host); if (pr) pr.addEventListener('click', () => reportProblem(g.name + (g.use ? ' (' + g.use + ')' : ''), { gear: g.id, device_id: g.device_id || undefined }));
+      const pn = $('#pnames', host); if (pn) pn.addEventListener('click', () => namesDialog(live()));
       if (!st.edit) return;
       $$('[data-addm]', host).forEach((b) => b.addEventListener('click', () => {
         if (g.kind === 'iemtx') return memberDialog(live());
@@ -1341,6 +1467,8 @@ const PatchView = (() => {
           else if (f === 'mixes') g.mixes = v.split(',').map((x) => x.trim()).filter(Boolean);
           else if (f === 'open') { if (inp.checked) g.open = true; else delete g.open; }
           else if (f === 'localstart') g[f] = Math.max(1, Number(v) || 1);
+          else if (f === 'namelen') { if (Number(v) >= 1) g.namelen = Math.min(64, Math.floor(Number(v))); else delete g.namelen; }
+          else if (f === 'colors') { const c = v.split(',').map((x) => x.trim()).filter(Boolean); if (c.length) g.colors = c; else delete g.colors; }
           else if (f === 'name') g.name = v.trim() || g.name;
           else { if (v.trim()) g[f] = v.trim(); else delete g[f]; }
         }, null, !['nin', 'nout', 'nch', 'mode'].includes(f));

@@ -503,7 +503,7 @@ test('wireless mics and in-ears: layouts saved, frequency and port checks, dashe
   const svg = Blk.traceSvg(wb);
   assert.ok(/class="te rf"/.test(svg) && svg.includes('⌁ 524.125'), 'the radio hop is dashed and carries the frequency');
   assert.ok(Blk.chainText(ib, 0).includes('(⌁ 518.200)'), 'chain text shows the frequency');
-  assert.ok(Blk.RF_GEAR.receivers.find((g) => g.name === 'SLX-D4D').ch === 2);
+  assert.ok(Blk.RF_GEAR.receivers.length === 0 && Blk.RF_GEAR.iem.length === 0, 'no built-in gear list: it fills from the team\'s own models');
 });
 
 test('sign-in QR links: once, for yourself (or anyone if admin), sign a phone in', async () => {
@@ -646,6 +646,34 @@ test('stage patch 0.16: cards have places, wireless systems hold their mics and 
   assert.strictEqual(back.gear.find((g) => g.name === 'AR2412').chmap[22], 23);
   assert.strictEqual(back.gear.find((g) => g.id === mic.id).person, 'Sarah');
   assert.ok((await vol.get('/api/search?q=sarah')).data.gear.some((g) => g.id === mic.id), 'search finds who uses a mic');
+});
+
+test('the model list starts empty and grows as gear is added; channel names and colours fit the console', async () => {
+  let r = await vol.get('/api/devices/models');
+  assert.deepStrictEqual(r.data.models, [], 'no preset gear');
+  assert.strictEqual((await vol.post('/api/devices/models', { add: [{ kind: 'console', model: 'X' }] })).status, 403, 'only admins add models');
+  r = await admin.post('/api/devices/models', { add: [{ kind: 'console', make: 'Allen & Heath', model: 'SQ-5', nin: 16, nout: 12, link: 'SLink', namelen: 6, colors: ['Red', 'Green', 'Blue'] }, { kind: 'bogus', model: 'Y' }, { kind: 'mic', model: '' }] });
+  assert.deepStrictEqual(r.data.models, [{ kind: 'console', make: 'Allen & Heath', model: 'SQ-5', nin: 16, nout: 12, link: 'SLink', namelen: 6, colors: ['Red', 'Green', 'Blue'] }]);
+  r = await admin.post('/api/devices/models', { add: [{ kind: 'console', make: 'Allen & Heath', model: 'SQ-5', nin: 16, nout: 14 }, { kind: 'receiver', make: 'Shure', model: 'SLX-D4D', nin: 2 }] });
+  assert.strictEqual(r.data.models.length, 2, 'the same make and model replaces the old one');
+  r = await admin.post('/api/devices/models', { remove: ['receiver|shure|slx-d4d'] });
+  assert.strictEqual(r.data.models.length, 1);
+  // channel names and colours
+  const P = require(path.join(ROOT, 'public', 'patchcore.js'));
+  const d = P.clean({});
+  const con = P.addGear(d, { kind: 'console', name: 'SQ-5', nin: 16, nout: 12, namelen: 6, colors: ['Red', 'Green'] });
+  const k = P.addGear(d, { kind: 'mic', name: 'Kick', use: 'Kick drum', chname: 'KICKDRUM', chcolor: 'Purple' });
+  P.connect(d, k, 0, con, 0);
+  const t = P.checks(d).map((c) => c.text).join(' | ');
+  assert.ok(/8 letters; the SQ-5 shows 6/.test(t) && /Purple is not one of/.test(t), 'too long and unknown colour are flagged');
+  const rx = P.addGear(d, { kind: 'receiver', name: 'RX', nin: 2 });
+  const w = P.addMember(d, rx, { person: 'Kyle' }); P.connect(d, rx, 0, con, 1);
+  const n = P.suggestNames(d, con, 'type');
+  assert.deepStrictEqual([n.get(k.id), n.get(w.id)], ['MIC-1', 'WMIC-1']);
+  assert.strictEqual(P.suggestNames(d, con, 'person').get(w.id), 'Kyle');
+  assert.strictEqual(P.landing(d, w)[0].ch, 2);
+  const c2 = P.clean(JSON.parse(JSON.stringify(d)));
+  assert.deepStrictEqual([c2.gear[0].namelen, c2.gear[0].colors, c2.gear[1].chname, c2.gear[1].chcolor], [6, ['Red', 'Green'], 'KICKDRUM', 'Purple']);
 });
 
 test('Gear Locker buckets: automatic, then the admin renames and orders them; To do shows checklists in progress', async () => {

@@ -367,6 +367,8 @@ async function api(req, res, url, user, token) {
         id: d.id, name: d.name, aliases: d.aliases, category: d.category, make: d.make, model: d.model, location: d.location, bucket: d.bucket, kind: pk.get(d.id) || '',
         ips: d.ips, photo: d.photo, tech_only: d.tech_only, inputs: d.inputs, outputs: d.outputs, files: fileCount.get(d.id) || 0 })) });
     }
+    if (m === 'GET' && b === 'models') return send(res, 200, { ok: true, models: devices.models(store.getSetting) });
+    if (m === 'POST' && b === 'models') { need(user, 'admin'); const body = await readJson(req); return send(res, 200, { ok: true, models: devices.saveModels(body.add, body.remove, user, store.getSetting, store.setSetting) }); }
     if (m === 'PUT' && b === 'buckets') { need(user, 'admin'); const body = await readJson(req); return send(res, 200, { ok: true, buckets: devices.setBuckets(body.buckets, body.renames, user, store.setSetting) }); }
     if (m === 'GET' && b === 'suggestions') { need(user, 'admin'); return send(res, 200, { ok: true, suggestions: devices.suggestions(user) }); }
     if (m === 'POST' && b === 'import') { need(user, 'admin'); const body = await readJson(req); return send(res, 200, { ok: true, made: devices.importFromLists(body.names, user) }); }

@@ -1307,7 +1307,7 @@ const Blk = (() => {
   function wire(root, page, live) {
     if (live) wireChecklists(root, page.id);
     wirePatch(root, page.blocks);
-    if (live && can('editor')) root.querySelectorAll('.patch[data-pid] .ph').forEach((ph) => {
+    if (live && can('admin')) root.querySelectorAll('.patch[data-pid] .ph').forEach((ph) => {
       const a = document.createElement('a');
       a.className = 'btn ghost pdedit'; a.href = '#/p/' + page.id + '/edit?draw=' + ph.parentNode.dataset.pid; a.innerHTML = icon('edit') + 'Draw';
       ph.appendChild(a);

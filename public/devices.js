@@ -87,13 +87,13 @@ async function viewDevices(qs) {
   const list = await loadDevices(true);
   let cat = qs.get('cat') || '';
   let q = '';
-  const sug = can('editor') ? (await get('/api/devices/suggestions')).suggestions : [];
+  const sug = can('admin') ? (await get('/api/devices/suggestions')).suggestions : [];
   app.innerHTML = `<div class="crumbs"><a href="#/">Home</a><span>/</span></div>
     <div class="bar"><div class="grow"><h1 class="title" style="font-size:22px;letter-spacing:.06em;margin:4px 0 2px">DEVICES</h1>
       <div class="note">Every device name, nickname or IP address typed on a page links to its card here.</div></div>
-      ${can('editor') ? '<a class="btn" href="#/gear-setup">' + icon('spark') + 'Guided setup</a>' : ''}
+      ${can('admin') ? '<a class="btn" href="#/gear-setup">' + icon('spark') + 'Guided setup</a>' : ''}
       ${sug.length ? '<button class="btn" id="imp">' + icon('net') + 'Create from IP lists (' + sug.length + ')</button>' : ''}
-      ${can('editor') ? '<button class="primary btn" id="newDev">' + icon('plus') + 'New device</button>' : ''}</div>
+      ${can('admin') ? '<button class="primary btn" id="newDev">' + icon('plus') + 'New device</button>' : ''}</div>
     <div class="bar"><input type="search" id="dq" placeholder="Filter by name, model, location or IP" style="flex:1;min-width:200px">
       <div class="seg" id="dcat"><button data-c="" class="on">All</button>${Object.keys(CAT).filter((k) => list.some((d) => d.category === k)).map((k) => '<button data-c="' + k + '">' + CAT[k] + '</button>').join('')}</div></div>
     <div id="dgrid"></div>`;
@@ -104,7 +104,7 @@ async function viewDevices(qs) {
       '<div class="t"><b>' + esc(d.name) + '</b><span>' + esc([d.make, d.model].filter(Boolean).join(' ') || CAT[d.category]) + '</span>' +
       '<span>' + esc(d.location) + (d.location && d.ips.length ? ' · ' : '') + (d.ips.length ? '<span class="mono">' + esc(d.ips[0]) + '</span>' + (d.ips.length > 1 ? ' +' + (d.ips.length - 1) : '') : '') + '</span></div>' +
       (d.tech_only ? '<span class="badge tech">Tech only</span>' : '') + '</a>').join('') + '</div>'
-      : '<div class="card empty">' + (list.length ? 'No devices match.' : 'No devices yet.' + (can('editor') ? ' Try the <a href="#/gear-setup">guided setup</a>, or add the SQ-5, the DriveRack PA2 or a stage box' + (sug.length ? ', or create cards from the names already in your IP lists' : '') + '.' : '')) + '</div>';
+      : '<div class="card empty">' + (list.length ? 'No devices match.' : 'No devices yet.' + (can('admin') ? ' Try the <a href="#/gear-setup">guided setup</a>, or add the SQ-5, the DriveRack PA2 or a stage box' + (sug.length ? ', or create cards from the names already in your IP lists' : '') + '.' : '')) + '</div>';
   };
   if (cat && !$('#dcat [data-c="' + cat + '"]')) cat = '';
   $$('#dcat button').forEach((b) => { b.classList.toggle('on', b.dataset.c === cat); b.addEventListener('click', () => { cat = b.dataset.c; $$('#dcat button').forEach((x) => x.classList.toggle('on', x === b)); paint(); }); });
@@ -160,9 +160,10 @@ async function viewDevice(id) {
     <div class="devhead">${v.photo ? '<img class="devphoto" src="/uploads/' + esc(v.photo) + '" alt="">' : devThumb(v, 84)}
       <div class="grow"><h1 class="title">${esc(v.name)}</h1><div class="meta" style="margin:0">${esc([v.make, v.model].filter(Boolean).join(' '))}
         <span class="chip">${CAT[v.category] || 'Other'}</span>${v.tech_only ? '<span class="badge tech">Tech only</span>' : ''}</div></div>
-      <div class="acts-top">${can('editor') ? '<button class="btn" id="eD">' + icon('edit') + 'Edit</button><button class="ghost danger" id="xD" title="Delete device">' + icon('trash') + '</button>' : ''}</div></div>
+      <div class="acts-top">${can('admin') ? '<button class="btn" id="eD">' + icon('edit') + 'Edit</button><button class="ghost danger" id="xD" title="Delete device">' + icon('trash') + '</button>' : '<button class="btn ghost" id="rD">' + icon('alert') + 'Report a problem</button>'}</div></div>
     ${facts.length ? '<div class="card facts">' + facts.map((f) => '<div class="fact"><span>' + f[0] + '</span><div>' + f[1] + '</div></div>').join('') + '</div>' : ''}
     ${v.notes.trim() ? '<div class="doc" id="dnotes">' + md(v.notes) + '</div>' : ''}
+    <div class="section" style="margin-top:20px"><h2>Manuals and documents</h2><div id="dfiles"></div></div>
     <div class="section" style="margin-top:20px"><h2>Used on</h2>${used.length ? '<div class="list used">' + used.map((u) => {
       const first = u.hits.find((h) => h.block);
       return '<a class="row" href="' + (u.page_id === 'patch' ? '#/patch?g=' + esc(u.gear) : '#/p/' + u.page_id + (first ? '?c=' + esc(first.block) : '')) + '"><div class="t"><b>' + esc(u.title) + '</b>' +
@@ -172,7 +173,9 @@ async function viewDevice(id) {
       : '<div class="card empty">Not mentioned on any page yet. Type its name' + (v.aliases.length ? ', a nickname' : '') + (v.ips.length ? ' or its IP' : '') + ' on any page and it links here by itself.</div>'}</div>
   </div>`;
   linkDevices($('#dnotes'));
-  if (can('editor')) {
+  paintFiles($('#dfiles'), v, d.files || []);
+  const rd = $('#rD'); if (rd) rd.addEventListener('click', () => reportProblem(v.name, { device_id: v.id }));
+  if (can('admin')) {
     $('#eD').addEventListener('click', () => { location.hash = '#/d/' + v.id + '/edit'; });
     $('#xD').addEventListener('click', async () => {
       if (!await confirmBox('Delete ' + v.name + '?', 'The card is removed and pages stop linking to it. The pages themselves do not change.', 'Delete', true)) return;
@@ -181,8 +184,34 @@ async function viewDevice(id) {
   }
 }
 
+/** Manuals, quick-start guides, wiring diagrams: stored in LiveGenie (and in its backups), opened in the browser. */
+const fileSize = (n) => (n > 1048576 ? (n / 1048576).toFixed(1) + ' MB' : Math.max(1, Math.round(n / 1024)) + ' KB');
+const fileIcon = (m) => (m === 'application/pdf' ? 'pdf' : /^image\//.test(m) ? 'image' : 'text');
+function paintFiles(host, v, files) {
+  host.innerHTML = (files.length ? '<div class="list files">' + files.map((f) => '<div class="row frow">' + icon(fileIcon(f.mime)) + '<a class="t" href="/files/' + esc(f.id) + '" target="_blank" rel="noopener"><b>' + esc(f.name) + '</b><span>' + fileSize(f.bytes) + ' · added ' + esc(ago(f.uploaded_at)) + (f.uploaded_by ? ' by ' + esc(f.uploaded_by) : '') + '</span></a>' +
+    '<a class="ghost abtn" href="/files/' + esc(f.id) + '?download=1" title="Download">' + icon('download') + '</a>' + (can('admin') ? '<button class="ghost danger" data-fdel="' + esc(f.id) + '" title="Remove">' + icon('trash') + '</button>' : '') + '</div>').join('') + '</div>'
+    : '<div class="card empty" style="padding:16px">' + (can('admin') ? 'No manuals yet. Upload the PDF manual, a quick-start guide or a wiring diagram.' : 'No manuals yet.') + '</div>') +
+    (can('admin') ? '<div class="adder" style="margin-top:8px"><input type="file" id="fup" class="hide" multiple accept=".pdf,image/*,.txt,.doc,.docx,.xls,.xlsx,.zip"><button class="btn" id="fupb">' + icon('upload') + 'Upload a manual or document</button><span class="note" id="fmsg"></span></div>' : '');
+  $$('[data-fdel]', host).forEach((b) => b.addEventListener('click', async () => {
+    const f = files.find((x) => x.id === b.dataset.fdel);
+    if (!await confirmBox('Remove ' + f.name + '?', 'It is deleted from LiveGenie (older backups still have it).', 'Remove', true)) return;
+    await call('DELETE', '/api/files/' + f.id); files.splice(files.indexOf(f), 1); paintFiles(host, v, files); forgetDevices();
+  }));
+  const inp = $('#fup', host), btn = $('#fupb', host);
+  if (btn) btn.addEventListener('click', () => inp.click());
+  if (inp) inp.addEventListener('change', async () => {
+    for (const f of inp.files) {
+      $('#fmsg', host).textContent = 'Uploading ' + f.name + '…';
+      try { const r = await call('POST', '/api/devices/' + v.id + '/files', f, { raw: true, type: f.type || 'application/octet-stream', headers: { 'x-filename': encodeURIComponent(f.name) } }); files.push({ ...r.file, uploaded_at: Date.now(), uploaded_by: S.state.user.name }); }
+      catch (e) { toast(f.name + ': ' + e.message, 'bad'); }
+    }
+    files.sort((a, b) => a.name.localeCompare(b.name));
+    paintFiles(host, v, files); forgetDevices();
+  });
+}
+
 async function viewDeviceEdit(id) {
-  if (!can('editor')) { app.innerHTML = '<div class="card empty">Editors and admins can add and change devices.</div>'; if (!S.state.user) signInDialog(() => route()); return; }
+  if (!can('admin')) { app.innerHTML = '<div class="card empty">Admins can add and change devices.</div>'; if (!S.state.user) signInDialog(() => route()); return; }
   const d = id ? (await get('/api/devices/' + id)).device : { inputs: '', outputs: '', uplink_id: '', uplink_port: '', name: '', aliases: [], category: 'audio', make: '', model: '', location: '', ip: '', mac: '', photo: '', manual_url: '', notes: '', tech_only: false };
   setTitle(id ? 'Edit ' + d.name : 'New device');
   S.dirty = false;

@@ -102,7 +102,7 @@ function drawMap(host, data, view) {
   edges.forEach((e) => { inGraph.add(e.from); inGraph.add(e.to); });
   const ids = data.nodes.filter((n) => inGraph.has(n.id)).sort((a, b) => a.name.localeCompare(b.name)).map((n) => n.id);
   const tray = view === 'network' ? data.nodes.filter((n) => !inGraph.has(n.id) && (n.ips.length || n.category === 'network')) : [];
-  const editable = can('editor');
+  const editable = can('admin');
   if (!ids.length) {
     host.innerHTML = '<div class="card empty" style="text-align:left;max-width:720px">' + (view === 'signal'
       ? '<b>Nothing to draw yet.</b><p>The signal map draws an arrow for every cable on the <a href="#/patch">stage patch</a> between two pieces of gear that have device cards (the SQ-5, the AR2412, the DriveRack PA2). Big gear added to the stage patch from its catalog gets a device card by itself; for other gear, open it on the stage patch and choose <b>Make a device card</b>.</p>'
@@ -371,7 +371,7 @@ async function viewVlans(host) {
 
 const VLAN_CACHE = { list: null };
 async function vlanList() {
-  if (!can('editor')) return [];
+  if (!can('admin')) return [];
   if (!VLAN_CACHE.list) { try { VLAN_CACHE.list = (await get('/api/vlans')).vlans; } catch (e) { VLAN_CACHE.list = []; } }
   return VLAN_CACHE.list;
 }

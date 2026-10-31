@@ -20,6 +20,7 @@ const Devices = require('./lib/devices');
 const Network = require('./lib/network');
 const Training = require('./lib/training');
 const Patch = require('./lib/patch');
+const Admin = require('./lib/admin');
 const PatchConvert = require('./lib/patchconvert');
 const PatchCoreLib = require('./public/patchcore');
 
@@ -42,6 +43,7 @@ const update = Update.create(pkg.version);
 const devices = Devices.create(db, { UserError: Store.UserError, audit: store.audit });
 const uploadExists = (id) => !!store.upload(id);
 const patch = Patch.create(db, { UserError: Store.UserError, audit: store.audit });
+const adm = Admin.create(db, { UserError: Store.UserError, audit: store.audit, dataDir: DATA, getSetting: store.getSetting, setSetting: store.setSetting });
 const network = Network.create(db, { UserError: Store.UserError, audit: store.audit, devices, getSetting: store.getSetting, setSetting: store.setSetting, patch });
 if (restoreNote) store.audit(null, 'backup.restored', '', restoreNote);
 try { if (Training.seed(store)) console.log('Added the audio training pages to Volunteers'); } catch (e) { console.error('Could not add the training pages:', e.message); }
@@ -211,8 +213,12 @@ function state(user) {
     setupNeeded: !auth.hasUsers(),
     user: user ? { id: user.id, name: user.name, role: user.role } : null,
     role: Auth.roleOf(user),
-    todo: (() => { const t = store.todo(user); return { open: t.filter((x) => !x.complete).length, overdue: t.filter((x) => x.overdue).length }; })(),
-    update: update.info()
+    viewAs: !!(user && user.viewAs),
+    org: { name: store.getSetting('org_name', ''), logo: store.getSetting('org_logo', '') },
+    // the rest only for someone signed in
+    todo: user ? (() => { const t = store.todo(user); return { open: t.filter((x) => !x.complete).length, overdue: t.filter((x) => x.overdue).length }; })() : { open: 0, overdue: 0 },
+    problems: user && user.role === 'admin' ? adm.problemCount() : 0,
+    update: user && user.role === 'admin' ? update.info() : { available: false }
   };
 }
 
@@ -234,6 +240,7 @@ async function api(req, res, url, user, token) {
     if (auth.hasUsers()) return fail(res, 409, 'LiveGenie is already set up');
     const body = await readJson(req);
     store.createUser({ name: body.name, pin: body.pin, role: 'admin' }, null);
+    if (body.org) store.setSetting('org_name', String(body.org).trim().slice(0, 80));
     const r = auth.signIn(body.name, body.pin);
     return send(res, 200, { ok: true, user: r.user }, { 'set-cookie': sessionCookie(r.token, 60 * 86400) });
   }
@@ -251,8 +258,18 @@ async function api(req, res, url, user, token) {
     store.audit(r.user, 'signin', '', 'with a QR code');
     return send(res, 200, { ok: true, user: r.user }, { 'set-cookie': sessionCookie(r.token, 60 * 86400) });
   }
+  // the church logo shows on the sign-in screen
+  if (m === 'GET' && a === 'org' && b === 'logo') {
+    const u = store.upload(store.getSetting('org_logo', ''));
+    if (!u || !fs.existsSync(u.path)) return fail(res, 404, 'No logo');
+    return serveFile(req, res, u.path, u.mime, { 'cache-control': 'private, max-age=300' });
+  }
+
+  // ----- everything else needs someone signed in -----
+  if (!user) return fail(res, 401, 'Sign in first');
+
   if (m === 'POST' && a === 'links' && !b) {
-    need(user, 'volunteer');
+    need(user, 'user');
     const body = await readJson(req);
     const target = body.user_id ? Number(body.user_id) : user.id;
     if (target !== user.id) need(user, 'admin');
@@ -266,7 +283,7 @@ async function api(req, res, url, user, token) {
     return send(res, 200, { ok: true }, { 'set-cookie': sessionCookie('', 0) });
   }
   if (m === 'POST' && a === 'me' && b === 'pin') {
-    need(user, 'volunteer');
+    need(user, 'user');
     const body = await readJson(req);
     const full = db.prepare('SELECT pin_hash FROM users WHERE id = ?').get(user.id);
     if (!Auth.checkPin(body.current, full.pin_hash)) return fail(res, 400, 'Your current PIN is not right');
@@ -286,7 +303,7 @@ async function api(req, res, url, user, token) {
   // ----- pages -----
   if (a === 'pages') {
     if (m === 'POST' && !b) {
-      need(user, 'editor');
+      need(user, 'admin');
       const id = store.createPage(await readJson(req), user);
       return send(res, 200, { ok: true, id });
     }
@@ -297,12 +314,12 @@ async function api(req, res, url, user, token) {
         return send(res, 200, { ok: true, page: p });
       }
       if (m === 'PUT') {
-        need(user, 'editor');
+        need(user, 'admin');
         const v = store.updatePage(b, await readJson(req), user);
         return send(res, 200, { ok: true, version: v });
       }
       if (m === 'DELETE') {
-        need(user, 'editor');
+        need(user, 'admin');
         store.deletePage(b, user);
         return send(res, 200, { ok: true });
       }
@@ -311,14 +328,14 @@ async function api(req, res, url, user, token) {
       if (m === 'GET' && !d) return send(res, 200, { ok: true, versions: store.versions(b, user) });
       if (m === 'GET' && d) return send(res, 200, { ok: true, version: store.version(b, d, user) });
       if (m === 'POST' && d && e === 'restore') {
-        need(user, 'editor');
+        need(user, 'admin');
         return send(res, 200, { ok: true, version: store.restoreVersion(b, d, user) });
       }
     }
   }
 
   if (a === 'trash') {
-    need(user, 'editor');
+    need(user, 'admin');
     if (m === 'GET' && !b) return send(res, 200, { ok: true, pages: store.trash() });
     if (m === 'POST' && b && c === 'restore') { store.undelete(b, user); return send(res, 200, { ok: true }); }
   }
@@ -326,13 +343,14 @@ async function api(req, res, url, user, token) {
   // ----- device library -----
   if (a === 'devices') {
     if (m === 'GET' && !b) {
+      const fileCount = adm.fileCounts();
       return send(res, 200, { ok: true, categories: Devices.CATEGORIES, devices: devices.list(user).map((d) => ({
         id: d.id, name: d.name, aliases: d.aliases, category: d.category, make: d.make, model: d.model, location: d.location,
-        ips: d.ips, photo: d.photo, tech_only: d.tech_only, inputs: d.inputs, outputs: d.outputs })) });
+        ips: d.ips, photo: d.photo, tech_only: d.tech_only, inputs: d.inputs, outputs: d.outputs, files: fileCount.get(d.id) || 0 })) });
     }
-    if (m === 'GET' && b === 'suggestions') { need(user, 'editor'); return send(res, 200, { ok: true, suggestions: devices.suggestions(user) }); }
-    if (m === 'POST' && b === 'import') { need(user, 'editor'); const body = await readJson(req); return send(res, 200, { ok: true, made: devices.importFromLists(body.names, user) }); }
-    if (m === 'POST' && !b) { need(user, 'editor'); return send(res, 200, { ok: true, id: devices.add(await readJson(req), user, uploadExists) }); }
+    if (m === 'GET' && b === 'suggestions') { need(user, 'admin'); return send(res, 200, { ok: true, suggestions: devices.suggestions(user) }); }
+    if (m === 'POST' && b === 'import') { need(user, 'admin'); const body = await readJson(req); return send(res, 200, { ok: true, made: devices.importFromLists(body.names, user) }); }
+    if (m === 'POST' && !b) { need(user, 'admin'); return send(res, 200, { ok: true, id: devices.add(await readJson(req), user, uploadExists) }); }
     if (b && /^\d+$/.test(b)) {
       if (m === 'GET') {
         const d = devices.get(b, user);
@@ -349,29 +367,29 @@ async function api(req, res, url, user, token) {
         const onPatch = patch.get().doc.gear.filter((g) => g.device_id === d.id);
         const used = devices.usedOn(d, user);
         if (onPatch.length) used.unshift({ page_id: 'patch', title: 'Stage patch', space_name: 'Drawing', tech_only: false, gear: onPatch[0].id, hits: onPatch.map((g) => ({ label: PatchCoreLib.KINDS[g.kind].label, text: g.name + (g.use ? ' · ' + g.use : '') })) });
-        return send(res, 200, { ok: true, device: d, usedOn: used, links, tech: mp.tech });
+        return send(res, 200, { ok: true, device: d, usedOn: used, links, tech: mp.tech, files: adm.filesFor(d.id) });
       }
-      if (m === 'PUT') { need(user, 'editor'); devices.edit(b, await readJson(req), user, uploadExists); return send(res, 200, { ok: true }); }
-      if (m === 'DELETE') { need(user, 'editor'); devices.remove(b, user); return send(res, 200, { ok: true }); }
+      if (m === 'PUT') { need(user, 'admin'); devices.edit(b, await readJson(req), user, uploadExists); return send(res, 200, { ok: true }); }
+      if (m === 'DELETE') { need(user, 'admin'); devices.remove(b, user); return send(res, 200, { ok: true }); }
     }
   }
 
   // ----- VLANs and the system map -----
   // ----- the stage patch -----
-  if (a === 'patch' && !b && m === 'GET') return send(res, 200, { ok: true, ...patch.get(), canEdit: Auth.atLeast(user, 'editor') });
+  if (a === 'patch' && !b && m === 'GET') return send(res, 200, { ok: true, ...patch.get(), canEdit: Auth.atLeast(user, 'admin') });
   if (a === 'patch' && !b && m === 'PUT') {
-    need(user, 'editor');
+    need(user, 'admin');
     const body = await readJson(req, 4 * 1024 * 1024);
     return send(res, 200, { ok: true, ...patch.save(body.doc, user, body.baseVersion, body.note) });
   }
-  if (a === 'patch' && b === 'versions' && !c && m === 'GET') { need(user, 'editor'); return send(res, 200, { ok: true, versions: patch.versions() }); }
-  if (a === 'patch' && b === 'versions' && c && !d && m === 'GET') { need(user, 'editor'); return send(res, 200, { ok: true, doc: patch.version(c) }); }
-  if (a === 'patch' && b === 'versions' && c && d === 'restore' && m === 'POST') { need(user, 'editor'); return send(res, 200, { ok: true, ...patch.restore(c, user) }); }
+  if (a === 'patch' && b === 'versions' && !c && m === 'GET') { need(user, 'admin'); return send(res, 200, { ok: true, versions: patch.versions() }); }
+  if (a === 'patch' && b === 'versions' && c && !d && m === 'GET') { need(user, 'admin'); return send(res, 200, { ok: true, doc: patch.version(c) }); }
+  if (a === 'patch' && b === 'versions' && c && d === 'restore' && m === 'POST') { need(user, 'admin'); return send(res, 200, { ok: true, ...patch.restore(c, user) }); }
 
   if (a === 'map' && m === 'GET' && !b) return send(res, 200, { ok: true, ...network.map(user) });
-  if (a === 'map' && b === 'layout' && c && m === 'PUT') { need(user, 'editor'); network.saveLayout(c, (await readJson(req)).positions, user); return send(res, 200, { ok: true }); }
+  if (a === 'map' && b === 'layout' && c && m === 'PUT') { need(user, 'admin'); network.saveLayout(c, (await readJson(req)).positions, user); return send(res, 200, { ok: true }); }
   if (a === 'vlans') {
-    need(user, 'editor');
+    need(user, 'admin');
     if (m === 'GET' && !b) return send(res, 200, { ok: true, colors: Network.COLORS, vlans: network.vlanDetails(user), suggestions: network.vlanSuggestions(user) });
     if (m === 'POST' && b === 'import') return send(res, 200, { ok: true, made: network.importVlans((await readJson(req)).vids, user) });
     if (m === 'POST' && !b) return send(res, 200, { ok: true, id: network.addVlan(await readJson(req), user) });
@@ -387,7 +405,7 @@ async function api(req, res, url, user, token) {
       return send(res, 200, { ok: true, now: Date.now(), checklist: store.tick(b, d, String(body.item || ''), !!body.done, user) });
     }
     if (m === 'POST' && d && e === 'reset') {
-      need(user, 'volunteer');
+      need(user, 'user');
       return send(res, 200, { ok: true, now: Date.now(), checklist: store.resetChecklist(b, d, user) });
     }
   }
@@ -420,7 +438,7 @@ async function api(req, res, url, user, token) {
 
   // ----- pictures -----
   if (m === 'POST' && a === 'uploads') {
-    need(user, 'editor');
+    need(user, 'admin');
     const buf = await readBody(req, Store.MAX_IMAGE + 1024);
     const r = store.saveUpload(buf, req.headers['content-type'], user, { w: req.headers['x-width'], h: req.headers['x-height'] });
     return send(res, 200, { ok: true, ...r });
@@ -489,6 +507,70 @@ async function api(req, res, url, user, token) {
     }
   }
 
+  // ----- spaces (the admin makes them) -----
+  if (a === 'spaces' && m === 'POST' && !b) { need(user, 'admin'); return send(res, 200, { ok: true, slug: adm.addSpace(await readJson(req), user) }); }
+  if (a === 'spaces' && b && m === 'PUT') { need(user, 'admin'); return send(res, 200, { ok: true, slug: adm.editSpace(b, await readJson(req), user) }); }
+  if (a === 'spaces' && b && m === 'DELETE') { need(user, 'admin'); const body = await readJson(req).catch(() => ({})); adm.removeSpace(b, body.move_to, user); return send(res, 200, { ok: true }); }
+  if (a === 'spaces-order' && m === 'PUT') { need(user, 'admin'); adm.orderSpaces((await readJson(req)).slugs, user); return send(res, 200, { ok: true }); }
+  if (a === 'admin' && b === 'starter' && m === 'POST') {
+    need(user, 'admin');
+    const have = store.spaces(user).map((s) => s.name.toLowerCase());
+    const made = DB.SPACES.filter((s) => !have.includes(s[1].toLowerCase())).map((s) => adm.addSpace({ name: s[1], blurb: s[2], admin_only: s[0] === 'network' }, user));
+    return send(res, 200, { ok: true, made });
+  }
+  if (a === 'admin' && b === 'training' && m === 'POST') {
+    need(user, 'admin');
+    let sp = store.spaces(user).find((s) => /^(training|volunteers)$/i.test(s.name));
+    if (!sp) adm.addSpace({ name: 'Training', blurb: 'How-tos and training for volunteers', color: '#3ecf6e' }, user);
+    sp = store.spaces(user).find((s) => /^(training|volunteers)$/i.test(s.name));
+    const start = Training.seed(store, { force: true, space: sp.slug });
+    return send(res, 200, { ok: true, page: start, space: sp.slug });
+  }
+
+  // ----- church name and logo -----
+  if (a === 'org' && !b && m === 'PUT') { need(user, 'admin'); return send(res, 200, { ok: true, org: adm.setOrg(await readJson(req), user) }); }
+
+  // ----- manuals and documents on device cards -----
+  if (a === 'devices' && b && /^\d+$/.test(b) && c === 'files' && m === 'POST') {
+    need(user, 'admin');
+    const buf = await readBody(req, Admin.MAX_FILE + 1024);
+    let name = ''; try { name = decodeURIComponent(String(req.headers['x-filename'] || '')); } catch (e) { name = ''; }
+    return send(res, 200, { ok: true, file: adm.addFile(b, buf, req.headers['content-type'], name, user) });
+  }
+  if (a === 'files' && b && m === 'DELETE') { need(user, 'admin'); adm.removeFile(b, user); return send(res, 200, { ok: true }); }
+
+  // ----- problem reports -----
+  if (a === 'problems' && !b && m === 'POST') {
+    const r = adm.report(await readJson(req), user);
+    const url = store.getSetting('notify_webhook'), base = store.getSetting('base_url');
+    if (url) postJson(url, { event: 'problem_reported', source: 'LiveGenie', title: 'Problem reported: ' + (r.where || 'LiveGenie'), message: r.by + ': ' + r.text, where: r.where, by: r.by, url: base ? base + '/#/admin/problems' : '' })
+      .then((x) => store.audit(null, 'notify.problem', r.id, x.ok ? 'sent' : 'failed (' + x.error + ')')).catch(() => {});
+    return send(res, 200, { ok: true, problem: r });
+  }
+  if (a === 'problems' && !b && m === 'GET') { need(user, 'admin'); return send(res, 200, { ok: true, problems: adm.problems(new URL(req.url, 'http://x').searchParams.get('status')) }); }
+  if (a === 'problems' && b && m === 'PUT') { need(user, 'admin'); return send(res, 200, { ok: true, problem: adm.updateProblem(b, await readJson(req), user) }); }
+
+  // ----- the checklist log -----
+  if (a === 'checklog' && m === 'GET') {
+    need(user, 'admin');
+    const qs = new URL(req.url, 'http://x').searchParams;
+    return send(res, 200, { ok: true, runs: adm.checklistLog({ page: qs.get('page'), block: qs.get('block'), limit: qs.get('limit') }), checklists: adm.checklistsLogged() });
+  }
+
+  // ----- reset to a clean state (a backup is made first) -----
+  if (a === 'admin' && b === 'reset' && m === 'POST') {
+    need(user, 'admin');
+    const body = await readJson(req);
+    const mode = body.mode === 'factory' ? 'factory' : 'content';
+    if (String(body.confirm || '').trim().toUpperCase() !== 'RESET') return fail(res, 400, 'Type RESET to confirm');
+    const backup = Backup.make(DATA, db, 'before-reset');
+    if (mode === 'content') store.audit(user, 'reset.content', '', 'backup ' + backup);
+    adm.reset(mode);
+    if (mode === 'factory') return send(res, 200, { ok: true, mode, backup }, { 'set-cookie': sessionCookie('', 0) });
+    store.audit(user, 'reset.content', '', 'done; backup ' + backup);
+    return send(res, 200, { ok: true, mode, backup });
+  }
+
   if (m === 'POST' && a === 'update-check') {
     need(user, 'admin');
     const okay = await update.check();
@@ -503,9 +585,19 @@ const server = http.createServer(async (req, res) => {
   const token = cookies(req).lg_s;
   try {
     if (restarting && url !== '/api/health') return fail(res, 503, 'LiveGenie is restarting');
-    const user = auth.userFor(token);
+    let user = auth.userFor(token);
+    // an admin can look at LiveGenie the way a user sees it (View as user)
+    if (user && user.role === 'admin' && req.headers['x-view-as'] === 'user') user = { ...user, role: 'user', viewAs: true };
     if (url === '/api' || url.startsWith('/api/')) return await api(req, res, url, user, token);
+    if ((req.method === 'GET' || req.method === 'HEAD') && url.startsWith('/files/')) {
+      if (!user) return fail(res, 401, 'Sign in first');
+      const f = adm.file(url.slice(7).split('/')[0]);
+      if (!f || !fs.existsSync(f.path)) return fail(res, 404, 'Document not found');
+      const dl = /[?&]download=1/.test(req.url || '');
+      return serveFile(req, res, f.path, f.mime, { 'cache-control': 'private, max-age=3600', 'content-disposition': (dl ? 'attachment' : 'inline') + "; filename*=UTF-8''" + encodeURIComponent(f.name) });
+    }
     if ((req.method === 'GET' || req.method === 'HEAD') && url.startsWith('/uploads/')) {
+      if (!user) return fail(res, 401, 'Sign in first');
       const u = store.upload(url.slice(9).split('.')[0]);
       if (!u || !fs.existsSync(u.path)) return fail(res, 404, 'Picture not found');
       return serveFile(req, res, u.path, u.mime, { 'cache-control': 'private, max-age=31536000, immutable' });

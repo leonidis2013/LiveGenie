@@ -416,7 +416,7 @@ const PatchView = (() => {
     const canEdit = data.canEdit;
     const wide = () => matchMedia('(min-width: 1024px)').matches;
     app.innerHTML = `<div class="patchv">
-      <div class="printhead"><img src="/icons/livegenie-glyph.svg" alt=""><div><b>LiveGenie</b><span>Rolling Hills Community Church · Stage patch</span></div><div class="pm">Version ${st.version}<br>Printed ${esc(new Date().toLocaleString())}</div></div>
+      <div class="printhead"><img src="/icons/livegenie-glyph.svg" alt=""><div><b>LiveGenie</b><span>${esc(((S.state && S.state.org && S.state.org.name) ? S.state.org.name + ' · ' : '') + 'Stage patch')}</span></div><div class="pm">Version ${st.version}<br>Printed ${esc(new Date().toLocaleString())}</div></div>
       <div class="crumbs"><a href="#/">Home</a><span>/</span></div>
       <div class="bar pbar"><div class="grow"><div class="ptitle" id="ptl"></div></div>
         <div class="seg" id="pmode"><button data-m="overview" class="on">Overview</button><button data-m="sockets">Sockets</button></div>
@@ -777,7 +777,9 @@ const PatchView = (() => {
         '<label>Notes<textarea data-f="notes" rows="2"' + (ro ? ' disabled' : '') + '>' + esc(g.notes || '') + '</textarea></label></div>');
       // device card
       const dev = g.device_id && typeof DEV !== 'undefined' && DEV.list ? DEV.list.find((d) => d.id === g.device_id) : null;
-      html += '<div class="pdev">' + (dev ? '<a class="btn abtn" href="#/d/' + dev.id + '">' + icon('box') + 'Device card: ' + esc(dev.name) + '</a>' : st.edit && k.card ? '<button class="btn" id="pmkdev">' + icon('box') + 'Make a device card</button>' : '') + '</div>';
+      html += '<div class="pdev">' + (dev ? '<a class="btn abtn" href="#/d/' + dev.id + '">' + icon('box') + 'Device card: ' + esc(dev.name) + '</a>' : st.edit && k.card ? '<button class="btn" id="pmkdev">' + icon('box') + 'Make a device card</button>' : '') +
+        (dev && dev.files ? '<a class="btn abtn" href="#/d/' + dev.id + '">' + icon('pdf') + dev.files + ' manual' + (dev.files === 1 ? '' : 's') + '</a>' : '') +
+        (!st.edit ? '<button class="btn ghost" id="prep">' + icon('alert') + 'Report a problem</button>' : '') + '</div>';
       // sockets
       const feedable = g.kind === 'console' || g.kind === 'stagebox';
       if (g.ins.length || g.outs.length || k.link) {
@@ -805,6 +807,7 @@ const PatchView = (() => {
       if (st.edit) html += '<div class="pacts"><button class="ghost" id="pup">' + icon('up') + 'Up</button><button class="ghost" id="pdn">' + icon('down') + 'Down</button><span class="grow"></span><button class="ghost danger" id="pdel">' + icon('trash') + 'Remove</button></div>';
       host.innerHTML = html;
       $('#pbk', host).addEventListener('click', () => { select(null); const m = host.closest('.modal'); if (m) m.remove(); });
+      const pr = $('#prep', host); if (pr) pr.addEventListener('click', () => reportProblem(g.name + (g.use ? ' (' + g.use + ')' : ''), { gear: g.id, device_id: g.device_id || undefined }));
       if (!st.edit) return;
       $$('[data-f]', host).forEach((inp) => inp.addEventListener('change', () => {
         const f = inp.dataset.f, v = inp.value;
@@ -879,6 +882,7 @@ const PatchView = (() => {
         '<label>Notes<textarea data-c="notes" rows="2"' + (ro ? ' disabled' : '') + '>' + esc(c.notes || '') + '</textarea></label></div>' +
         (st.edit ? '<div class="pacts"><span class="grow"></span><button class="ghost danger" id="pcdel">' + icon('trash') + 'Remove cable</button></div>' : '');
       $('#pbk', host).addEventListener('click', () => { select(null); const m = host.closest('.modal'); if (m) m.remove(); });
+      const pr = $('#prep', host); if (pr) pr.addEventListener('click', () => reportProblem(g.name + (g.use ? ' (' + g.use + ')' : ''), { gear: g.id, device_id: g.device_id || undefined }));
       if (!st.edit) return;
       $$('[data-c]', host).forEach((inp) => inp.addEventListener('change', () => change(() => { const cc = st.doc.cables.find((x) => x.id === c.id); if (inp.value.trim()) cc[inp.dataset.c] = inp.value.trim(); else delete cc[inp.dataset.c]; }, null, true)));
       $('#pcdel', host).addEventListener('click', () => { st.selCable = null; change(() => { st.doc.cables = st.doc.cables.filter((x) => x.id !== c.id); }, 'Cable removed'); const m = document.querySelector('.modal.psheet'); if (m) m.remove(); });

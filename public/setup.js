@@ -39,7 +39,7 @@ const GROUP_ROLE = { Wireless: 'wireless', 'Speaker processor': 'processor', Amp
 const unitNames = (o) => Array.from({ length: Math.max(1, Number(o.qty) || 1) }, (_, i) => (i ? o.name + ' #' + (i + 1) : o.name));
 
 async function viewGearSetup() {
-  if (!can('editor')) { app.innerHTML = '<div class="card empty">Editors and admins can run the guided setup.</div>'; if (!S.state.user) signInDialog(() => route()); return; }
+  if (!can('admin')) { app.innerHTML = '<div class="card empty">Admins can run the guided setup.</div>'; if (!S.state.user) signInDialog(() => route()); return; }
   setTitle('Guided setup');
   const have = await loadDevices(true);
   const st = {

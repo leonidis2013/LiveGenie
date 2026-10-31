@@ -19,7 +19,7 @@ const Shell = (() => {
   /** Which tab / sidebar item a route belongs to. */
   function sectionOf(p) {
     if (!p.length) return 'home';
-    return { todo: 'todo', search: 'search', devices: 'devices', d: 'devices', 'gear-setup': 'devices', map: 'map', patch: 'patch', settings: 'settings', s: 'space', p: 'space', new: 'space' }[p[0]] || 'home';
+    return { todo: 'todo', search: 'search', devices: 'devices', d: 'devices', 'gear-setup': 'devices', map: 'map', patch: 'patch', settings: 'settings', admin: 'admin', s: 'space', p: 'space', new: 'space' }[p[0]] || 'home';
   }
   const EDITING = (p) => (p[0] === 'p' && (p[2] === 'edit')) || p[0] === 'new' || (p[0] === 'devices' && p[1] === 'new') || (p[0] === 'd' && p[2] === 'edit') || p[0] === 'gear-setup';
 
@@ -43,27 +43,31 @@ const Shell = (() => {
     if (!nav || !S.state) return;
     const list = spaces || [];
     const cur = ctx.space;
+    const st0 = S.state;
     nav.innerHTML = item('#/', 'Home', 'home', section === 'home') +
       item('#/todo', 'To do', 'check', section === 'todo', todoBadge()) +
       item('#/devices', 'Devices', 'box', section === 'devices') +
       item('#/patch', 'Stage patch', 'grid', section === 'patch') +
       item('#/map', 'System map', 'net', section === 'map') +
+      (can('admin') ? item('#/admin', 'Admin', 'gear', section === 'admin', st0.problems ? '<b class="cnt bad" title="Open problem reports">' + st0.problems + '</b>' : '') : '') +
       '<div class="shd">Spaces</div>' +
       list.map((s) => {
         const open = s.slug === cur;
         const pages = open ? (pagesBySpace[s.slug] || []) : [];
-        return '<a class="ssp' + (open && !ctx.page ? ' on' : '') + (open ? ' open' : '') + '" href="#/s/' + esc(s.slug) + '"><i></i><span>' + esc(s.name) + '</span><em>' + (s.pages || '') + '</em></a>' +
+        return '<a class="ssp' + (open && !ctx.page ? ' on' : '') + (open ? ' open' : '') + '" href="#/s/' + esc(s.slug) + '" style="--sc:' + esc(s.color || '#4c8dff') + '"><i></i><span>' + esc(s.name) + '</span>' + (s.admin_only ? icon('lock') : '') + '<em>' + (s.pages || '') + '</em></a>' +
           (open && pages.length ? '<div class="spg">' + pages.map((p) => '<a href="#/p/' + p.id + '"' + (String(p.id) === String(ctx.page) ? ' class="on"' : '') + ' title="' + esc(p.title) + '">' + esc(p.title) + (p.tech_only ? icon('lock') : '') + '</a>').join('') + '</div>' : '');
       }).join('');
     const st = S.state, u = st.user, upd = st.update && st.update.available;
     $('#sfoot').innerHTML =
-      (can('editor') ? '<button class="primary btn snew" id="sNew">' + icon('plus') + 'New page</button>' : '') +
+      (can('admin') ? '<button class="primary btn snew" id="sNew">' + icon('plus') + 'New page</button>' : '') +
+      (canViewAs() ? '<label class="tog vas' + (viewAs() ? ' on' : '') + '" title="See LiveGenie the way users do"><input type="checkbox" id="sVas"' + (viewAs() ? ' checked' : '') + '>View as user</label>' : '') +
       (upd ? '<a class="pill acc supd" href="#/settings/about">' + icon('download') + 'Update available' + (st.update.latest ? ' · ' + esc(st.update.latest) : '') + '</a>' : '') +
       '<div class="sme">' + (u
-        ? '<a class="who" href="#/settings/account" title="Your account"><span class="av">' + esc(u.name.slice(0, 1).toUpperCase()) + '</span><span class="nm">' + esc(u.name) + '<small>' + esc({ admin: 'Admin', editor: 'Editor', volunteer: 'Volunteer' }[st.role] || '') + '</small></span></a>'
+        ? '<a class="who" href="#/settings/account" title="Your account"><span class="av">' + esc(u.name.slice(0, 1).toUpperCase()) + '</span><span class="nm">' + esc(u.name) + '<small>' + esc({ admin: 'Admin', user: 'User' }[st.role] || '') + '</small></span></a>'
         : '<button class="btn" id="sSign">' + icon('user') + 'Sign in</button>') +
       '<a class="gear sgear' + (section === 'settings' ? ' on' : '') + '" href="#/settings" title="Settings" aria-label="Settings">' + icon('gear', '') + '</a></div>';
     const sn = $('#sNew'); if (sn) sn.addEventListener('click', newPage);
+    const va = $('#sVas'); if (va) va.addEventListener('change', () => setViewAs(va.checked));
     const ss = $('#sSign'); if (ss) ss.addEventListener('click', () => signInDialog());
   }
 
@@ -78,6 +82,14 @@ const Shell = (() => {
     tabs.querySelector('[data-t=more] .dot').classList.toggle('hide', !(S.state.update && S.state.update.available));
   }
 
+  /** Admins can switch to seeing LiveGenie as a user sees it, and back. */
+  const canViewAs = () => !!(S.state && S.state.user && (S.state.user.role === 'admin' || S.state.viewAs));
+  async function setViewAs(on) {
+    try { if (on) sessionStorage.setItem('livegenie-view-as', 'user'); else sessionStorage.removeItem('livegenie-view-as'); } catch (e) { /* private mode */ }
+    await loadState(); paintHeader(); route();
+    toast(on ? 'Viewing LiveGenie as a user' : 'Back to the admin view');
+  }
+
   function newPage() { location.hash = ctx.space ? '#/new?space=' + encodeURIComponent(ctx.space) : '#/new'; }
 
   /** Phone: everything that is not a tab. */
@@ -86,18 +98,21 @@ const Shell = (() => {
     const st = S.state, u = st.user, upd = st.update && st.update.available;
     const row = (href, ic, label, sub) => '<a class="mrow" href="' + href + '" data-close>' + icon(ic) + '<span><b>' + label + '</b>' + (sub ? '<small>' + sub + '</small>' : '') + '</span></a>';
     modal('<div class="more">' +
-      (u ? '<a class="mme" href="#/settings/account" data-close><span class="av">' + esc(u.name.slice(0, 1).toUpperCase()) + '</span><span><b>' + esc(u.name) + '</b><small>' + esc({ admin: 'Admin', editor: 'Editor', volunteer: 'Volunteer' }[st.role] || '') + ' · account</small></span></a>'
+      (u ? '<a class="mme" href="#/settings/account" data-close><span class="av">' + esc(u.name.slice(0, 1).toUpperCase()) + '</span><span><b>' + esc(u.name) + '</b><small>' + esc({ admin: 'Admin', user: 'User' }[st.role] || '') + ' · account</small></span></a>'
         : '<button class="primary mbtn" id="mSign">' + icon('user') + 'Sign in</button>') +
       (upd ? row('#/settings/about', 'download', 'Update available', esc(st.update.latest || '')) : '') +
-      (can('editor') ? '<button class="mbtn" id="mNew">' + icon('plus') + 'New page</button>' : '') +
+      (can('admin') ? '<button class="mbtn" id="mNew">' + icon('plus') + 'New page</button>' : '') +
       '<div class="mh">Spaces</div>' + list.map((s) => row('#/s/' + esc(s.slug), 'list', esc(s.name), s.pages + ' page' + (s.pages === 1 ? '' : 's'))).join('') +
-      '<div class="mh">More</div>' + row('#/patch', 'grid', 'Stage patch', 'Mic to speaker, every cable') + row('#/map', 'net', 'System map', 'Signal flow' + (can('editor') ? ', network and VLANs' : '')) +
-      (can('editor') ? row('#/gear-setup', 'spark', 'Guided equipment setup', 'Console, stage boxes, wireless, in-ears') : '') +
+      '<div class="mh">More</div>' + row('#/patch', 'grid', 'Stage patch', 'Mic to speaker, every cable') + row('#/map', 'net', 'System map', 'Signal flow' + (can('admin') ? ', network and VLANs' : '')) +
+      (can('admin') ? row('#/gear-setup', 'spark', 'Guided equipment setup', 'Console, stage boxes, wireless, in-ears') : '') +
+      (can('admin') ? row('#/admin', 'gear', 'Admin' + (st.problems ? ' · ' + st.problems + ' problem' + (st.problems === 1 ? '' : 's') : ''), 'Spaces, people, problems, checklist log, backups, reset') : '') +
+      (canViewAs() ? '<button class="mbtn" id="mVas">' + icon('user') + (viewAs() ? 'Back to admin view' : 'View as user') + '</button>' : '') +
       row('#/settings', 'gear', 'Settings', 'Display, account' + (can('admin') ? ', users, backups' : '')) +
       '</div>', (w, close) => {
       w.classList.add('sheet');
       const si = $('#mSign', w); if (si) si.addEventListener('click', () => { close(); signInDialog(); });
       const nw = $('#mNew', w); if (nw) nw.addEventListener('click', () => { close(); newPage(); });
+      const mv = $('#mVas', w); if (mv) mv.addEventListener('click', () => { close(); setViewAs(!viewAs()); });
     });
   }
 
@@ -130,9 +145,9 @@ const Shell = (() => {
     section = sectionOf(p);
     document.body.classList.toggle('editing', EDITING(p));
     document.body.classList.toggle('wideview', p[0] === 'patch');
-    document.body.classList.toggle('setupmode', !!(S.state && S.state.setupNeeded));
+    document.body.classList.toggle('setupmode', !!(S.state && (S.state.setupNeeded || !S.state.user)));
     if (!['space'].includes(section)) ctx = {};
-    const fabOn = can('editor') && (section === 'home' || (p[0] === 's'));
+    const fabOn = can('admin') && (section === 'home' || (p[0] === 's'));
     $('#fab').classList.toggle('hide', !fabOn);
     if (p[0] !== 'search') $('#sq').value = '';
     paintSide(); paintTabs();
@@ -169,5 +184,5 @@ const Shell = (() => {
     return true;
   }
 
-  return { init, update, paintSide, paintTabs, outline, setCtx: (c) => { ctx = c || {}; }, newPage };
+  return { init, update, paintSide, paintTabs, outline, setCtx: (c) => { ctx = c || {}; }, newPage, setViewAs };
 })();

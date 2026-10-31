@@ -75,7 +75,8 @@ a.abtn:hover { background:color-mix(in srgb, var(--card2) 80%, var(--fg) 8%); }
 .space b { font-size:14px; letter-spacing:.06em; text-transform:uppercase; font-weight:800; }
 .space span { font-size:12px; color:var(--dim); line-height:1.35; }
 .space .n { font-style:normal; position:absolute; top:12px; right:12px; font-size:11px; color:var(--dim); font-variant-numeric:tabular-nums; }
-.space i { width:28px; height:3px; border-radius:2px; background:var(--acc); margin-bottom:6px; }
+.space i { width:28px; height:3px; border-radius:2px; background:var(--sc, var(--acc)); margin-bottom:6px; }
+.space b .icon { width:12px; height:12px; vertical-align:-1px; color:var(--dim); }
 
 .list { background:var(--card); border:1px solid var(--line); border-radius:var(--r); overflow:hidden; }
 .row { display:flex; align-items:center; gap:10px; padding:11px 14px; border-top:1px solid var(--line); color:var(--fg); text-decoration:none !important; }
@@ -1011,3 +1012,60 @@ button.xs { padding:1px 3px; vertical-align:-2px; } button.xs .icon { width:12px
 .pfacts { display:grid; gap:6px; margin-bottom:10px; }
 .pfacts > div { display:grid; grid-template-columns:96px 1fr; gap:8px; font-size:13px; }
 .pfacts span { color:var(--dim); }
+
+/* ===== 1.0: sign-in screen, admin area, problems, manuals ===== */
+.signpage { max-width:420px; margin:6vh auto 0; }
+.signbrand { text-align:center; margin-bottom:16px; }
+.signbrand img { width:84px; height:84px; object-fit:contain; }
+.signbrand img.orglogo { width:auto; max-width:220px; height:84px; }
+.signbrand h1 { font-size:20px; margin:8px 0 2px; }
+.signbrand .orgname { font-size:14px; color:var(--dim); font-weight:600; }
+.signcard { padding:18px; }
+.signcard .signin h3 { margin-top:0; }
+.homeorg { margin:2px 0 0; }
+.welcome h2 { margin-bottom:6px; }
+.welcome p { margin:0 0 12px; color:var(--dim); }
+.wsteps { display:grid; grid-template-columns:repeat(auto-fill, minmax(220px, 1fr)); gap:10px; }
+.wstep { display:flex; flex-direction:column; gap:3px; padding:12px; border-radius:11px; background:var(--card2); color:var(--fg); text-decoration:none !important; }
+.wstep .icon { width:20px; height:20px; color:var(--acc); margin-bottom:4px; }
+.wstep b { font-size:14px; } .wstep span { font-size:12px; color:var(--dim); }
+.wstep:hover { background:color-mix(in srgb, var(--card2) 80%, var(--fg) 8%); }
+.setup .side button .cnt { margin-left:auto; font-style:normal; font-size:11px; min-width:20px; height:20px; padding:0 6px; border-radius:10px; background:var(--bad); color:#fff; display:inline-flex; align-items:center; justify-content:center; }
+.splist { display:flex; flex-direction:column; }
+.sprow { display:flex; align-items:center; gap:8px; padding:10px 4px; border-top:1px solid var(--line); }
+.sprow:first-child { border-top:0; }
+.sprow .t { flex:1; min-width:0; display:flex; flex-direction:column; }
+.sprow .t span { font-size:12px; color:var(--dim); }
+.spdot { width:12px; height:12px; border-radius:4px; flex:none; }
+.badge .icon { width:11px; height:11px; vertical-align:-1px; margin-right:3px; }
+.swatches { display:flex; gap:8px; flex-wrap:wrap; margin-top:4px; }
+.sw { width:30px; height:30px; border-radius:9px; padding:0; border:2px solid transparent; }
+.sw.on { border-color:var(--fg); box-shadow:0 0 0 2px var(--card) inset; }
+.plist3 { display:flex; flex-direction:column; }
+.prob { display:flex; gap:10px; align-items:flex-start; padding:12px 4px; border-top:1px solid var(--line); }
+.prob:first-child { border-top:0; }
+.prob .t { flex:1; display:flex; flex-direction:column; gap:3px; min-width:0; }
+.prob .t b { font-weight:600; white-space:pre-wrap; }
+.prob .t span { font-size:12px; color:var(--dim); }
+.prob .t span.ok { color:var(--ok); }
+.prob.done .t b { color:var(--dim); }
+table.grid tr.missed td:first-child { box-shadow:inset 3px 0 0 var(--bad); }
+table.grid tr.live td:first-child { box-shadow:inset 3px 0 0 var(--acc); }
+.orglogo.sm { height:40px; width:auto; max-width:140px; object-fit:contain; border-radius:6px; background:var(--card2); padding:4px; }
+.list.files .frow { gap:10px; }
+.list.files .frow > .icon { width:20px; height:20px; color:var(--dim); }
+.list.files .frow a.t { color:var(--fg); text-decoration:none !important; }
+.pdev { display:flex; flex-wrap:wrap; gap:6px; }
+#sfoot .vas { font-size:12.5px; padding:2px 4px; }
+.ssp i { background:var(--sc, var(--faint)) !important; opacity:.55; }
+.ssp.open i { opacity:1; }
+.ssp > .icon { width:12px; height:12px; color:var(--faint); flex:none; }
+.vasbar { position:fixed; left:50%; top:calc(8px + env(safe-area-inset-top)); transform:translateX(-50%); z-index:45; display:flex; align-items:center; gap:10px; padding:6px 8px 6px 14px; border-radius:999px;
+  background:var(--warn); color:#1a1400; font-size:13px; font-weight:600; box-shadow:0 8px 24px var(--shadow); }
+.vasbar span { display:inline-flex; align-items:center; gap:6px; } .vasbar .icon { width:15px; height:15px; }
+.vasbar button { background:#1a1400; color:#fff; padding:5px 12px; border-radius:999px; font-size:12.5px; }
+@media (min-width:1024px) { .vasbar { left:calc(50% + 130px); } }
+@media (max-width:1023px) { .vasbar { top:auto; bottom:calc(66px + env(safe-area-inset-bottom)); } }
+@media print { .vasbar { display:none !important; } }
+body.setupmode #hdr .hright { display:none !important; }
+.sc input.txt#orgn { min-width:min(320px, 60vw); }

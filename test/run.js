@@ -76,20 +76,44 @@ test('first run needs setup and creates the admin', async () => {
   assert.strictEqual(r.status, 409, 'second setup refused');
 });
 
+test('a new LiveGenie starts with no spaces; the admin adds them (and the training pages)', async () => {
+  let r = await admin.get('/api/spaces');
+  assert.deepStrictEqual(r.data.spaces, [], 'no built-in spaces');
+  r = await admin.post('/api/admin/starter');
+  assert.strictEqual(r.data.made.length, 6);
+  r = await admin.get('/api/spaces');
+  assert.deepStrictEqual(r.data.spaces.map((s) => s.slug), ['audio', 'video-stream', 'lighting', 'network', 'volunteers', 'services']);
+  assert.strictEqual(r.data.spaces.find((s) => s.slug === 'network').admin_only, true, 'Network is admins only');
+  r = await admin.post('/api/admin/training');
+  assert.strictEqual(r.status, 200);
+  assert.strictEqual(r.data.space, 'volunteers');
+});
+
+test('nothing is visible without signing in', async () => {
+  const st = (await anon.get('/api/state')).data;
+  assert.strictEqual(st.user, null);
+  assert.strictEqual(st.todo.open, 0);
+  for (const u of ['/api/home', '/api/spaces', '/api/search?q=x', '/api/devices', '/api/patch', '/api/todo', '/api/map']) assert.strictEqual((await anon.get(u)).status, 401, u + ' needs sign-in');
+});
+
 test('changes need the LiveGenie header', async () => {
   const r = await admin.req('POST', '/api/pages', { title: 'x', space: 'audio', blocks: [] }, { noHeader: true });
   assert.strictEqual(r.status, 403);
 });
 
-test('admin adds an editor and a volunteer', async () => {
+test('admin adds an admin (old name: editor) and a user (old name: volunteer)', async () => {
   let r = await admin.post('/api/users', { name: 'Sam', role: 'editor', pin: '1357' });
   assert.strictEqual(r.status, 200);
-  r = await admin.post('/api/users', { name: 'Val', role: 'volunteer', pin: '9753' });
+  r = await admin.post('/api/users', { name: 'Val', role: 'user', pin: '9753' });
   assert.strictEqual(r.status, 200);
   r = await admin.post('/api/users', { name: 'val', role: 'volunteer', pin: '9753' });
   assert.strictEqual(r.status, 400, 'names are unique, ignoring case');
   assert.strictEqual((await editor.post('/api/signin', { name: 'sam', pin: '1357' })).status, 200);
   assert.strictEqual((await vol.post('/api/signin', { name: 'Val', pin: '9753' })).status, 200);
+  const list = (await admin.get('/api/users')).data.users;
+  assert.strictEqual(list.find((u) => u.name === 'Sam').role, 'admin', 'editor became admin');
+  assert.strictEqual(list.find((u) => u.name === 'Val').role, 'user');
+  assert.strictEqual((await vol.get('/api/state')).data.role, 'user');
 });
 
 test('volunteers and anonymous readers cannot write', async () => {
@@ -116,7 +140,7 @@ test('editor creates pages with blocks; bad blocks are refused', async () => {
   pageId = r.data.id;
   r = await editor.post('/api/pages', { title: 'UDM Pro admin', space: 'network', tech_only: true, blocks: [{ type: 'text', md: 'Management VLAN and the admin login live here. Keyword crossover.' }] });
   techId = r.data.id;
-  const p = (await anon.get('/api/pages/' + pageId)).data.page;
+  const p = (await vol.get('/api/pages/' + pageId)).data.page;
   assert.strictEqual(p.blocks.length, 4);
   assert.deepStrictEqual(p.blocks[2].items, ['Desk on', 'Load scene Sunday', 'Amps on'], 'empty steps dropped');
   assert.strictEqual(p.blocks[3].extra, undefined, 'unknown fields dropped');
@@ -124,25 +148,25 @@ test('editor creates pages with blocks; bad blocks are refused', async () => {
 });
 
 test('Tech only pages are hidden from volunteers and anonymous readers', async () => {
-  assert.strictEqual((await anon.get('/api/pages/' + techId)).status, 404);
+  assert.strictEqual((await vol.get('/api/pages/' + techId)).status, 404);
   assert.strictEqual((await vol.get('/api/pages/' + techId)).status, 404);
   assert.strictEqual((await editor.get('/api/pages/' + techId)).status, 200);
-  const net = (await anon.get('/api/spaces/network')).data;
-  assert.strictEqual(net.pages.length, 0);
-  const home = (await anon.get('/api/home')).data;
-  assert.strictEqual(home.spaces.find((s) => s.slug === 'network').pages, 0);
+  assert.strictEqual((await vol.get('/api/spaces/network')).status, 404, 'an admins-only space is hidden from users');
+  const home = (await vol.get('/api/home')).data;
+  assert.ok(!home.spaces.some((s) => s.slug === 'network'));
+  assert.strictEqual((await editor.get('/api/spaces/network')).data.pages.length, 1);
   assert.strictEqual(home.pinned.filter((p) => !/^Audio training/.test(p.title)).length, 1);
 });
 
 test('search finds words, prefixes and respects Tech only', async () => {
-  let r = await anon.get('/api/search?q=amplif');
+  let r = await vol.get('/api/search?q=amplif');
   assert.strictEqual(r.data.results.filter(notTraining).length, 1, 'prefix match');
   assert.ok(r.data.results[0].snip.includes('\u0001'), 'snippet marks the match');
-  r = await anon.get('/api/search?q=sq-5 startup');
+  r = await vol.get('/api/search?q=sq-5 startup');
   assert.strictEqual(r.data.results[0].id, pageId);
-  assert.strictEqual((await anon.get('/api/search?q=crossover')).data.results.length, 0);
+  assert.strictEqual((await vol.get('/api/search?q=crossover')).data.results.length, 0);
   assert.strictEqual((await editor.get('/api/search?q=crossover')).data.results.length, 1);
-  assert.strictEqual((await anon.get('/api/search?q=%22)(*')).data.results.length, 0, 'odd characters are safe');
+  assert.strictEqual((await vol.get('/api/search?q=%22)(*')).data.results.length, 0, 'odd characters are safe');
 });
 
 test('saving over someone else\'s change is refused; history and restore work', async () => {
@@ -150,13 +174,13 @@ test('saving over someone else\'s change is refused; history and restore work', 
   assert.strictEqual(r.data.version, 2);
   r = await admin.put('/api/pages/' + pageId, { title: 'Stale', space: 'audio', blocks: [], baseVersion: 1 });
   assert.strictEqual(r.status, 409);
-  r = await anon.get('/api/pages/' + pageId + '/versions');
+  r = await vol.get('/api/pages/' + pageId + '/versions');
   assert.deepStrictEqual(r.data.versions.map((v) => v.version), [2, 1]);
   r = await editor.post('/api/pages/' + pageId + '/versions/1/restore');
   assert.strictEqual(r.data.version, 3);
-  const p = (await anon.get('/api/pages/' + pageId)).data.page;
+  const p = (await vol.get('/api/pages/' + pageId)).data.page;
   assert.strictEqual(p.blocks.length, 4);
-  assert.strictEqual((await anon.get('/api/search?q=amplifiers')).data.results.filter(notTraining).length, 1, 'search index follows the restore');
+  assert.strictEqual((await vol.get('/api/search?q=amplifiers')).data.results.filter(notTraining).length, 1, 'search index follows the restore');
 });
 
 test('pictures upload, show on pages, and odd files are refused', async () => {
@@ -167,11 +191,11 @@ test('pictures upload, show on pages, and odd files are refused', async () => {
   assert.strictEqual(r.status, 415, 'SVG refused');
   r = await vol.post('/api/uploads', PNG, { raw: true, type: 'image/png' });
   assert.strictEqual(r.status, 403);
-  r = await editor.post('/api/pages', { title: 'Rack photo', space: 'video', blocks: [{ type: 'image', upload: id, caption: 'Front AV rack' }] });
+  r = await editor.post('/api/pages', { title: 'Rack photo', space: 'video-stream', blocks: [{ type: 'image', upload: id, caption: 'Front AV rack' }] });
   assert.strictEqual(r.status, 200);
-  r = await editor.post('/api/pages', { title: 'Ghost', space: 'video', blocks: [{ type: 'image', upload: 'a'.repeat(24) }] });
+  r = await editor.post('/api/pages', { title: 'Ghost', space: 'video-stream', blocks: [{ type: 'image', upload: 'a'.repeat(24) }] });
   assert.strictEqual(r.status, 400, 'unknown picture refused');
-  r = await anon.get('/uploads/' + id);
+  r = await vol.get('/uploads/' + id);
   assert.strictEqual(r.status, 200);
   assert.strictEqual(r.type, 'image/png');
   assert.ok(Buffer.compare(r.data, PNG) === 0);
@@ -180,11 +204,11 @@ test('pictures upload, show on pages, and odd files are refused', async () => {
 test('delete moves a page to the trash and it can come back', async () => {
   const id = (await editor.post('/api/pages', { title: 'Temp page', space: 'lighting', blocks: [{ type: 'text', md: 'zebrafish' }] })).data.id;
   assert.strictEqual((await editor.del('/api/pages/' + id)).status, 200);
-  assert.strictEqual((await anon.get('/api/pages/' + id)).status, 404);
-  assert.strictEqual((await anon.get('/api/search?q=zebrafish')).data.results.length, 0);
+  assert.strictEqual((await vol.get('/api/pages/' + id)).status, 404);
+  assert.strictEqual((await vol.get('/api/search?q=zebrafish')).data.results.length, 0);
   assert.ok((await editor.get('/api/trash')).data.pages.some((p) => p.id === id));
   assert.strictEqual((await editor.post('/api/trash/' + id + '/restore')).status, 200);
-  assert.strictEqual((await anon.get('/api/search?q=zebrafish')).data.results.length, 1);
+  assert.strictEqual((await vol.get('/api/search?q=zebrafish')).data.results.length, 1);
 });
 
 test('five wrong PINs lock the user', async () => {
@@ -205,7 +229,7 @@ test('role changes sign the person out; the last admin cannot be removed or demo
   const sam = users.find((u) => u.name === 'Sam'), me = users.find((u) => u.name === 'Jerod');
   await admin.put('/api/users/' + sam.id, { role: 'volunteer' });
   assert.strictEqual((await editor.get('/api/state')).data.user, null, 'Sam was signed out');
-  assert.strictEqual((await admin.put('/api/users/' + me.id, { role: 'editor' })).status, 400);
+  assert.strictEqual((await admin.put('/api/users/' + me.id, { role: 'user' })).status, 400);
   assert.strictEqual((await admin.del('/api/users/' + me.id)).status, 400);
   await admin.put('/api/users/' + sam.id, { role: 'editor' });
   assert.strictEqual((await editor.post('/api/signin', { name: 'Sam', pin: '1357' })).status, 200);
@@ -244,40 +268,41 @@ test('checklist ticks are shared, signed, and reset at the scheduled time', asyn
   let r = await editor.post('/api/pages', { title: 'Sunday Morning Checks', space: 'services', blocks: [
     { type: 'checklist', title: 'Startup', items: ['Desk on', 'Amps on', 'Batteries'], schedule: [{ day: 'daily', reset: hhmm(reset), due: hhmm(due) }] }] });
   checkPage = r.data.id;
-  checkId = (await anon.get('/api/pages/' + checkPage)).data.page.blocks[0].id;
+  checkId = (await vol.get('/api/pages/' + checkPage)).data.page.blocks[0].id;
   assert.match(checkId, /^[a-f0-9]{8}$/);
   r = await vol.post('/api/pages/' + checkPage + '/checklists/' + checkId + '/tick', { item: 'Desk on', done: true });
   assert.strictEqual(r.data.checklist.left, 2);
   assert.strictEqual(r.data.checklist.items[0].by, 'Val');
-  r = await anon.post('/api/pages/' + checkPage + '/checklists/' + checkId + '/tick', { item: 'Amps on', done: true });
-  assert.strictEqual(r.data.checklist.items[1].by, 'Guest', 'anyone who can see the page can tick');
+  assert.strictEqual((await anon.post('/api/pages/' + checkPage + '/checklists/' + checkId + '/tick', { item: 'Amps on', done: true })).status, 401, 'ticking needs sign-in');
+  r = await editor.post('/api/pages/' + checkPage + '/checklists/' + checkId + '/tick', { item: 'Amps on', done: true });
+  assert.strictEqual(r.data.checklist.items[1].by, 'Sam', 'every tick has a name');
   r = await editor.get('/api/pages/' + checkPage + '/checklists');
   assert.strictEqual(r.data.checklists[0].left, 1, 'everyone sees the same ticks');
   assert.strictEqual(r.data.checklists[0].active, true);
   assert.strictEqual(r.data.checklists[0].overdue, false);
-  assert.strictEqual((await anon.post('/api/pages/' + checkPage + '/checklists/' + checkId + '/tick', { item: 'Not a step', done: true })).status, 409);
+  assert.strictEqual((await vol.post('/api/pages/' + checkPage + '/checklists/' + checkId + '/tick', { item: 'Not a step', done: true })).status, 409);
   assert.strictEqual((await anon.post('/api/pages/' + checkPage + '/checklists/' + checkId + '/reset')).status, 401, 'guests cannot reset');
   // editing the page keeps the checklist id, so ticks survive the edit
   const page = (await editor.get('/api/pages/' + checkPage)).data.page;
   await editor.put('/api/pages/' + checkPage, { ...page, space: 'services', title: 'Sunday Morning Checks', baseVersion: page.version });
-  assert.strictEqual((await anon.get('/api/pages/' + checkPage + '/checklists')).data.checklists[0].left, 1);
+  assert.strictEqual((await vol.get('/api/pages/' + checkPage + '/checklists')).data.checklists[0].left, 1);
   r = await vol.post('/api/pages/' + checkPage + '/checklists/' + checkId + '/reset');
   assert.strictEqual(r.data.checklist.left, 3);
   assert.strictEqual(r.data.checklist.lastReset.by, 'Val');
 });
 
 test('To do list: active runs show, finished ones stay as Done, overdue sorts first', async () => {
-  let t = (await anon.get('/api/todo')).data.todo;
+  let t = (await vol.get('/api/todo')).data.todo;
   const mine = t.find((x) => x.block_id === checkId);
   assert.ok(mine && !mine.complete && mine.left === 3);
-  let st = (await anon.get('/api/state')).data.todo;
+  let st = (await vol.get('/api/state')).data.todo;
   assert.ok(st.open >= 1);
   for (const item of ['Desk on', 'Amps on', 'Batteries']) await vol.post('/api/pages/' + checkPage + '/checklists/' + checkId + '/tick', { item, done: true });
-  t = (await anon.get('/api/todo')).data.todo;
+  t = (await vol.get('/api/todo')).data.todo;
   const done = t.find((x) => x.block_id === checkId);
   assert.ok(done.complete, 'finished checklist stays on the list');
   assert.strictEqual(done.completedBy, 'Val');
-  st = (await anon.get('/api/state')).data.todo;
+  st = (await vol.get('/api/state')).data.todo;
   assert.strictEqual(st.open, 0, 'header only counts open ones');
   // an overdue one on a Tech only page
   const now = new Date();
@@ -286,7 +311,7 @@ test('To do list: active runs show, finished ones stay as Done, overdue sorts fi
   t = (await editor.get('/api/todo')).data.todo;
   assert.strictEqual(t[0].title, 'Rack');
   assert.strictEqual(t[0].overdue, true);
-  assert.ok(!(await anon.get('/api/todo')).data.todo.some((x) => x.page_id === r.data.id), 'Tech only checklists stay hidden from guests');
+  assert.ok(!(await vol.get('/api/todo')).data.todo.some((x) => x.page_id === r.data.id), 'Tech only checklists stay hidden from guests');
   assert.strictEqual((await editor.get('/api/state')).data.todo.overdue, 1);
 });
 
@@ -295,7 +320,7 @@ test('overdue notices go to the webhook once per run', async () => {
   const hook = http.createServer((req, res) => { let b = ''; req.on('data', (d) => { b += d; }); req.on('end', () => { got.push(JSON.parse(b)); res.end('ok'); }); });
   await new Promise((r) => hook.listen(0, '127.0.0.1', r));
   const url = 'http://127.0.0.1:' + hook.address().port + '/api/webhook/test';
-  assert.strictEqual((await editor.put('/api/settings/notify', { webhook: url })).status, 403);
+  assert.strictEqual((await vol.put('/api/settings/notify', { webhook: url })).status, 403);
   assert.strictEqual((await admin.put('/api/settings/notify', { webhook: 'ftp://x' })).status, 400);
   assert.strictEqual((await admin.put('/api/settings/notify', { webhook: url })).status, 200);
   assert.strictEqual((await admin.post('/api/settings/notify/test')).status, 200);
@@ -315,13 +340,13 @@ test('patch lists and IP lists are checked and searchable', async () => {
       rows: [{ ip: '10.10.20.12', device: 'DriveRack PA2' }, { ip: '10.10.20.11', device: 'SQ-5', mac: 'aa:bb' }, {}] },
     { type: 'patch', preset: 'input', rows: [['1', 'Pastor lav', 'SLX-D', '', 'SB1-1'], ['', '', '', '', '', '']] }] });
   assert.strictEqual(r.status, 200);
-  const p = (await anon.get('/api/pages/' + r.data.id)).data.page;
+  const p = (await editor.get('/api/pages/' + r.data.id)).data.page;
   assert.deepStrictEqual(p.blocks[0].rows.map((x) => x.ip), ['10.10.20.11', '10.10.20.12'], 'sorted by address, blank rows dropped');
   assert.deepStrictEqual(p.blocks[1].trace, [1, 2, 4, 0]);
   assert.deepStrictEqual(p.blocks[1].ok, [], 'no intended duplicates yet');
   assert.strictEqual(p.blocks[1].rows.length, 1);
-  assert.strictEqual((await anon.get('/api/search?q=driverack')).data.results[0].id, r.data.id);
-  assert.strictEqual((await anon.get('/api/search?q=pastor')).data.results.some((x) => x.id === r.data.id), true);
+  assert.strictEqual((await editor.get('/api/search?q=driverack')).data.results[0].id, r.data.id);
+  assert.strictEqual((await editor.get('/api/search?q=pastor')).data.results.some((x) => x.id === r.data.id), true);
   r = await editor.post('/api/pages', { title: 'Bad net', space: 'network', blocks: [{ type: 'iplist', net: { cidr: '10.10.20.0/33' }, rows: [] }] });
   assert.strictEqual(r.status, 400);
 });
@@ -329,7 +354,7 @@ test('patch lists and IP lists are checked and searchable', async () => {
 test('escaped Markdown characters are searchable as words', async () => {
   const r = await editor.post('/api/pages', { title: 'Escapes', space: 'audio', blocks: [{ type: 'text', md: 'Use \\*only\\* the **Aux\\_7** send' }] });
   assert.strictEqual(r.status, 200);
-  assert.ok((await anon.get('/api/search?q=only')).data.results.some((x) => x.id === r.data.id));
+  assert.ok((await vol.get('/api/search?q=only')).data.results.some((x) => x.id === r.data.id));
 });
 
 test('device library: cards, aliases, IPs from IP lists, Used on, import', async () => {
@@ -341,24 +366,24 @@ test('device library: cards, aliases, IPs from IP lists, Used on, import', async
   assert.strictEqual((await editor.post('/api/devices', { name: 'Bad', ip: '10.10.20.300' })).status, 400);
   r = await editor.post('/api/devices', { name: 'UDM Pro', category: 'network', ip: '10.10.1.1', tech_only: true });
   const udm = r.data.id;
-  let list = (await anon.get('/api/devices')).data.devices;
+  let list = (await vol.get('/api/devices')).data.devices;
   assert.ok(!list.some((d) => d.id === udm), 'Tech only devices hidden from guests');
   const card = list.find((d) => d.id === sq);
   assert.deepStrictEqual(card.ips, ['10.10.20.11'], 'IP comes from the IP list row named SQ-5');
-  r = await anon.get('/api/devices/' + sq);
+  r = await vol.get('/api/devices/' + sq);
   const titles = r.data.usedOn.map((u) => u.title);
   assert.ok(titles.includes('AVL network'), 'IP list mention');
   assert.ok(titles.includes('SQ-5 Sunday startup'), 'text mention');
   const avl = r.data.usedOn.find((u) => u.title === 'AVL network');
   assert.ok(avl.hits.some((h) => h.kind === 'iplist' && h.text.includes('10.10.20.11')));
-  assert.strictEqual((await anon.get('/api/devices/' + udm)).status, 404);
+  assert.strictEqual((await vol.get('/api/devices/' + udm)).status, 404);
   const sug = (await editor.get('/api/devices/suggestions')).data.suggestions.map((x) => x.name);
   assert.ok(sug.includes('DriveRack PA2') && !sug.includes('SQ-5'));
   r = await editor.post('/api/devices/import', { names: ['DriveRack PA2'] });
   assert.strictEqual(r.data.made, 1);
   list = (await editor.get('/api/devices')).data.devices;
   assert.deepStrictEqual(list.find((d) => d.name === 'DriveRack PA2').ips, ['10.10.20.12']);
-  assert.strictEqual((await anon.get('/api/search?q=allen')).data.devices[0].name, 'SQ-5');
+  assert.strictEqual((await vol.get('/api/search?q=allen')).data.devices[0].name, 'SQ-5');
   assert.strictEqual((await editor.put('/api/devices/' + sq, { name: 'SQ-5', aliases: ['FOH desk'], category: 'audio' })).status, 200);
   assert.strictEqual((await editor.del('/api/devices/' + udm)).status, 200);
 });
@@ -401,7 +426,7 @@ test('system map: plugged-into links, signal links from patch lists, loops refus
   const sig = r.data.sigLinks.map((l) => l.from + '>' + l.to + 'x' + l.count).sort();
   assert.deepStrictEqual(sig, [sq + '>' + pa2 + 'x1', pa2 + '>' + amp + 'x2'].sort(), 'aliases count, rows add up: ' + JSON.stringify(r.data.sigLinks.map((l) => [l.from, l.to, l.count])) + ' ids sq=' + sq + ' pa2=' + pa2 + ' amp=' + amp);
   assert.ok(r.data.nodes.find((n) => n.id === sq).vlans.includes(20));
-  r = await anon.get('/api/map');
+  r = await vol.get('/api/map');
   assert.strictEqual(r.data.tech, false);
   assert.strictEqual(r.data.netLinks.length, 0, 'guests get the signal map only');
   assert.ok(r.data.nodes.every((n) => !n.ips.length && !n.vlans.length));
@@ -489,8 +514,8 @@ test('sign-in QR links: once, for yourself (or anyone if admin), sign a phone in
   assert.strictEqual(r.data.name, 'Val');
   assert.ok(r.data.token.length >= 20 && r.data.expires > Date.now());
   const users = (await admin.get('/api/users')).data.users;
-  const ed = users.find((u) => u.role === 'editor');
-  assert.strictEqual((await vol.post('/api/links', { user_id: ed.id })).status, 403, 'a volunteer cannot make one for someone else');
+  const ed = users.find((u) => u.name === 'Sam');
+  assert.strictEqual((await vol.post('/api/links', { user_id: ed.id })).status, 403, 'a user cannot make one for someone else');
   const phone = client();
   let u = await phone.post('/api/links/use', { token: r.data.token });
   assert.strictEqual(u.status, 200);
@@ -502,7 +527,7 @@ test('sign-in QR links: once, for yourself (or anyone if admin), sign a phone in
   assert.strictEqual(r.data.name, ed.name, 'an admin can make one for anyone');
   const phone2 = client();
   await phone2.post('/api/links/use', { token: r.data.token });
-  assert.strictEqual((await phone2.get('/api/state')).data.role, 'editor');
+  assert.strictEqual((await phone2.get('/api/state')).data.role, 'admin');
   assert.strictEqual((await admin.post('/api/links', { user_id: 99999 })).status, 404);
   // the QR maker in the browser encodes a sign-in link
   const QR = require(path.join(ROOT, 'public', 'qr.js'));
@@ -513,7 +538,7 @@ test('sign-in QR links: once, for yourself (or anyone if admin), sign a phone in
 
 test('stage patch: one drawing, saved with versions; lists, checks, search and map come from it', async () => {
   const P = require(path.join(ROOT, 'public', 'patchcore.js'));
-  let r = await anon.get('/api/patch');
+  let r = await vol.get('/api/patch');
   assert.strictEqual(r.status, 200);
   assert.strictEqual(r.data.canEdit, false);
   const base = r.data.version;
@@ -540,7 +565,7 @@ test('stage patch: one drawing, saved with versions; lists, checks, search and m
   assert.strictEqual(r.status, 200);
   const v1 = r.data.version;
   assert.strictEqual((await admin.put('/api/patch', { doc: d, baseVersion: base })).status, 409, 'saving over a newer version is refused');
-  const doc = (await anon.get('/api/patch')).data.doc;
+  const doc = (await vol.get('/api/patch')).data.doc;
   // the lists
   const ins = P.inputs(doc).filter((x) => x.used);
   assert.deepStrictEqual(ins.map((x) => [x.ch, x.up.source]), [[1, 'Kick'], [9, 'Worship lead'], [10, 'Pastor']]);
@@ -566,7 +591,7 @@ test('stage patch: one drawing, saved with versions; lists, checks, search and m
   r = await editor.post('/api/patch/versions/' + v1 + '/restore');
   assert.strictEqual(r.data.doc.title, doc.title, 'restoring brings the old one back as a new version');
   // search, map and the device card
-  const sr = (await anon.get('/api/search?q=pastor lav')).data;
+  const sr = (await vol.get('/api/search?q=pastor lav')).data;
   assert.ok(sr.gear.some((g) => g.name === 'Pastor lav'), 'search finds gear on the patch');
   const devs = (await editor.get('/api/devices')).data.devices;
   const sqDev = devs.find((x) => x.name === 'SQ-5'), arDev = devs.find((x) => x.name === 'AR2412');
@@ -593,6 +618,7 @@ test('old patch lists move onto the stage patch once, and pages keep a live list
   const st = StoreM.create(db, dir);
   const pt = PatchM.create(db, { UserError: StoreM.UserError, audit: st.audit });
   const who = { id: null, name: 'test' };
+  db.prepare("INSERT INTO spaces (slug, name) VALUES ('audio', 'Audio')").run();
   const snake = [['1', 'Kick', 'Beta 91A', 'AR2412', '1', 'SLink', 'SQ-5', ''], ['2', '', '', 'AR2412', '2', 'SLink', 'SQ-5', ''], ['3', 'Bass', 'DI', 'AR2412', '3', 'SLink', 'SQ-5', ''], ['4', 'Keys L', 'DI', 'AR2412', '4', 'SLink', 'SQ-5', '']];
   const out = [['Mix 1', 'SQ-5', 'SLink', 'AR2412', '1', 'Wedge 1', '']];
   const wl = [['9', 'Pastor', 'TL47', 'SLX-D1', '524.125', 'SLX-D4D', '1', 'AR2412', '9', 'SQ-5', '']];
@@ -634,12 +660,119 @@ test('old patch lists move onto the stage patch once, and pages keep a live list
   db.close();
 });
 
+test('spaces belong to the admin: make, rename, admins only, order, remove (moving pages)', async () => {
+  let r = await vol.post('/api/spaces', { name: 'Kids' });
+  assert.strictEqual(r.status, 403, 'users cannot make spaces');
+  r = await admin.post('/api/spaces', { name: 'Kids ministry', blurb: 'Thursday kids' });
+  assert.strictEqual(r.data.slug, 'kids-ministry');
+  assert.strictEqual((await admin.post('/api/spaces', { name: 'kids MINISTRY' })).status, 400, 'names are unique');
+  const pg = await admin.post('/api/pages', { title: 'Kids room sound', space: 'kids-ministry', blocks: [{ type: 'text', md: 'Use the small mixer.' }] });
+  assert.ok((await vol.get('/api/spaces')).data.spaces.some((x) => x.slug === 'kids-ministry'));
+  await admin.put('/api/spaces/kids-ministry', { admin_only: true, name: 'Kids', color: '#ec6aa8' });
+  assert.ok(!(await vol.get('/api/spaces')).data.spaces.some((x) => x.slug === 'kids-ministry'), 'admins-only spaces are hidden from users');
+  assert.strictEqual((await vol.get('/api/pages/' + pg.data.id)).status, 404, 'and so are their pages');
+  assert.strictEqual((await vol.get('/api/search?q=small mixer')).data.results.length, 0, 'and search does not show them');
+  // View as user: an admin sees what users see
+  assert.ok(!(await admin.req('GET', '/api/spaces', undefined, { headers: { 'x-view-as': 'user' } })).data.spaces.some((x) => x.slug === 'kids-ministry'));
+  const st = (await admin.req('GET', '/api/state', undefined, { headers: { 'x-view-as': 'user' } })).data;
+  assert.strictEqual(st.role, 'user'); assert.strictEqual(st.viewAs, true);
+  assert.strictEqual((await admin.req('POST', '/api/spaces', { name: 'Nope' }, { headers: { 'x-view-as': 'user' } })).status, 403, 'viewing as a user, admin powers are off');
+  assert.strictEqual((await vol.req('GET', '/api/state', undefined, { headers: { 'x-view-as': 'user' } })).data.viewAs, false);
+  // order
+  const slugs = (await admin.get('/api/spaces')).data.spaces.map((x) => x.slug);
+  await admin.put('/api/spaces-order', { slugs: ['kids-ministry', ...slugs.filter((x) => x !== 'kids-ministry')] });
+  assert.strictEqual((await admin.get('/api/spaces')).data.spaces[0].slug, 'kids-ministry');
+  // remove: pages must go somewhere
+  r = await admin.del('/api/spaces/kids-ministry');
+  assert.strictEqual(r.status, 409);
+  r = await admin.req('DELETE', '/api/spaces/kids-ministry', { move_to: 'services' });
+  assert.strictEqual(r.status, 200);
+  assert.strictEqual((await vol.get('/api/pages/' + pg.data.id)).data.page.space, 'services', 'its pages moved');
+});
+
+test('church name and logo; the logo shows before signing in', async () => {
+  const up = await admin.post('/api/uploads', PNG, { raw: true, type: 'image/png' });
+  assert.strictEqual((await vol.put('/api/org', { name: 'X' })).status, 403);
+  const r = await admin.put('/api/org', { name: 'Rolling Hills Community Church', logo: up.data.id });
+  assert.strictEqual(r.data.org.name, 'Rolling Hills Community Church');
+  const st = (await anon.get('/api/state')).data;
+  assert.strictEqual(st.org.name, 'Rolling Hills Community Church');
+  const logo = await anon.get('/api/org/logo');
+  assert.strictEqual(logo.status, 200); assert.strictEqual(logo.type, 'image/png');
+  assert.strictEqual((await anon.get('/uploads/' + up.data.id)).status, 401, 'other pictures need sign-in');
+});
+
+test('manuals on device cards: upload, open, list, remove', async () => {
+  const dev = await admin.post('/api/devices', { name: 'DriveRack VENU360', category: 'audio' });
+  const pdf = Buffer.from('%PDF-1.4\n1 0 obj<<>>endobj\ntrailer<<>>\n%%EOF');
+  assert.strictEqual((await vol.post('/api/devices/' + dev.data.id + '/files', pdf, { raw: true, type: 'application/pdf', headers: { 'x-filename': 'manual.pdf' } })).status, 403);
+  assert.strictEqual((await admin.post('/api/devices/' + dev.data.id + '/files', Buffer.from('nope'), { raw: true, type: 'application/pdf', headers: { 'x-filename': 'fake.pdf' } })).status, 415, 'a fake PDF is refused');
+  let r = await admin.post('/api/devices/' + dev.data.id + '/files', pdf, { raw: true, type: 'application/pdf', headers: { 'x-filename': encodeURIComponent('VENU360 Owner’s Manual.pdf') } });
+  assert.strictEqual(r.status, 200);
+  const f = r.data.file;
+  assert.strictEqual(f.name, 'VENU360 Owner’s Manual.pdf');
+  r = await vol.get('/api/devices/' + dev.data.id);
+  assert.strictEqual(r.data.files.length, 1);
+  assert.strictEqual((await vol.get('/api/devices')).data.devices.find((x) => x.id === dev.data.id).files, 1);
+  r = await vol.get('/files/' + f.id);
+  assert.strictEqual(r.status, 200); assert.strictEqual(r.type, 'application/pdf');
+  assert.strictEqual((await anon.get('/files/' + f.id)).status, 401);
+  assert.strictEqual((await vol.del('/api/files/' + f.id)).status, 403);
+  assert.strictEqual((await admin.del('/api/files/' + f.id)).status, 200);
+  assert.strictEqual((await vol.get('/files/' + f.id)).status, 404);
+});
+
+test('problem reports: users report, admins see them (and the webhook), resolve and reopen', async () => {
+  const got = [];
+  const hook = http.createServer((req, res) => { let b = ''; req.on('data', (d) => { b += d; }); req.on('end', () => { got.push(JSON.parse(b)); res.end('ok'); }); });
+  await new Promise((r) => hook.listen(0, '127.0.0.1', r));
+  await admin.put('/api/settings/notify', { webhook: 'http://127.0.0.1:' + hook.address().port + '/x' });
+  assert.strictEqual((await vol.post('/api/problems', { text: '' })).status, 400);
+  let r = await vol.post('/api/problems', { text: 'Pastor lav cuts out', where: 'Pastor lav', page_id: pageId });
+  assert.strictEqual(r.status, 200);
+  await new Promise((res) => setTimeout(res, 600));
+  hook.close();
+  assert.ok(got.some((g) => g.event === 'problem_reported' && /Pastor lav cuts out/.test(g.message)), 'the webhook hears about it');
+  assert.strictEqual((await vol.get('/api/problems')).status, 403);
+  assert.strictEqual((await admin.get('/api/state')).data.problems, 1);
+  const list = (await admin.get('/api/problems')).data.problems;
+  assert.strictEqual(list[0].created_name, 'Val');
+  r = await admin.put('/api/problems/' + list[0].id, { status: 'resolved', note: 'New TA4F cable' });
+  assert.strictEqual(r.data.problem.resolved_name, 'Jerod');
+  assert.strictEqual((await admin.get('/api/state')).data.problems, 0);
+  assert.strictEqual((await admin.get('/api/problems?status=resolved')).data.problems[0].note, 'New TA4F cable');
+  await admin.put('/api/settings/notify', { webhook: '' });
+});
+
+test('checklist log: every run, who did it, when it finished, what was missed', async () => {
+  const r = await admin.post('/api/pages', { title: 'Log test', space: 'services', blocks: [{ type: 'checklist', title: 'Shutdown', items: ['Amps off', 'Desk off', 'Lights off'] }] });
+  const blk = (await admin.get('/api/pages/' + r.data.id)).data.page.blocks[0].id;
+  const tick = (c, item) => c.post('/api/pages/' + r.data.id + '/checklists/' + blk + '/tick', { item, done: true });
+  await tick(vol, 'Amps off'); await tick(editor, 'Desk off');
+  let log = (await admin.get('/api/checklog')).data;
+  let run = log.runs.find((x) => x.block_id === blk);
+  assert.strictEqual(run.done, 2); assert.strictEqual(run.completed_at, null); assert.deepStrictEqual(run.missed, ['Lights off']);
+  assert.deepStrictEqual(run.people.sort(), ['Sam', 'Val']);
+  await tick(vol, 'Lights off');
+  run = (await admin.get('/api/checklog')).data.runs.find((x) => x.block_id === blk);
+  assert.ok(run.completed_at); assert.strictEqual(run.completed_by, 'Val');
+  // a reset starts a new run; the old one stays in the log
+  await admin.post('/api/pages/' + r.data.id + '/checklists/' + blk + '/reset');
+  await new Promise((res) => setTimeout(res, 5));
+  await tick(vol, 'Amps off');
+  log = (await admin.get('/api/checklog?page=' + r.data.id + '&block=' + blk)).data;
+  assert.strictEqual(log.runs.length, 2);
+  assert.ok(log.runs[1].completed_at && !log.runs[0].completed_at, 'the newest run is still going, the older one finished');
+  assert.ok(log.checklists.some((c) => c.block_id === blk));
+  assert.strictEqual((await vol.get('/api/checklog')).status, 403);
+});
+
 test('backup, then restore brings the data back after a restart', async () => {
   let r = await admin.post('/api/backups/now');
   assert.strictEqual(r.status, 200);
   const name = r.data.name;
   r = await admin.get('/api/backups/' + name + '/inspect');
-  assert.strictEqual(r.data.info.pictures, 1 + 6, 'one picture plus the six training diagrams');
+  assert.strictEqual(r.data.info.pictures, 1 + 6 + 1, 'one picture, the six training diagrams and the church logo');
   const before = r.data.info.pages;
   const dl = await admin.get('/api/backups/' + name + '/download');
   assert.ok(dl.data.length > 1024 && dl.data.toString('ascii', 257, 262) === 'ustar', 'download is a tar file');
@@ -667,17 +800,17 @@ test('backup, then restore brings the data back after a restart', async () => {
 
 test('audio training pages are added to Volunteers once, in signal-flow order', async () => {
   const anon = client();
-  const vol = (await anon.get('/api/spaces/volunteers')).data;
-  const titles = vol.pages.map((p) => p.title);
+  const volSpace = (await vol.get('/api/spaces/volunteers')).data;
+  const titles = volSpace.pages.map((p) => p.title);
   assert.deepStrictEqual(titles.slice(0, 6), ['Audio training: start here', 'Audio 1: Setting gain', 'Audio 2: High pass filter', 'Audio 3: Low pass filter', 'Audio 4: How EQ works', 'Audio 5: How a compressor works']);
-  const start = (await anon.get('/api/pages/' + vol.pages[0].id)).data.page;
+  const start = (await vol.get('/api/pages/' + volSpace.pages[0].id)).data.page;
   const links = [...JSON.stringify(start.blocks).matchAll(/#\/p\/(\d+)/g)].map((m) => Number(m[1]));
-  assert.deepStrictEqual(links, vol.pages.slice(1, 6).map((p) => p.id));
-  const gain = (await anon.get('/api/pages/' + links[0])).data.page;
+  assert.deepStrictEqual(links, volSpace.pages.slice(1, 6).map((p) => p.id));
+  const gain = (await vol.get('/api/pages/' + links[0])).data.page;
   assert.ok(gain.blocks.some((b) => b.type === 'image'), 'gain module has its diagram');
   assert.ok(/\*\*\[ Gain \]\*\*/.test(gain.blocks[0].md), 'shows where it sits in the signal flow');
   assert.ok(JSON.stringify(gain.blocks).includes('#/p/' + links[1]), 'links to the next module');
-  const s = (await anon.get('/api/search?q=compressor')).data;
+  const s = (await vol.get('/api/search?q=compressor')).data;
   assert.ok(JSON.stringify(s).includes('How a compressor works'));
 });
 
@@ -690,6 +823,30 @@ test('static files and icons are served with safe headers', async () => {
   for (const f of ['/app.js', '/style.css', '/icons/favicon.svg', '/favicon.ico', '/icons/site.webmanifest']) assert.strictEqual((await fetch(BASE + f)).status, 200, f);
   assert.strictEqual((await fetch(BASE + '/../server.js')).status, 404);
   assert.strictEqual((await fetch(BASE + '/%2e%2e/package.json')).status, 404);
+});
+
+test('reset: clear content keeps people; factory reset starts over (a backup is made first)', async () => {
+  assert.strictEqual((await vol.post('/api/admin/reset', { mode: 'content', confirm: 'RESET' })).status, 403);
+  assert.strictEqual((await admin.post('/api/admin/reset', { mode: 'content', confirm: 'yes' })).status, 400, 'needs RESET typed');
+  let r = await admin.post('/api/admin/reset', { mode: 'content', confirm: 'RESET' });
+  assert.strictEqual(r.status, 200);
+  assert.ok(/before-reset/.test(r.data.backup));
+  assert.strictEqual((await admin.get('/api/spaces')).data.spaces.length, 0);
+  assert.strictEqual((await admin.get('/api/home')).data.recent.length, 0);
+  assert.strictEqual((await admin.get('/api/devices')).data.devices.length, 0);
+  assert.strictEqual((await admin.get('/api/patch')).data.doc.gear.length, 0);
+  assert.strictEqual((await vol.get('/api/state')).data.user.name, 'Val', 'people stay signed in');
+  assert.strictEqual((await admin.get('/api/state')).data.org.name, 'Rolling Hills Community Church', 'settings stay');
+  assert.ok((await admin.get('/api/backups')).data.backups.some((b) => b.name === r.data.backup));
+  r = await admin.post('/api/admin/reset', { mode: 'factory', confirm: 'reset' });
+  assert.strictEqual(r.status, 200);
+  const st = (await anon.get('/api/state')).data;
+  assert.strictEqual(st.setupNeeded, true, 'back to the first-run setup');
+  assert.strictEqual(st.org.name, '');
+  assert.strictEqual((await vol.get('/api/state')).data.user, null, 'everyone is signed out');
+  r = await admin.post('/api/setup', { name: 'New admin', pin: '1234', org: 'Test Church' });
+  assert.strictEqual(r.status, 200);
+  assert.strictEqual((await admin.get('/api/state')).data.org.name, 'Test Church');
 });
 
 (async () => {

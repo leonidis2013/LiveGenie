@@ -10,7 +10,10 @@ const esc = (s) => String(s == null ? '' : s).replace(/[&<>"']/g, (c) => ({ '&':
 const app = $('#app');
 
 const S = { state: null, dirty: false, lastRoute: '#/', offline: false, ed: null };
-const can = (role) => ({ viewer: 0, volunteer: 1, editor: 2, admin: 3 }[S.state ? S.state.role : 'viewer'] >= { viewer: 0, volunteer: 1, editor: 2, admin: 3 }[role]);
+const RANK = { viewer: 0, user: 1, admin: 3 };
+const can = (role) => (RANK[S.state ? S.state.role : 'viewer'] || 0) >= RANK[role];
+/** An admin looking at LiveGenie the way users see it (kept for this browser tab). */
+const viewAs = () => { try { return sessionStorage.getItem('livegenie-view-as') === 'user'; } catch (e) { return false; } };
 
 // ---------- icons ----------
 const ICONS = {
@@ -53,6 +56,7 @@ const icon = (n, cls = 'icon') => '<svg class="' + cls + '" viewBox="0 0 24 24">
 // ---------- talking to the server ----------
 async function call(method, url, body, opts = {}) {
   const headers = { 'x-livegenie': '1' };
+  if (viewAs()) headers['x-view-as'] = 'user';
   let payload;
   if (opts.raw) { payload = body; headers['content-type'] = opts.type || 'application/octet-stream'; Object.assign(headers, opts.headers || {}); }
   else if (body !== undefined) { payload = JSON.stringify(body); headers['content-type'] = 'application/json'; }
@@ -201,7 +205,15 @@ function paintHeader() {
   $('#updPill').textContent = 'Update available' + (st.update && st.update.latest ? ' · ' + st.update.latest : '');
   $('#hdr').classList.toggle('hide', !!st.setupNeeded);
   $('#sVer').textContent = st.version;
-  document.body.classList.toggle('setupmode', !!st.setupNeeded);
+  document.body.classList.toggle('setupmode', !!st.setupNeeded || !st.user);
+  document.body.classList.toggle('viewas', !!st.viewAs);
+  let vb = $('#vasbar');
+  if (st.viewAs && !vb) {
+    vb = document.createElement('div'); vb.id = 'vasbar'; vb.className = 'vasbar';
+    vb.innerHTML = '<span>' + icon('user') + 'You are seeing LiveGenie as a user sees it.</span><button type="button">Back to admin view</button>';
+    vb.querySelector('button').addEventListener('click', () => Shell.setViewAs(false));
+    document.body.appendChild(vb);
+  } else if (!st.viewAs && vb) vb.remove();
   Shell.paintSide(); Shell.paintTabs();
   measureHeader();
 }
@@ -264,10 +276,20 @@ function rememberPerson(name) {
 function forgetPerson(name) { try { localStorage.setItem(PEOPLE_KEY, JSON.stringify(rememberedPeople().filter((x) => x !== name))); } catch (e) { /* private mode */ } }
 
 function signInDialog(then) {
-  const st = { name: '', pin: '', busy: false, step: rememberedPeople().length ? 'who' : 'name' };
   modal('<div class="signin" id="sgn"></div>', (w, close) => {
     w.classList.add('signsheet');
-    const host = $('#sgn', w);
+    signInPanel($('#sgn', w), { close, then });
+  });
+}
+
+/** The sign-in itself: in a dialog (close given) or on the full sign-in screen (no Cancel). */
+function signInPanel(host, opts = {}) {
+  const st = { name: '', pin: '', busy: false, step: rememberedPeople().length ? 'who' : 'name' };
+  const inline = !opts.close;
+  const close = opts.close || (() => {});
+  const then = opts.then;
+  const w = host;
+  {
     const av = (n) => '<span class="av">' + esc(n.slice(0, 1).toUpperCase()) + '</span>';
     const qrHint = '<p class="note sqr">' + icon('grid') + '<span>Signed in on a computer? Open <b>Settings › Account › Sign in on your phone</b> and scan the code with your camera. No PIN needed.</span></p>';
     const done = async (user) => {
@@ -305,17 +327,17 @@ function signInDialog(then) {
       if (st.step === 'who') {
         host.innerHTML = '<h3>Who is signing in?</h3><div class="people">' + rememberedPeople().map((n) => '<div class="pwrap"><button type="button" class="person" data-p="' + esc(n) + '">' + av(n) + '<b>' + esc(n) + '</b></button><button type="button" class="pforget" data-forget="' + esc(n) + '" aria-label="Forget ' + esc(n) + ' on this device" title="Forget on this device">' + icon('x') + '</button></div>').join('') +
           '<button type="button" class="person other" data-p="">' + '<span class="av">' + icon('plus') + '</span><b>Someone else</b></button></div>' + qrHint +
-          '<div class="acts"><button type="button" data-close>Cancel</button></div>';
+          (inline ? '' : '<div class="acts"><button type="button" data-close>Cancel</button></div>');
         $$('[data-p]', host).forEach((b) => b.addEventListener('click', () => { st.name = b.dataset.p; st.pin = ''; st.step = st.name ? 'pin' : 'name'; paint(); }));
         $$('[data-forget]', host).forEach((b) => b.addEventListener('click', () => { forgetPerson(b.dataset.forget); st.step = rememberedPeople().length ? 'who' : 'name'; paint(); }));
         $$('[data-close]', host).forEach((b) => b.addEventListener('click', () => { close(); document.removeEventListener('keydown', keys); }));
         return;
       }
       if (st.step === 'name') {
-        host.innerHTML = '<h3>Sign in</h3><p>Volunteers, editors and admins sign in with their name and PIN.</p><form id="snf"><label for="sn">Your name</label>' +
+        host.innerHTML = '<h3>Sign in</h3><p>Sign in with your name and PIN.</p><form id="snf"><label for="sn">Your name</label>' +
           '<input id="sn" autocomplete="username" autocapitalize="words" enterkeyhint="next" value="' + esc(st.name) + '"><div class="err" id="se"></div>' +
-          '<div class="acts"><button type="button" id="sb">' + (rememberedPeople().length ? 'Back' : 'Cancel') + '</button><button class="primary">Next</button></div></form>' + qrHint;
-        $('#sb', host).addEventListener('click', () => { if (rememberedPeople().length) { st.step = 'who'; paint(); } else { close(); document.removeEventListener('keydown', keys); } });
+          '<div class="acts">' + (inline && !rememberedPeople().length ? '' : '<button type="button" id="sb">' + (rememberedPeople().length ? 'Back' : 'Cancel') + '</button>') + '<button class="primary">Next</button></div></form>' + qrHint;
+        const sbb = $('#sb', host); if (sbb) sbb.addEventListener('click', () => { if (rememberedPeople().length) { st.step = 'who'; paint(); } else { close(); document.removeEventListener('keydown', keys); } });
         $('#snf', host).addEventListener('submit', (e) => { e.preventDefault(); const n = $('#sn', host).value.trim(); if (!n) { $('#se', w).textContent = 'Type your name'; return; } st.name = n; st.step = 'pin'; paint(); });
         setTimeout(() => $('#sn', host).focus(), 40);
         return;
@@ -324,7 +346,7 @@ function signInDialog(then) {
         '<div class="pdots" aria-live="polite"></div><div class="err" id="se"></div>' +
         '<div class="pad">' + ['1', '2', '3', '4', '5', '6', '7', '8', '9'].map((k) => '<button type="button" data-k="' + k + '">' + k + '</button>').join('') +
         '<button type="button" data-k="back" aria-label="Delete">⌫</button><button type="button" data-k="0">0</button><button type="button" data-k="go" class="primary" aria-label="Sign in">' + (st.busy ? '<span class="spin"></span>' : 'Go') + '</button></div>' +
-        '<div class="acts"><button type="button" data-close>Cancel</button></div>';
+        (inline ? '' : '<div class="acts"><button type="button" data-close>Cancel</button></div>');
       $$('[data-k]', host).forEach((b) => b.addEventListener('click', () => press(b.dataset.k)));
       $('#nyou', host).addEventListener('click', () => { st.pin = ''; st.step = rememberedPeople().length ? 'who' : 'name'; paint(); });
       $$('[data-close]', host).forEach((b) => b.addEventListener('click', () => { close(); document.removeEventListener('keydown', keys); }));
@@ -340,7 +362,7 @@ function signInDialog(then) {
     }
     document.addEventListener('keydown', keys);
     paint();
-  });
+  }
 }
 
 /** A QR code that signs a phone in as someone (yourself, or anyone if you are an admin). Works once, for 5 minutes. */
@@ -387,7 +409,7 @@ async function useSignInLink(token) {
 
 // ---------- shared bits ----------
 function pageRow(p, opts = {}) {
-  const badges = (p.pinned && !opts.noPin ? '<span class="badge pin">Pinned</span>' : '') + (p.tech_only ? '<span class="badge tech">Tech only</span>' : '');
+  const badges = (p.pinned && !opts.noPin ? '<span class="badge pin">Pinned</span>' : '') + (p.tech_only ? '<span class="badge tech">Hidden from users</span>' : '');
   const sub = opts.snip ? '<span class="snip">' + esc(p.snip).replace(/\u0001/g, '<mark>').replace(/\u0002/g, '</mark>') + '</span>'
     : '<span>' + esc(opts.showSpace ? p.space_name : '') + (opts.showSpace && p.updated_by ? ' · ' : '') + (p.updated_by ? 'Updated by ' + esc(p.updated_by) : '') + '</span>';
   return '<a class="row" href="#/p/' + p.id + '"><div class="t"><b>' + esc(p.title) + '</b>' + sub + '</div>' + badges +
@@ -408,8 +430,9 @@ async function viewSetup() {
   app.innerHTML = `<div class="first-run">
     <img src="/icons/livegenie-mark.svg" alt="">
     <h1 style="font-size:20px">Welcome to LiveGenie</h1>
-    <p class="note" style="font-size:14px;margin:6px 0 18px">Create the first admin. You can add volunteers and editors in Settings afterwards.</p>
+    <p class="note" style="font-size:14px;margin:6px 0 18px">Create the first admin. You can add more admins and users in Admin › People afterwards.</p>
     <form class="card" id="setupF">
+      <label for="ao">Church or organisation <span class="note">(optional)</span></label><input id="ao" autocapitalize="words" placeholder="Rolling Hills Community Church">
       <label for="an">Your name</label><input id="an" autocomplete="username" autocapitalize="words" required>
       <label for="ap">PIN (4 to 8 digits)</label><input id="ap" type="password" inputmode="numeric" maxlength="8" autocomplete="new-password" required>
       <label for="ap2">PIN again</label><input id="ap2" type="password" inputmode="numeric" maxlength="8" autocomplete="new-password" required>
@@ -421,7 +444,7 @@ async function viewSetup() {
     const pin = $('#ap').value;
     if (pin !== $('#ap2').value) { $('#ae').textContent = 'The two PINs are not the same'; return; }
     try {
-      await call('POST', '/api/setup', { name: $('#an').value, pin });
+      await call('POST', '/api/setup', { name: $('#an').value, pin, org: $('#ao').value });
       await loadState(); paintHeader();
       location.hash = '#/';
       route();
@@ -429,18 +452,33 @@ async function viewSetup() {
   });
 }
 
+/** Everyone signs in before seeing anything. */
+function viewSignIn() {
+  setTitle('Sign in');
+  const org = (S.state && S.state.org) || {};
+  app.innerHTML = '<div class="signpage"><div class="signbrand">' + (org.logo ? '<img class="orglogo" src="/api/org/logo" alt="">' : '<img src="/icons/livegenie-mark.svg" alt="">') +
+    '<h1>LiveGenie</h1>' + (org.name ? '<div class="orgname">' + esc(org.name) + '</div>' : '<div class="note">AVL knowledge base</div>') + '</div><div class="card signcard"><div class="signin" id="sgp"></div></div></div>';
+  signInPanel($('#sgp'), { then: () => { location.hash = location.hash && location.hash !== '#/' ? location.hash : '#/'; route(); } });
+}
+
 async function viewHome() {
   setTitle('');
   const [d, t, devs] = await Promise.all([get('/api/home'), get('/api/todo'), loadDevices(true)]);
   S.spaces = d.spaces;
-  const newBtn = can('editor') ? '<button class="primary btn" id="newPage">' + icon('plus') + 'New page</button>' : '';
+  const newBtn = can('admin') ? '<button class="primary btn" id="newPage">' + icon('plus') + 'New page</button>' : '';
+  const fresh = can('admin') && !d.spaces.length;
   app.innerHTML = `
-    <div class="bar"><div class="grow"></div>${newBtn}</div>
+    <div class="bar"><div class="grow">${S.state.org && S.state.org.name ? '<div class="pkicker homeorg">' + esc(S.state.org.name.toUpperCase()) + '</div>' : ''}</div>${newBtn}</div>
+    ${fresh ? '<div class="card welcome"><h2>Get started</h2><p>LiveGenie starts empty so it fits the way your team works. A few good first steps:</p><div class="wsteps">' +
+      '<a class="wstep" href="#/admin/spaces">' + icon('list') + '<b>Make your spaces</b><span>Audio, Video, Training… or add a starter set</span></a>' +
+      '<a class="wstep" href="#/gear-setup">' + icon('spark') + '<b>Guided equipment setup</b><span>Console, stage boxes, wireless, in-ears, PA onto the stage patch</span></a>' +
+      '<a class="wstep" href="#/admin/people">' + icon('users') + '<b>Add people</b><span>Admins build; users read and tick checklists</span></a>' +
+      '<a class="wstep" href="#/admin/church">' + icon('image') + '<b>Church name and logo</b><span>Shown on sign in and on every PDF</span></a></div></div>' : ''}
     ${t.todo.length ? '<div class="section" id="todo"><h2>To do</h2><div class="list">' + t.todo.map(todoRow).join('') + '</div></div>' : ''}
     ${d.pinned.length ? '<div class="section"><h2>Pinned</h2><div class="list">' + d.pinned.map((p) => pageRow(p, { showSpace: true, noPin: true })).join('') + '</div></div>' : ''}
-    <div class="section"><h2>Spaces</h2><div class="spaces">${d.spaces.map((s) => `<a class="space" href="#/s/${esc(s.slug)}"><i></i><b>${esc(s.name)}</b><span>${esc(s.blurb)}</span><em class="n">${s.pages} page${s.pages === 1 ? '' : 's'}</em></a>`).join('')}<a class="space devtile" href="#/devices"><i></i><b>Devices</b><span>Every device, its IP and where it is used</span><em class="n">${devs.length} device${devs.length === 1 ? '' : 's'}</em></a><a class="space patchtile" href="#/patch"><i></i><b>Stage patch</b><span>Every mic, wireless, stage box and speaker, drawn mic to speaker</span><em class="n">${icon('grid')}</em></a><a class="space maptile" href="#/map"><i></i><b>System map</b><span>Signal flow${can('editor') ? ', network and VLANs' : ''} drawn from your pages</span><em class="n">${icon('net')}</em></a></div></div>
+    <div class="section"><h2>Spaces</h2><div class="spaces">${d.spaces.map((s) => `<a class="space" href="#/s/${esc(s.slug)}" style="--sc:${esc(s.color || '#4c8dff')}"><i></i><b>${esc(s.name)}${s.admin_only ? ' ' + icon('lock') : ''}</b><span>${esc(s.blurb)}</span><em class="n">${s.pages} page${s.pages === 1 ? '' : 's'}</em></a>`).join('')}<a class="space devtile" href="#/devices"><i></i><b>Devices</b><span>Every device, its IP and where it is used</span><em class="n">${devs.length} device${devs.length === 1 ? '' : 's'}</em></a><a class="space patchtile" href="#/patch"><i></i><b>Stage patch</b><span>Every mic, wireless, stage box and speaker, drawn mic to speaker</span><em class="n">${icon('grid')}</em></a><a class="space maptile" href="#/map"><i></i><b>System map</b><span>Signal flow${can('admin') ? ', network and VLANs' : ''} drawn from the stage patch</span><em class="n">${icon('net')}</em></a></div></div>
     <div class="section"><h2>Recently updated</h2>${d.recent.length ? '<div class="list">' + d.recent.map((p) => pageRow(p, { showSpace: true })).join('') + '</div>'
-      : '<div class="card empty">No pages yet.' + (can('editor') ? ' Start with the Sunday startup checklist or a page about the SQ-5.' : (S.state.user ? '' : ' Editors can sign in to add the first pages.')) + '</div>'}</div>`;
+      : '<div class="card empty">No pages yet.' + (can('admin') ? (d.spaces.length ? ' Start with the Sunday startup checklist or a page about the console.' : ' Make a space first, then add pages to it.') : ' The admins have not written any yet.') + '</div>'}</div>`;
   const nb = $('#newPage');
   if (nb) nb.addEventListener('click', () => { location.hash = '#/new'; });
   // refresh the To do list while the home page is open
@@ -492,11 +530,11 @@ async function viewSpace(slug) {
   const d = await get('/api/spaces/' + encodeURIComponent(slug));
   setTitle(d.space.name);
   Shell.setCtx({ space: slug });
-  const newBtn = can('editor') ? '<button class="primary btn" id="newPage">' + icon('plus') + 'New page</button>' : '';
+  const newBtn = can('admin') ? '<button class="primary btn" id="newPage">' + icon('plus') + 'New page</button>' : '';
   app.innerHTML = `<div class="crumbs"><a href="#/">Home</a><span>/</span></div>
     <div class="bar"><div class="grow"><h1 class="title" style="font-size:22px;letter-spacing:.06em;margin:4px 0 2px">${esc(d.space.name)}</h1><div class="note">${esc(d.space.blurb)}</div></div>${newBtn}</div>
     ${d.pages.length ? '<div class="list">' + d.pages.map((p) => pageRow(p)).join('') + '</div>' : (d.hidden ? '' : '<div class="card empty">No pages in this space yet.</div>')}
-    ${d.hidden ? '<div class="locknote" style="margin-top:12px">' + d.hidden + ' Tech only page' + (d.hidden === 1 ? ' is' : 's are') + ' hidden here. ' + (S.state.user ? 'Ask an admin for the Editor role to see ' + (d.hidden === 1 ? 'it' : 'them') + '.' : '<a href="#" id="siT">Sign in</a> as an editor to see ' + (d.hidden === 1 ? 'it' : 'them') + '.') + '</div>' : ''}`;
+    ${d.hidden ? '<div class="locknote" style="margin-top:12px">' + d.hidden + ' page' + (d.hidden === 1 ? ' is' : 's are') + ' hidden from users here.</div>' : ''}`;
   const siT = $('#siT'); if (siT) siT.addEventListener('click', (e) => { e.preventDefault(); signInDialog(); });
   const nb = $('#newPage');
   if (nb) nb.addEventListener('click', () => { location.hash = '#/new?space=' + encodeURIComponent(slug); });
@@ -557,29 +595,31 @@ async function viewPage(id, focusChecklist) {
   setTitle(p.title);
   Shell.setCtx({ space: p.space, page: p.id });
   const pdf = '<button class="btn ghost" id="pB" title="Export PDF">' + icon('pdf') + '<span class="hide-sm">PDF</span></button>';
-  const acts = can('editor')
+  const rep = '<button class="btn ghost" id="rB" title="Report a problem">' + icon('alert') + '<span class="hide-sm">Report a problem</span></button>';
+  const acts = can('admin')
     ? '<button class="btn" id="eB">' + icon('edit') + 'Edit</button>' + pdf + '<button class="btn ghost" id="hB" title="History">' + icon('clock') + '<span class="hide-sm">History</span></button><button class="ghost danger" id="dB" title="Delete page">' + icon('trash') + '</button>'
-    : pdf + '<button class="btn ghost" id="hB" title="History">' + icon('clock') + '<span class="hide-sm">History</span></button>';
+    : pdf + rep;
   app.innerHTML = `<div class="pagewrap"><div class="page">
-    <div class="printhead"><img src="/icons/livegenie-glyph.svg" alt=""><div><b>LiveGenie</b><span>Rolling Hills Community Church · AVL knowledge base</span></div>
+    <div class="printhead"><img src="/icons/livegenie-glyph.svg" alt=""><div><b>LiveGenie</b><span>${esc((S.state.org && S.state.org.name) || 'AVL knowledge base')}</span></div>
       <div class="pm">${esc(p.space_name)} · version ${p.version} · updated ${esc(when(p.updated_at))}${p.updated_by ? ' by ' + esc(p.updated_by) : ''}<br>Printed ${esc(when(Date.now()))}</div></div>
     <div class="crumbs"><a href="#/">Home</a><span>/</span><a href="#/s/${esc(p.space)}">${esc(p.space_name)}</a></div>
     <div class="bar acts-top" style="margin-bottom:0"><div class="grow"><h1 class="title">${esc(p.title)}</h1></div>${acts}</div>
-    <div class="meta">${p.tech_only ? '<span class="badge tech">' + icon('lock', 'icon') + 'Tech only</span>' : ''}${p.pinned ? '<span class="badge pin">Pinned</span>' : ''}
+    <div class="meta">${p.tech_only ? '<span class="badge tech">' + icon('lock', 'icon') + 'Hidden from users</span>' : ''}${(S.spaces || []).some((x) => x.slug === p.space && x.admin_only) ? '<span class="badge tech">' + icon('lock', 'icon') + 'Admins only</span>' : ''}${p.pinned ? '<span class="badge pin">Pinned</span>' : ''}
       <span>Updated ${esc(ago(p.updated_at))}${p.updated_by ? ' by ' + esc(p.updated_by) : ''} · version ${p.version}</span></div>
-    <div class="doc" id="doc">${p.blocks.length ? renderBlocks(p.blocks) : '<p class="note">This page is empty.' + (can('editor') ? ' Tap Edit to add text, steps or pictures.' : '') + '</p>'}</div>
+    <div class="doc" id="doc">${p.blocks.length ? renderBlocks(p.blocks) : '<p class="note">This page is empty.' + (can('admin') ? ' Tap Edit to add text, steps or pictures.' : '') + '</p>'}</div>
   </div><nav class="outline" aria-label="On this page"></nav></div>`;
   wireBlocks($('#doc'), p);
   linkDevices($('#doc'));
   if (Shell.outline($('#doc'), $('.outline'))) $('.pagewrap').classList.add('has-outline');
-  $('#hB').addEventListener('click', () => { location.hash = '#/p/' + p.id + '/history'; });
+  const hb = $('#hB'); if (hb) hb.addEventListener('click', () => { location.hash = '#/p/' + p.id + '/history'; });
+  const rb = $('#rB'); if (rb) rb.addEventListener('click', () => reportProblem(p.title, { page_id: p.id }));
   $('#pB').addEventListener('click', () => exportPdf(p.title));
   if (focusChecklist) {
     const c = document.getElementById('c-' + focusChecklist) || document.querySelector('[data-pid="' + CSS.escape(focusChecklist) + '"], [data-ipid="' + CSS.escape(focusChecklist) + '"]');
     if (c) setTimeout(() => { c.scrollIntoView({ block: 'start', behavior: 'smooth' }); c.classList.add('flash'); }, 60);
     S.noScroll = true;
   }
-  if (can('editor')) {
+  if (can('admin')) {
     $('#eB').addEventListener('click', () => { location.hash = '#/p/' + p.id + '/edit'; });
     $('#dB').addEventListener('click', async () => {
       if (!await confirmBox('Delete this page?', 'It moves to the trash; an editor can bring it back from Settings › Trash.', 'Delete', true)) return;
@@ -620,19 +660,20 @@ function pickPreset() {
 }
 
 async function viewEdit(id, spaceSlug, drawBlock) {
-  if (!can('editor')) {
-    if (!S.state.user) { signInDialog(() => route()); app.innerHTML = '<div class="card empty">Sign in as an editor to edit pages.</div>'; return; }
-    app.innerHTML = '<div class="card empty">Your role can read pages but not edit them. Ask an admin for the Editor role.</div>'; return;
-  }
+  if (!can('admin')) { app.innerHTML = '<div class="card empty">Only admins write pages. If something here is wrong, use <b>Report a problem</b> on the page.</div>'; return; }
   const sp = await get('/api/spaces');
   S.spaces = sp.spaces;
+  if (!S.spaces.length) {
+    app.innerHTML = '<div class="card empty">' + icon('list') + '<div style="margin-top:8px"><b>Make a space first.</b></div><div class="note" style="margin:4px 0 12px">Pages live in spaces (Audio, Video, Training, whatever suits you).</div><a class="btn abtn" href="#/admin/spaces">' + icon('plus') + 'Make a space</a></div>';
+    return;
+  }
   if (id) {
     const d = await get('/api/pages/' + id);
     const p = d.page;
     S.ed = { id: p.id, title: p.title, space: p.space, tech_only: p.tech_only, pinned: p.pinned, blocks: p.blocks.map((b) => ({ ...b, _items: b.items ? b.items.join('\n') : undefined })), baseVersion: p.version };
   } else {
     const sp0 = spaceSlug || (S.spaces[0] && S.spaces[0].slug);
-    S.ed = { id: null, title: '', space: sp0, tech_only: sp0 === 'network', pinned: false, blocks: [newBlock('text')], baseVersion: undefined };
+    S.ed = { id: null, title: '', space: sp0, tech_only: false, pinned: false, blocks: [newBlock('text')], baseVersion: undefined };
   }
   S.dirty = false;
   setTitle(id ? 'Edit ' + S.ed.title : 'New page');
@@ -643,7 +684,7 @@ async function viewEdit(id, spaceSlug, drawBlock) {
       <input class="title-in" id="eT" placeholder="Page title" value="${esc(ed.title)}" maxlength="200">
       <div class="opts">
         <select id="eS" aria-label="Space">${S.spaces.map((s) => '<option value="' + esc(s.slug) + '"' + (s.slug === ed.space ? ' selected' : '') + '>' + esc(s.name) + '</option>').join('')}</select>
-        <label class="tog ${ed.tech_only ? 'on' : ''}" title="Only editors and admins can see Tech only pages"><input type="checkbox" id="eTech" ${ed.tech_only ? 'checked' : ''}>Tech only</label>
+        ${ed.tech_only ? '<label class="tog on" title="Set by an older version of LiveGenie: users cannot see this page. Who sees a page is now set per space (Admin › Spaces)."><input type="checkbox" id="eTech" checked>Hidden from users</label>' : '<span class="note" id="eVis"></span>'}
         <label class="tog ${ed.pinned ? 'on' : ''}" title="Pinned pages show at the top of the home page"><input type="checkbox" id="ePin" ${ed.pinned ? 'checked' : ''}>Pinned</label>
       </div>
     </div>
@@ -653,16 +694,16 @@ async function viewEdit(id, spaceSlug, drawBlock) {
   </div>`;
   const dirty = () => { S.dirty = true; $('#eMsg').textContent = 'Unsaved changes'; };
   $('#eT').addEventListener('input', (e) => { ed.title = e.target.value; dirty(); });
-  let techTouched = !!id;
-  const setTech = (on) => { ed.tech_only = on; $('#eTech').checked = on; $('#eTech').closest('.tog').classList.toggle('on', on); };
-  $('#eS').addEventListener('change', (e) => { ed.space = e.target.value; if (!techTouched) setTech(ed.space === 'network'); dirty(); });
-  $('#eTech').addEventListener('change', (e) => { techTouched = true; setTech(e.target.checked); dirty(); });
+  const visNote = () => { const v = $('#eVis'); if (!v) return; const sp = (S.spaces || []).find((x) => x.slug === ed.space); v.innerHTML = sp && sp.admin_only ? icon('lock') + ' Admins only (set by the space)' : 'Everyone signed in can read it'; };
+  $('#eS').addEventListener('change', (e) => { ed.space = e.target.value; visNote(); dirty(); });
+  const et = $('#eTech'); if (et) et.addEventListener('change', (e) => { ed.tech_only = e.target.checked; e.target.closest('.tog').classList.toggle('on', ed.tech_only); dirty(); });
+  visNote();
   $('#ePin').addEventListener('change', (e) => { ed.pinned = e.target.checked; e.target.closest('.tog').classList.toggle('on', e.target.checked); dirty(); });
   $$('[data-add]').forEach((b) => b.addEventListener('click', async () => {
     let preset;
     if (b.dataset.add === 'patch') { preset = await pickPreset(); if (!preset) return; }
     ed.blocks.push(newBlock(b.dataset.add, preset)); dirty(); paintBlocks();
-    if (b.dataset.add === 'iplist' && !ed.tech_only && !techTouched) { setTech(true); toast('Tech only is on: IP lists are hidden from volunteers. Switch it off above if you like.'); }
+    if (b.dataset.add === 'iplist') { const sp = (S.spaces || []).find((x) => x.slug === ed.space); if (sp && !sp.admin_only) toast('Users can read this space. For IP lists, an admins-only space (Admin › Spaces) keeps them private.'); }
     const last = $$('#eB .blk').pop();
     if (last) {
       last.scrollIntoView({ block: 'center', behavior: 'smooth' });
@@ -804,7 +845,7 @@ async function viewHistory(id, v) {
       <div class="list">${hv.versions.map((x) => `<a class="row ${x.version === pick ? 'on' : ''}" href="#/p/${p.id}/history/${x.version}"><div class="t"><b>Version ${x.version}${x.version === p.version ? ' (current)' : ''}</b><span>${esc(x.saved_by || 'Unknown')} · ${esc(when(x.saved_at))}${x.note ? ' · ' + esc(x.note) : ''}</span></div></a>`).join('')}</div>
       <div class="card page" style="margin:0">
         <div class="bar" style="margin-bottom:6px"><div class="grow"><div class="note">Version ${ver.version} · ${esc(ver.saved_by || '')} · ${esc(when(ver.saved_at))}${ver.tech_only ? ' · Tech only' : ''} · ${esc(spaceName(ver.space))}</div></div>
-          ${!isCurrent && can('editor') ? '<button class="primary btn" id="rB">' + icon('restore') + 'Restore this version</button>' : ''}</div>
+          ${!isCurrent && can('admin') ? '<button class="primary btn" id="rB">' + icon('restore') + 'Restore this version</button>' : ''}</div>
         <h1 class="title" style="font-size:20px">${esc(ver.title)}</h1>
         <div class="doc" id="doc">${renderBlocks(ver.blocks, false)}</div>
       </div>
@@ -840,15 +881,29 @@ async function viewSearch(q) {
     ${(d.gear || []).length ? '<div class="section"><h2>On the stage patch</h2><div class="dgrid">' + d.gear.map((g) => '<a class="dcard" href="#/patch?g=' + esc(g.id) + '"><div class="t"><b>' + esc(g.name) + '</b><span>' + esc([g.kind, g.use, g.model].filter(Boolean).join(' · ')) + '</span>' + (g.freq ? '<span class="mono">' + esc(g.freq) + ' MHz</span>' : '') + '</div></a>').join('') + '</div></div>' : ''}
     ${d.devices.length ? '<div class="section"><div class="dgrid">' + d.devices.map((v) => '<a class="dcard" href="#/d/' + v.id + '">' + devThumb(v, 40) + '<div class="t"><b>' + esc(v.name) + '</b><span>' + esc([v.make, v.model].filter(Boolean).join(' ')) + '</span><span>' + esc(v.location) + (v.ips.length ? ' <span class="mono">' + esc(v.ips[0]) + '</span>' : '') + '</span></div></a>').join('') + '</div></div>' : ''}
     ${d.results.length ? '<div class="list">' + d.results.map((p) => pageRow(p, { snip: true })).join('') + '</div>'
-      : '<div class="card empty">Nothing matches that yet.' + (S.state.user ? '' : ' Some pages are Tech only and need you to sign in.') + (can('editor') ? '<div style="margin-top:12px"><a href="#/new">Write a page about it</a></div>' : '') + '</div>'}`;
+      : '<div class="card empty">Nothing matches that yet.' + (can('admin') ? '<div style="margin-top:12px"><a href="#/new">Write a page about it</a></div>' : '') + '</div>'}`;
   wire();
 }
 
 // ----- settings -----
-const TABS = [
-  ['display', 'Display', 'sun', 'viewer'], ['account', 'Account', 'user', 'viewer'], ['users', 'Users', 'users', 'admin'],
-  ['notify', 'Notifications', 'bell', 'admin'], ['backups', 'Backups', 'box', 'admin'], ['trash', 'Trash', 'trash', 'editor'], ['activity', 'Activity', 'list', 'admin'], ['about', 'About', 'spark', 'viewer']
+const TABS = [['display', 'Display', 'sun', 'user'], ['account', 'Account', 'user', 'user'], ['about', 'About', 'spark', 'user']];
+const ADMIN_TABS = [
+  ['spaces', 'Spaces', 'list'], ['people', 'People', 'users'], ['problems', 'Problems', 'alert'], ['checklog', 'Checklist log', 'check'],
+  ['church', 'Church', 'image'], ['notify', 'Notifications', 'bell'], ['backups', 'Backups', 'box'], ['trash', 'Trash', 'trash'], ['activity', 'Activity', 'clock'], ['reset', 'Reset', 'restore']
 ];
+
+/** The admin area: everything that builds or runs LiveGenie (users only see help pages, checklists and the drawings). */
+async function viewAdmin(tab) {
+  if (!can('admin')) { app.innerHTML = '<div class="card empty">This part is for admins.</div>'; return; }
+  if (!ADMIN_TABS.find((t) => t[0] === tab)) tab = 'spaces';
+  setTitle('Admin');
+  const n = (S.state && S.state.problems) || 0;
+  app.innerHTML = `<div class="crumbs"><a href="#/">Home</a><span>/</span></div><h1 class="title" style="font-size:22px;letter-spacing:.06em;margin:4px 0 12px">ADMIN</h1>
+    <div class="setup"><div class="side">${ADMIN_TABS.map((t) => '<button data-tab="' + t[0] + '" class="' + (t[0] === tab ? 'on' : '') + '">' + icon(t[2]) + t[1] + (t[0] === 'problems' && n ? '<em class="cnt bad">' + n + '</em>' : '') + '</button>').join('')}</div><div class="pane" id="pane"></div></div>`;
+  $$('[data-tab]').forEach((b) => b.addEventListener('click', () => { location.hash = '#/admin/' + b.dataset.tab; }));
+  const pane = $('#pane');
+  await ({ spaces: tabSpaces, people: tabUsers, problems: tabProblems, checklog: tabChecklog, church: tabChurch, notify: tabNotify, backups: tabBackups, trash: tabTrash, activity: tabActivity, reset: tabReset }[tab])(pane);
+}
 
 async function viewSettings(tab) {
   const tabs = TABS.filter((t) => can(t[3]));
@@ -889,7 +944,7 @@ function tabAccount(pane) {
     $('#si').addEventListener('click', () => signInDialog());
     return;
   }
-  const roleText = { admin: 'Admin: everything, including users and backups', editor: 'Editor: write pages, see Tech only pages', volunteer: 'Volunteer: read pages and use checklists' }[u.role];
+  const roleText = { admin: 'Admin: builds LiveGenie: spaces, pages, stage patch, devices, IP lists, manuals, people and backups', user: 'User: reads help pages, ticks checklists, follows signals and reports problems' }[u.role];
   pane.innerHTML = '<div class="card"><h2>Account</h2>' + setRow(esc(u.name), roleText, '<button id="so">Sign out</button>', true) +
     setRow('Sign in on your phone', 'Shows a QR code. Scan it with the phone\'s camera and the phone is signed in as you, no typing.', '<button class="btn" id="qrMe">' + icon('grid') + 'Show QR code</button>') + '</div>' +
     '<div class="card"><h2>Change PIN</h2><form id="pf">' +
@@ -909,15 +964,15 @@ function tabAccount(pane) {
 
 async function tabUsers(pane) {
   const d = await get('/api/users');
-  const roleName = { admin: 'Admin', editor: 'Editor', volunteer: 'Volunteer' };
-  pane.innerHTML = '<p class="note pnote">Admins manage everything. Editors write pages and see Tech only pages. Volunteers read and use checklists. People who are not signed in can read pages that are not Tech only.</p>' +
+  const roleName = { admin: 'Admin', user: 'User' };
+  pane.innerHTML = '<p class="note pnote"><b>Admins</b> build LiveGenie: spaces, pages, the stage patch, devices, IP lists, VLANs, manuals, people and backups. <b>Users</b> read help pages, tick checklists, follow signals on the stage patch and report problems. Everyone signs in; <b>Phone</b> shows a QR code that signs someone in on their phone.</p>' +
     '<div class="card"><h2>Users</h2>' + d.users.map((u, i) => setRow(esc(u.name) + (u.id === S.state.user.id ? ' <span class="note">(you)</span>' : ''),
       roleName[u.role] + (u.locked ? ' · <span style="color:var(--warn)">locked after wrong PINs</span>' : '') + ' · added ' + esc(ago(u.created_at)),
       '<button class="btn" data-qr="' + u.id + '" title="Sign ' + esc(u.name) + ' in on a phone">' + icon('grid') + '<span class="hide-sm">Phone</span></button><button data-edit="' + u.id + '">Edit</button>' + (u.id !== S.state.user.id ? '<button class="danger ghost" data-rm="' + u.id + '">Remove</button>' : ''), i === 0)).join('') +
     setRow('', '', '<button class="primary btn" id="addU">' + icon('plus') + 'Add user</button>') + '</div>';
   const form = (u) => `<h3>${u ? 'Edit ' + esc(u.name) : 'Add a user'}</h3><p>${u ? 'Leave the PIN empty to keep it.' : 'They sign in with this name and PIN.'}</p><form id="uf">
     <label for="un">Name</label><input id="un" value="${esc(u ? u.name : '')}" autocapitalize="words">
-    <label for="ur">Role</label><select id="ur">${['volunteer', 'editor', 'admin'].map((r) => '<option value="' + r + '"' + ((u ? u.role : 'volunteer') === r ? ' selected' : '') + '>' + roleName[r] + '</option>').join('')}</select>
+    <label for="ur">Role</label><select id="ur">${['user', 'admin'].map((r) => '<option value="' + r + '"' + ((u ? u.role : 'user') === r ? ' selected' : '') + '>' + roleName[r] + '</option>').join('')}</select>
     <label for="up">${u ? 'New PIN (optional)' : 'PIN (4 to 8 digits)'}</label><input id="up" type="password" inputmode="numeric" maxlength="8" autocomplete="new-password">
     ${u && u.locked ? '<label class="tog" style="margin-top:12px"><input type="checkbox" id="uu" checked> Unlock now</label>' : ''}
     <div class="err" id="ue"></div><div class="acts"><button type="button" data-close>Cancel</button><button class="primary">${u ? 'Save' : 'Add user'}</button></div></form>`;
@@ -941,6 +996,175 @@ async function tabUsers(pane) {
     const u = d.users.find((x) => x.id === Number(b.dataset.rm));
     if (!await confirmBox('Remove ' + u.name + '?', 'They can no longer sign in. Pages they wrote stay.', 'Remove', true)) return;
     try { await call('DELETE', '/api/users/' + u.id); toast('Removed', 'ok'); tabUsers(pane); } catch (e) { toast(e.message, 'bad'); }
+  }));
+}
+
+// ----- admin: spaces -----
+async function tabSpaces(pane) {
+  const d = await get('/api/spaces');
+  S.spaces = d.spaces;
+  const list = d.spaces;
+  pane.innerHTML = '<p class="note pnote">Spaces group your pages (Audio, Video, Training… whatever suits your team). <b>Admins only</b> hides a space and its pages from users, for things like IP addresses and network notes. The arrows change the order everyone sees.</p>' +
+    '<div class="card"><h2>Spaces</h2>' + (list.length ? '<div class="splist">' + list.map((sp, i) => '<div class="sprow" data-slug="' + esc(sp.slug) + '"><i class="spdot" style="background:' + esc(sp.color) + '"></i>' +
+      '<div class="t"><b>' + esc(sp.name) + (sp.admin_only ? ' <span class="badge tech">' + icon('lock') + 'Admins only</span>' : '') + '</b><span>' + esc(sp.blurb || '') + (sp.blurb ? ' · ' : '') + sp.pages + ' page' + (sp.pages === 1 ? '' : 's') + '</span></div>' +
+      '<button class="ghost" data-mv="-1" title="Move up"' + (i ? '' : ' disabled') + '>' + icon('up') + '</button><button class="ghost" data-mv="1" title="Move down"' + (i < list.length - 1 ? '' : ' disabled') + '>' + icon('down') + '</button>' +
+      '<button data-edit>Edit</button></div>').join('') + '</div>'
+      : '<div class="empty" style="padding:18px 6px">No spaces yet. Make your first one, or add the starter set.</div>') +
+    '<div class="adder" style="margin-top:10px"><button class="primary btn" id="spAdd">' + icon('plus') + 'New space</button>' +
+    '<button class="btn" id="spStarter" title="Audio, Video & Stream, Lighting, Network (admins only), Volunteers, Services">' + icon('spark') + 'Add the church AVL starter set</button>' +
+    '<button class="btn" id="spTrain">' + icon('check') + 'Add the audio training pages</button></div></div>';
+  const form = (sp) => '<h3>' + (sp ? 'Edit ' + esc(sp.name) : 'New space') + '</h3><form id="spf"><label>Name</label><input id="spn" value="' + esc(sp ? sp.name : '') + '" placeholder="Audio, Video, Training">' +
+    '<label>What goes here <span class="note">(optional)</span></label><input id="spb" value="' + esc(sp ? sp.blurb : '') + '" placeholder="Desk, mics, wireless, PA">' +
+    '<label>Colour</label><div class="swatches">' + ['#2ec4b6', '#4c8dff', '#f2c94c', '#8b6cff', '#3ecf6e', '#ef8a3c', '#ec6aa8', '#ef4c4c', '#8a96a5'].map((c) => '<button type="button" class="sw' + ((sp ? sp.color : '') === c ? ' on' : '') + '" data-c="' + c + '" style="background:' + c + '" aria-label="' + c + '"></button>').join('') + '</div>' +
+    '<label class="tog' + (sp && sp.admin_only ? ' on' : '') + '" style="margin-top:14px"><input type="checkbox" id="spa"' + (sp && sp.admin_only ? ' checked' : '') + '> Admins only <span class="note">(users do not see this space or its pages)</span></label>' +
+    '<div class="err" id="spe"></div><div class="acts">' + (sp ? '<button type="button" class="ghost danger" id="spdel" style="margin-right:auto">' + icon('trash') + 'Remove</button>' : '') + '<button type="button" data-close>Cancel</button><button class="primary">' + (sp ? 'Save' : 'Make space') + '</button></div></form>';
+  const open = (sp) => modal(form(sp), (w, close) => {
+    let color = sp ? sp.color : '';
+    $$('.sw', w).forEach((b) => b.addEventListener('click', () => { color = b.dataset.c; $$('.sw', w).forEach((x) => x.classList.toggle('on', x === b)); }));
+    $('#spa', w).addEventListener('change', (e) => e.target.closest('.tog').classList.toggle('on', e.target.checked));
+    $('#spf', w).addEventListener('submit', async (e) => {
+      e.preventDefault();
+      const body = { name: $('#spn', w).value, blurb: $('#spb', w).value, admin_only: $('#spa', w).checked };
+      if (color) body.color = color;
+      try {
+        if (sp) await call('PUT', '/api/spaces/' + encodeURIComponent(sp.slug), body); else await call('POST', '/api/spaces', body);
+        close(); toast(sp ? 'Saved' : 'Space made', 'ok'); tabSpaces(pane); Shell.update(['admin']);
+      } catch (err) { $('#spe', w).textContent = err.message; }
+    });
+    const del = $('#spdel', w);
+    if (del) del.addEventListener('click', async () => {
+      const others = list.filter((x) => x.slug !== sp.slug);
+      try { await call('DELETE', '/api/spaces/' + encodeURIComponent(sp.slug), {}); close(); toast('Removed ' + sp.name, 'ok'); tabSpaces(pane); Shell.update(['admin']); }
+      catch (err) {
+        if (err.status !== 409) { $('#spe', w).textContent = err.message; return; }
+        if (!others.length) { $('#spe', w).textContent = err.message + ' Make another space first.'; return; }
+        close();
+        modal('<h3>Remove ' + esc(sp.name) + '</h3><p>' + esc(err.message) + '</p><form id="mvf"><label>Move them to</label><select id="mvs">' + others.map((x) => '<option value="' + esc(x.slug) + '">' + esc(x.name) + '</option>').join('') + '</select>' +
+          '<div class="acts"><button type="button" data-close>Cancel</button><button class="primary danger">Move and remove</button></div></form>', (w2, close2) => {
+          $('#mvf', w2).addEventListener('submit', async (e) => {
+            e.preventDefault();
+            try { await call('DELETE', '/api/spaces/' + encodeURIComponent(sp.slug), { move_to: $('#mvs', w2).value }); close2(); toast('Pages moved, space removed', 'ok'); tabSpaces(pane); Shell.update(['admin']); }
+            catch (e2) { toast(e2.message, 'bad'); }
+          });
+        });
+      }
+    });
+  });
+  $('#spAdd').addEventListener('click', () => open(null));
+  $$('.sprow [data-edit]', pane).forEach((b) => b.addEventListener('click', () => open(list.find((x) => x.slug === b.closest('.sprow').dataset.slug))));
+  $$('.sprow [data-mv]', pane).forEach((b) => b.addEventListener('click', async () => {
+    const slugs = list.map((x) => x.slug), i = slugs.indexOf(b.closest('.sprow').dataset.slug), j = i + Number(b.dataset.mv);
+    [slugs[i], slugs[j]] = [slugs[j], slugs[i]];
+    await call('PUT', '/api/spaces-order', { slugs }); tabSpaces(pane); Shell.update(['admin']);
+  }));
+  $('#spStarter').addEventListener('click', async () => {
+    try { const r = await call('POST', '/api/admin/starter'); toast(r.made.length ? 'Added ' + r.made.length + ' spaces' : 'You already have those spaces', 'ok'); tabSpaces(pane); Shell.update(['admin']); } catch (e) { toast(e.message, 'bad'); }
+  });
+  $('#spTrain').addEventListener('click', async () => {
+    try { const r = await call('POST', '/api/admin/training'); toast('Audio training added', 'ok'); location.hash = '#/p/' + r.page; } catch (e) { toast(e.message, 'bad'); }
+  });
+}
+
+// ----- admin: problems users reported -----
+async function tabProblems(pane, status) {
+  status = status || 'open';
+  const d = await get('/api/problems?status=' + status);
+  pane.innerHTML = '<p class="note pnote">Anyone can tap <b>Report a problem</b> on a page, a device card or a piece of gear on the stage patch. New reports also go to the Notifications webhook, if one is set.</p>' +
+    '<div class="card"><div class="bar" style="margin-bottom:6px"><h2 class="grow" style="margin:0">Problems</h2><div class="seg" id="pst"><button data-s="open"' + (status === 'open' ? ' class="on"' : '') + '>Open</button><button data-s="resolved"' + (status === 'resolved' ? ' class="on"' : '') + '>Resolved</button></div></div>' +
+    (d.problems.length ? '<div class="plist3">' + d.problems.map((p) => '<div class="prob' + (p.status === 'resolved' ? ' done' : '') + '" data-id="' + p.id + '"><div class="t"><b>' + esc(p.text) + '</b>' +
+      '<span>' + (p.where_text ? esc(p.where_text) + ' · ' : '') + esc(p.created_name) + ' · ' + esc(ago(p.created_at)) +
+      (p.page_id ? ' · <a href="#/p/' + p.page_id + '">page</a>' : '') + (p.device_id ? ' · <a href="#/d/' + p.device_id + '">device</a>' : '') + (p.gear ? ' · <a href="#/patch?g=' + esc(p.gear) + '">on the stage patch</a>' : '') + '</span>' +
+      (p.status === 'resolved' ? '<span class="ok">Resolved by ' + esc(p.resolved_name) + ' ' + esc(ago(p.resolved_at)) + (p.note ? ': ' + esc(p.note) : '') + '</span>' : '') + '</div>' +
+      (p.status === 'open' ? '<button class="btn" data-res>' + icon('check') + 'Resolve</button>' : '<button class="ghost" data-reopen>Reopen</button>') + '</div>').join('') + '</div>'
+      : '<div class="empty" style="padding:18px 6px">' + (status === 'open' ? 'Nothing open. Nice.' : 'Nothing resolved yet.') + '</div>') + '</div>';
+  $$('#pst button', pane).forEach((b) => b.addEventListener('click', () => tabProblems(pane, b.dataset.s)));
+  $$('[data-res]', pane).forEach((b) => b.addEventListener('click', () => {
+    const id = b.closest('.prob').dataset.id;
+    modal('<h3>Resolve</h3><form id="rf"><label>What was done <span class="note">(optional)</span></label><textarea id="rn" rows="3" placeholder="Replaced the lav cable"></textarea><div class="acts"><button type="button" data-close>Cancel</button><button class="primary">Resolve</button></div></form>', (w, close) => {
+      $('#rf', w).addEventListener('submit', async (e) => { e.preventDefault(); await call('PUT', '/api/problems/' + id, { status: 'resolved', note: $('#rn', w).value }); close(); await loadState(); paintHeader(); viewAdmin('problems'); });
+    });
+  }));
+  $$('[data-reopen]', pane).forEach((b) => b.addEventListener('click', async () => { await call('PUT', '/api/problems/' + b.closest('.prob').dataset.id, { status: 'open' }); await loadState(); paintHeader(); tabProblems(pane, 'resolved'); }));
+}
+
+/** Report a problem (anyone signed in). where = what it is about; ctx = { page_id, device_id, gear }. */
+function reportProblem(where, ctx = {}) {
+  modal('<h3>Report a problem</h3><p>Tell the admins what is wrong. They see it in Admin › Problems.</p><form id="rpf"><label>About</label><input id="rpw" value="' + esc(where || '') + '">' +
+    '<label>What is wrong?</label><textarea id="rpt" rows="4" placeholder="Pastor lav cuts out when he turns his head"></textarea><div class="err" id="rpe"></div>' +
+    '<div class="acts"><button type="button" data-close>Cancel</button><button class="primary">Send</button></div></form>', (w, close) => {
+    setTimeout(() => $('#rpt', w).focus(), 40);
+    $('#rpf', w).addEventListener('submit', async (e) => {
+      e.preventDefault();
+      try { await call('POST', '/api/problems', { ...ctx, where: $('#rpw', w).value, text: $('#rpt', w).value }); close(); toast('Sent to the admins. Thank you!', 'ok'); if (can('admin')) { await loadState(); paintHeader(); } }
+      catch (err) { $('#rpe', w).textContent = err.message; }
+    });
+  });
+}
+
+// ----- admin: the checklist log -----
+async function tabChecklog(pane, pick) {
+  const q = pick ? '?page=' + encodeURIComponent(pick.split(':')[0]) + '&block=' + encodeURIComponent(pick.split(':')[1]) : '';
+  const d = await get('/api/checklog' + q);
+  const tmx = (t) => (t ? new Date(t).toLocaleString([], { weekday: 'short', month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' }) : '');
+  const dur = (a, b) => { const m = Math.round((b - a) / 60000); return m < 1 ? 'under a minute' : m < 60 ? m + ' min' : Math.floor(m / 60) + ' h ' + (m % 60) + ' min'; };
+  pane.innerHTML = '<p class="note pnote">Every run of every checklist: who did it, when it was finished and how long it took, and what was left undone.</p>' +
+    '<div class="card"><div class="bar" style="margin-bottom:6px"><h2 class="grow" style="margin:0">Checklist log</h2><select id="clp"><option value="">All checklists</option>' +
+    d.checklists.map((c) => '<option value="' + c.page_id + ':' + esc(c.block_id) + '"' + (pick === c.page_id + ':' + c.block_id ? ' selected' : '') + '>' + esc((c.title || 'Checklist') + ' · ' + c.page_title) + '</option>').join('') + '</select></div>' +
+    (d.runs.length ? '<div class="tscroll"><table class="grid"><thead><tr><th>Run</th><th>Checklist</th><th>Done</th><th>Finished</th><th>Took</th><th>Who</th></tr></thead><tbody>' + d.runs.map((r) =>
+      '<tr class="' + (r.completed_at ? '' : r.over ? 'missed' : 'live') + '"><td>' + esc(tmx(r.run_start)) + '</td><td><a href="#/p/' + r.page_id + '?c=' + esc(r.block_id) + '">' + esc(r.title) + '</a><div class="note">' + esc(r.page_title) + '</div></td>' +
+      '<td>' + r.done + ' / ' + r.total + (r.missed.length ? '<div class="note">' + (r.over ? 'Not done: ' : 'Left: ') + esc(r.missed.join(', ')) + '</div>' : '') + '</td>' +
+      '<td>' + (r.completed_at ? '<span class="chip ok">' + esc(tmx(r.completed_at)) + '</span>' : r.over ? '<span class="chip bad">Not finished</span>' : '<span class="chip acc">In progress</span>') + '</td>' +
+      '<td>' + (r.first_at && r.last_at && r.completed_at ? esc(dur(r.first_at, r.last_at)) : '') + '</td><td>' + esc(r.people.join(', ')) + '</td></tr>').join('') + '</tbody></table></div>'
+      : '<div class="empty" style="padding:18px 6px">No checklist runs yet. They show up here as soon as someone ticks a step.</div>') + '</div>';
+  $('#clp', pane).addEventListener('change', (e) => tabChecklog(pane, e.target.value));
+}
+
+// ----- admin: church name and logo -----
+function tabChurch(pane) {
+  const org = S.state.org || {};
+  pane.innerHTML = '<div class="card"><h2>Church</h2>' +
+    setRow('Name', 'Shown on the sign-in screen, the home page and every PDF.', '<input class="txt" id="orgn" value="' + esc(org.name || '') + '" placeholder="Rolling Hills Community Church">', true) +
+    setRow('Logo', 'A square or wide picture (PNG with a clear background looks best). Shown when signing in and on PDFs.', (org.logo ? '<img class="orglogo sm" src="/uploads/' + esc(org.logo) + '" alt="">' : '') + '<input type="file" accept="image/*" id="orgf" class="hide"><button id="orgp">' + (org.logo ? 'Replace' : 'Upload') + '</button>' + (org.logo ? '<button class="ghost danger" id="orgx">Remove</button>' : '')) +
+    setRow('', '', '<button class="primary" id="orgs">Save</button>') + '</div>';
+  $('#orgp').addEventListener('click', () => $('#orgf').click());
+  $('#orgf').addEventListener('change', async () => {
+    const f = $('#orgf').files[0]; if (!f) return;
+    try {
+      const pic = await shrink(f);
+      const r = await call('POST', '/api/uploads', pic.blob, { raw: true, type: pic.type, headers: { 'x-width': String(pic.w || ''), 'x-height': String(pic.h || '') } });
+      await call('PUT', '/api/org', { logo: r.id }); await loadState(); paintHeader(); tabChurch(pane); toast('Logo saved', 'ok');
+    } catch (e) { toast(e.message, 'bad'); }
+  });
+  const x = $('#orgx'); if (x) x.addEventListener('click', async () => { await call('PUT', '/api/org', { logo: '' }); await loadState(); paintHeader(); tabChurch(pane); });
+  $('#orgs').addEventListener('click', async () => { try { await call('PUT', '/api/org', { name: $('#orgn').value }); await loadState(); paintHeader(); toast('Saved', 'ok'); } catch (e) { toast(e.message, 'bad'); } });
+}
+
+// ----- admin: reset -----
+function tabReset(pane) {
+  pane.innerHTML = '<div class="card"><h2>Reset</h2><p class="note" style="margin-top:0">Both make a backup first (Admin › Backups), so a reset can be undone by restoring it.</p>' +
+    setRow('Clear content', 'Removes every page, space, device card, the stage patch, IP lists, VLANs, pictures, manuals, problem reports and the checklist log. People, PINs and settings (church name, logo, notifications) stay.', '<button class="danger" data-reset="content">Clear content…</button>', true) +
+    setRow('Factory reset', 'Removes everything, including every person and setting. LiveGenie starts again at the first-run setup screen. Backups are kept.', '<button class="danger" data-reset="factory">Factory reset…</button>') + '</div>';
+  $$('[data-reset]', pane).forEach((b) => b.addEventListener('click', () => {
+    const mode = b.dataset.reset;
+    modal('<h3>' + (mode === 'factory' ? 'Factory reset' : 'Clear content') + '</h3><p>' + (mode === 'factory' ? 'Everything goes, including all people. You will set LiveGenie up again from the start.' : 'All content goes; people and settings stay.') + ' A backup is made first.</p>' +
+      '<form id="rsf"><label>Type RESET to confirm</label><input id="rsc" autocomplete="off" autocapitalize="characters"><div class="err" id="rse"></div><div class="acts"><button type="button" data-close>Cancel</button><button class="primary danger" id="rsb" disabled>' + (mode === 'factory' ? 'Factory reset' : 'Clear content') + '</button></div></form>', (w, close) => {
+      const inp = $('#rsc', w), btn = $('#rsb', w);
+      btn.style.background = 'var(--bad)'; btn.style.color = '#fff';
+      inp.addEventListener('input', () => { btn.disabled = inp.value.trim().toUpperCase() !== 'RESET'; });
+      $('#rsf', w).addEventListener('submit', async (e) => {
+        e.preventDefault();
+        btn.disabled = true; btn.textContent = 'Working…';
+        try {
+          const r = await call('POST', '/api/admin/reset', { mode, confirm: inp.value });
+          close();
+          try { sessionStorage.removeItem('livegenie-view-as'); } catch (x) { /* ignore */ }
+          toast(mode === 'factory' ? 'LiveGenie is reset. Backup: ' + r.backup : 'Content cleared. Backup: ' + r.backup, 'ok');
+          if (typeof forgetDevices === 'function') forgetDevices();
+          S.spaces = [];
+          await loadState(); paintHeader(); location.hash = '#/'; route();
+        } catch (err) { $('#rse', w).textContent = err.message; btn.disabled = false; btn.textContent = 'Try again'; }
+      });
+    });
   }));
 }
 
@@ -1089,6 +1313,7 @@ async function route() {
   try {
     if (S.state.setupNeeded) return await viewSetup();
     if (p[0] === 'link' && p[1]) return await useSignInLink(p[1]);
+    if (!S.state.user) { Shell.update(p); return viewSignIn(); }
     if (!p.length) await viewHome();
     else if (p[0] === 's' && p[1]) await viewSpace(p[1]);
     else if (p[0] === 'p' && p[1] && p[2] === 'edit') await viewEdit(p[1], null, qs.get('draw'));
@@ -1105,6 +1330,7 @@ async function route() {
     else if (p[0] === 'search') await viewSearch(qs.get('q') || '');
     else if (p[0] === 'todo') await viewTodo();
     else if (p[0] === 'settings') await viewSettings(p[1]);
+    else if (p[0] === 'admin') await viewAdmin(p[1]);
     else app.innerHTML = '<div class="card empty">Page not found. <a href="#/">Go home</a></div>';
     if (n === routing && !S.noScroll) window.scrollTo(0, 0);
     S.noScroll = false;

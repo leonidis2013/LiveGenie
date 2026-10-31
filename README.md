@@ -4,7 +4,7 @@
 
 The Rolling Hills Community Church AVL knowledge base: one web app where volunteers find how our system works, how to run a service and how to fix what broke. Part of the Live series (LiveMic, LiveCompanion, LivePi, LiveVoice).
 
-Version 0.14.0 · © 2026 Jerod Ulicki
+Version 0.14.1 · © 2026 Jerod Ulicki
 
 ## What it does
 
@@ -115,7 +115,8 @@ Run it on the TrueNAS host and reach it from the AVL and office VLANs through th
 | 0.11.0 | Phone layout (bottom tabs, + button, bottom sheets, To do screen) and desktop layout (sidebar with spaces and pages, On this page outline) |
 | 0.12.0 | Phone sign in: tap your name, PIN pad, and QR code sign in from a signed-in computer |
 | 0.13.0 | Stage patch: one visual signal-flow drawing for the whole system (equipment pane, drag to connect, follow a signal, overview and sockets, cable styles, checks), with the input, output, wireless, in-ear and cable lists and the PDF made from it; old patch lists moved onto it |
-| 0.14.0 | Admins and users with sign-in required, admin-made spaces (colour, order, admins only), Admin area, manuals on device cards, problem reports, checklist log, church name and logo, View as user, clear content and factory reset (this release) |
+| 0.14.1 | Updates always load straight away: the page names its code with the version, so a browser can no longer keep running old screens after an update (this release) |
+| 0.14.0 | Admins and users with sign-in required, admin-made spaces (colour, order, admins only), Admin area, manuals on device cards, problem reports, checklist log, church name and logo, View as user, clear content and factory reset |
 | next | Document library, AI drafts from the Jetson, Bitfocus Companion buttons in checklists |
 | later | Document library, AI drafts from the Jetson with citations, review queue, Ask the Genie |
 | later | Bitfocus Companion buttons inside checklists |

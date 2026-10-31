@@ -134,7 +134,8 @@ const TYPES = {
 };
 
 function serveStatic(req, res, url) {
-  let rel = url === '/' ? '/index.html' : url;
+  if (url === '/' || url === '/index.html') return serveIndex(req, res);
+  let rel = url;
   if (rel === '/favicon.ico') rel = '/icons/favicon.ico';
   const file = path.normalize(path.join(PUBLIC, rel));
   if (!file.startsWith(PUBLIC + path.sep)) return false;
@@ -142,14 +143,28 @@ function serveStatic(req, res, url) {
   try { st = fs.statSync(file); } catch (e) { return false; }
   if (!st.isFile()) return false;
   const ext = path.extname(file).toLowerCase();
+  // Always revalidate, so a new version is picked up on the next load; unchanged files come back as 304.
+  const etag = '"' + st.size.toString(36) + '-' + Math.floor(st.mtimeMs).toString(36) + '-' + pkg.version + '"';
+  const base = { ...SECURITY_HEADERS, 'cache-control': 'no-cache', etag };
+  if (req.headers['if-none-match'] === etag) { res.writeHead(304, base); res.end(); return true; }
   res.writeHead(200, {
-    ...SECURITY_HEADERS,
+    ...base,
     'content-type': TYPES[ext] || 'application/octet-stream',
-    'content-length': st.size,
-    'cache-control': ext === '.html' ? 'no-cache' : 'public, max-age=3600'
+    'content-length': st.size
   });
   if (req.method === 'HEAD') return res.end(), true;
   fs.createReadStream(file).pipe(res);
+  return true;
+}
+
+// index.html names its scripts and styles with ?v=<version>, so an update can never run with old code.
+let indexHtml = null;
+function serveIndex(req, res) {
+  if (!indexHtml) indexHtml = Buffer.from(fs.readFileSync(path.join(PUBLIC, 'index.html'), 'utf8')
+    .replace(/(src|href)="(\/[\w.-]+\.(?:js|css))"/g, (m, a, f) => a + '="' + f + '?v=' + pkg.version + '"'));
+  res.writeHead(200, { ...SECURITY_HEADERS, 'content-type': TYPES['.html'], 'content-length': indexHtml.length, 'cache-control': 'no-cache' });
+  if (req.method === 'HEAD') return res.end(), true;
+  res.end(indexHtml);
   return true;
 }
 

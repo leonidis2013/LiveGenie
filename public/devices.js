@@ -165,7 +165,7 @@ async function viewDevice(id) {
     ${v.notes.trim() ? '<div class="doc" id="dnotes">' + md(v.notes) + '</div>' : ''}
     <div class="section" style="margin-top:20px"><h2>Used on</h2>${used.length ? '<div class="list used">' + used.map((u) => {
       const first = u.hits.find((h) => h.block);
-      return '<a class="row" href="#/p/' + u.page_id + (first ? '?c=' + esc(first.block) : '') + '"><div class="t"><b>' + esc(u.title) + '</b>' +
+      return '<a class="row" href="' + (u.page_id === 'patch' ? '#/patch?g=' + esc(u.gear) : '#/p/' + u.page_id + (first ? '?c=' + esc(first.block) : '')) + '"><div class="t"><b>' + esc(u.title) + '</b>' +
         u.hits.slice(0, 6).map((h) => '<span class="hit"><em>' + esc(h.label) + '</em> ' + esc(h.text) + '</span>').join('') + (u.hits.length > 6 ? '<span class="note">and ' + (u.hits.length - 6) + ' more</span>' : '') + '</div>' +
         (u.tech_only ? '<span class="badge tech">Tech only</span>' : '') + '<span class="m hide-sm">' + esc(u.space_name || '') + '</span></a>';
     }).join('') + '</div>'

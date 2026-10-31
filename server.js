@@ -19,6 +19,9 @@ const Update = require('./lib/update');
 const Devices = require('./lib/devices');
 const Network = require('./lib/network');
 const Training = require('./lib/training');
+const Patch = require('./lib/patch');
+const PatchConvert = require('./lib/patchconvert');
+const PatchCoreLib = require('./public/patchcore');
 
 const DATA = path.resolve(process.env.LIVEGENIE_DATA || path.join(__dirname, 'data'));
 const PORT = Number(process.env.PORT || 8080);
@@ -38,9 +41,11 @@ const store = Store.create(db, DATA);
 const update = Update.create(pkg.version);
 const devices = Devices.create(db, { UserError: Store.UserError, audit: store.audit });
 const uploadExists = (id) => !!store.upload(id);
-const network = Network.create(db, { UserError: Store.UserError, audit: store.audit, devices, getSetting: store.getSetting, setSetting: store.setSetting });
+const patch = Patch.create(db, { UserError: Store.UserError, audit: store.audit });
+const network = Network.create(db, { UserError: Store.UserError, audit: store.audit, devices, getSetting: store.getSetting, setSetting: store.setSetting, patch });
 if (restoreNote) store.audit(null, 'backup.restored', '', restoreNote);
 try { if (Training.seed(store)) console.log('Added the audio training pages to Volunteers'); } catch (e) { console.error('Could not add the training pages:', e.message); }
+try { const r = PatchConvert.run({ db, store, patch, devices }); if (r && r.lists) console.log('Moved ' + r.lists + ' patch lists into the stage patch'); } catch (e) { console.error('Could not move the patch lists:', e.message); }
 
 // ---------- small http helpers ----------
 const SECURITY_HEADERS = {
@@ -92,9 +97,9 @@ function readBody(req, limit) {
   });
 }
 
-async function readJson(req) {
+async function readJson(req, limit) {
   if (!/^application\/json/i.test(req.headers['content-type'] || '')) throw new Store.UserError('Expected JSON', 415);
-  const buf = await readBody(req, MAX_JSON);
+  const buf = await readBody(req, limit || MAX_JSON);
   if (!buf.length) return {};
   try { return JSON.parse(buf.toString('utf8')); } catch (e) { throw new Store.UserError('Bad JSON'); }
 }
@@ -275,7 +280,7 @@ async function api(req, res, url, user, token) {
   if (m === 'GET' && a === 'spaces' && b) return send(res, 200, { ok: true, ...store.pagesIn(b, user) });
   if (m === 'GET' && a === 'search') {
     const q = new URL(req.url, 'http://x').searchParams.get('q') || '';
-    return send(res, 200, { ok: true, q, results: store.search(q, user), devices: devices.search(q, user) });
+    return send(res, 200, { ok: true, q, results: store.search(q, user), devices: devices.search(q, user), gear: patch.search(q) });
   }
 
   // ----- pages -----
@@ -341,7 +346,10 @@ async function api(req, res, url, user, token) {
           signalIn: mp.sigLinks.filter((l) => l.to === d.id).map((l) => ({ id: l.from, name: name(l.from), count: l.count })),
           signalOut: mp.sigLinks.filter((l) => l.from === d.id).map((l) => ({ id: l.to, name: name(l.to), count: l.count }))
         };
-        return send(res, 200, { ok: true, device: d, usedOn: devices.usedOn(d, user), links, tech: mp.tech });
+        const onPatch = patch.get().doc.gear.filter((g) => g.device_id === d.id);
+        const used = devices.usedOn(d, user);
+        if (onPatch.length) used.unshift({ page_id: 'patch', title: 'Stage patch', space_name: 'Drawing', tech_only: false, gear: onPatch[0].id, hits: onPatch.map((g) => ({ label: PatchCoreLib.KINDS[g.kind].label, text: g.name + (g.use ? ' · ' + g.use : '') })) });
+        return send(res, 200, { ok: true, device: d, usedOn: used, links, tech: mp.tech });
       }
       if (m === 'PUT') { need(user, 'editor'); devices.edit(b, await readJson(req), user, uploadExists); return send(res, 200, { ok: true }); }
       if (m === 'DELETE') { need(user, 'editor'); devices.remove(b, user); return send(res, 200, { ok: true }); }
@@ -349,6 +357,17 @@ async function api(req, res, url, user, token) {
   }
 
   // ----- VLANs and the system map -----
+  // ----- the stage patch -----
+  if (a === 'patch' && !b && m === 'GET') return send(res, 200, { ok: true, ...patch.get(), canEdit: Auth.atLeast(user, 'editor') });
+  if (a === 'patch' && !b && m === 'PUT') {
+    need(user, 'editor');
+    const body = await readJson(req, 4 * 1024 * 1024);
+    return send(res, 200, { ok: true, ...patch.save(body.doc, user, body.baseVersion, body.note) });
+  }
+  if (a === 'patch' && b === 'versions' && !c && m === 'GET') { need(user, 'editor'); return send(res, 200, { ok: true, versions: patch.versions() }); }
+  if (a === 'patch' && b === 'versions' && c && !d && m === 'GET') { need(user, 'editor'); return send(res, 200, { ok: true, doc: patch.version(c) }); }
+  if (a === 'patch' && b === 'versions' && c && d === 'restore' && m === 'POST') { need(user, 'editor'); return send(res, 200, { ok: true, ...patch.restore(c, user) }); }
+
   if (a === 'map' && m === 'GET' && !b) return send(res, 200, { ok: true, ...network.map(user) });
   if (a === 'map' && b === 'layout' && c && m === 'PUT') { need(user, 'editor'); network.saveLayout(c, (await readJson(req)).positions, user); return send(res, 200, { ok: true }); }
   if (a === 'vlans') {

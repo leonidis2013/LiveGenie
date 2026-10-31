@@ -17,7 +17,7 @@ async function viewMap(tab) {
   const tabs = [['signal', 'Signal flow']].concat(data.tech ? [['network', 'Network'], ['vlans', 'VLANs']] : []);
   app.innerHTML = `<div class="crumbs"><a href="#/">Home</a><span>/</span></div>
     <div class="bar"><div class="grow"><h1 class="title" style="font-size:22px;letter-spacing:.06em;margin:4px 0 2px">SYSTEM MAP</h1>
-      <div class="note">${tab === 'signal' ? 'Drawn from your patch lists and cable runs: every row that names two devices becomes an arrow.' : tab === 'network' ? 'Drawn from “Plugged into” on each device card. Colours are VLANs.' : 'Every VLAN, its subnet, and the devices in it.'}</div></div>
+      <div class="note">${tab === 'signal' ? 'Drawn from the stage patch (and any older patch lists): every cable between two devices with a device card becomes an arrow.' : tab === 'network' ? 'Drawn from “Plugged into” on each device card. Colours are VLANs.' : 'Every VLAN, its subnet, and the devices in it.'}</div></div>
       <div class="seg" id="mtabs">${tabs.map((t) => '<button data-t="' + t[0] + '"' + (t[0] === tab ? ' class="on"' : '') + '>' + t[1] + '</button>').join('')}</div></div>
     <div id="mbody"></div>`;
   $$('#mtabs button').forEach((b) => b.addEventListener('click', () => { location.hash = '#/map/' + b.dataset.t; }));
@@ -105,9 +105,9 @@ function drawMap(host, data, view) {
   const editable = can('editor');
   if (!ids.length) {
     host.innerHTML = '<div class="card empty" style="text-align:left;max-width:720px">' + (view === 'signal'
-      ? '<b>Nothing to draw yet.</b><p>The signal map draws an arrow whenever a patch list or cable run row names two devices along its wire trace, for example a Cable runs row from <i>SQ-5</i> to <i>DriveRack PA2</i>, or an input patch whose Stage box column says <i>SB1-3</i> when SB1 has a device card. Add device cards for the boxes you want on the map, then use their names in your patch lists.</p>'
+      ? '<b>Nothing to draw yet.</b><p>The signal map draws an arrow for every cable on the <a href="#/patch">stage patch</a> between two pieces of gear that have device cards (the SQ-5, the AR2412, the DriveRack PA2). Big gear added to the stage patch from its catalog gets a device card by itself; for other gear, open it on the stage patch and choose <b>Make a device card</b>.</p>'
       : '<b>No network links yet.</b><p>Open a device card, choose Edit, and set <b>Plugged into</b> (the switch or router it connects to) and the port. Start with the switches: USW-16-PoE into the UDM Pro, the FOH switch into the USW-16-PoE, and so on.</p>') +
-      '<p><a href="#/devices">Open the device library</a></p></div>' + trayHtml(tray);
+      '<p><a href="#/patch">Open the stage patch</a> · <a href="#/devices">Open the device library</a></p></div>' + trayHtml(tray);
     return;
   }
   const saved = (data.layouts && data.layouts[view]) || {};
@@ -200,7 +200,7 @@ function drawMap(host, data, view) {
       if (ins.length) rows += '<div class="sr"><span>Signal from</span><div>' + ins.map((e) => '<div>' + name(e.from) + (e.count > 1 ? ' <span class="note">×' + e.count + '</span>' : '') + '</div>').join('') + '</div></div>';
       if (outs.length) rows += '<div class="sr"><span>Signal to</span><div>' + outs.map((e) => '<div>' + name(e.to) + (e.count > 1 ? ' <span class="note">×' + e.count + '</span>' : '') + '<div class="note">' + e.rows.slice(0, 3).map(esc).join('<br>') + '</div></div>').join('') + '</div></div>';
       const pages = new Map(); [...ins, ...outs].forEach((e) => e.pages.forEach((p) => pages.set(p.page_id + p.block, p)));
-      if (pages.size) rows += '<div class="sr"><span>From</span><div>' + [...pages.values()].map((p) => '<div><a href="#/p/' + p.page_id + '?c=' + esc(p.block) + '">' + esc(p.title) + '</a> <span class="note">' + esc(p.label) + '</span></div>').join('') + '</div></div>';
+      if (pages.size) rows += '<div class="sr"><span>From</span><div>' + [...pages.values()].map((p) => '<div><a href="' + (p.page_id === 'patch' ? '#/patch' : '#/p/' + p.page_id + '?c=' + esc(p.block)) + '">' + esc(p.title) + '</a> <span class="note">' + esc(p.label) + '</span></div>').join('') + '</div></div>';
     }
     box.innerHTML = '<button class="ghost mx" aria-label="Close">' + icon('x') + '</button><div class="mh">' + devThumb(n, 40) + '<div><b>' + esc(n.name) + '</b><span>' + esc([n.make, n.model].filter(Boolean).join(' ') || CAT[n.category]) + '</span></div></div>' +
       (n.location ? '<div class="sr"><span>Location</span><div>' + esc(n.location) + '</div></div>' : '') +

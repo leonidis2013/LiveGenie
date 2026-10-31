@@ -19,7 +19,7 @@ const Shell = (() => {
   /** Which tab / sidebar item a route belongs to. */
   function sectionOf(p) {
     if (!p.length) return 'home';
-    return { todo: 'todo', search: 'search', devices: 'devices', d: 'devices', 'gear-setup': 'devices', map: 'map', settings: 'settings', s: 'space', p: 'space', new: 'space' }[p[0]] || 'home';
+    return { todo: 'todo', search: 'search', devices: 'devices', d: 'devices', 'gear-setup': 'devices', map: 'map', patch: 'patch', settings: 'settings', s: 'space', p: 'space', new: 'space' }[p[0]] || 'home';
   }
   const EDITING = (p) => (p[0] === 'p' && (p[2] === 'edit')) || p[0] === 'new' || (p[0] === 'devices' && p[1] === 'new') || (p[0] === 'd' && p[2] === 'edit') || p[0] === 'gear-setup';
 
@@ -46,6 +46,7 @@ const Shell = (() => {
     nav.innerHTML = item('#/', 'Home', 'home', section === 'home') +
       item('#/todo', 'To do', 'check', section === 'todo', todoBadge()) +
       item('#/devices', 'Devices', 'box', section === 'devices') +
+      item('#/patch', 'Stage patch', 'grid', section === 'patch') +
       item('#/map', 'System map', 'net', section === 'map') +
       '<div class="shd">Spaces</div>' +
       list.map((s) => {
@@ -69,7 +70,7 @@ const Shell = (() => {
   function paintTabs() {
     const tabs = $('#tabs');
     if (!tabs || !S.state) return;
-    tabs.querySelectorAll('[data-t]').forEach((t) => t.classList.toggle('on', t.dataset.t === section || (t.dataset.t === 'more' && ['space', 'map', 'settings'].includes(section))));
+    tabs.querySelectorAll('[data-t]').forEach((t) => t.classList.toggle('on', t.dataset.t === section || (t.dataset.t === 'more' && ['space', 'map', 'patch', 'settings'].includes(section))));
     const b = tabs.querySelector('[data-t=todo] .cnt'), td = S.state.todo || { open: 0, overdue: 0 };
     b.textContent = td.overdue || td.open || '';
     b.classList.toggle('hide', !td.open);
@@ -90,7 +91,7 @@ const Shell = (() => {
       (upd ? row('#/settings/about', 'download', 'Update available', esc(st.update.latest || '')) : '') +
       (can('editor') ? '<button class="mbtn" id="mNew">' + icon('plus') + 'New page</button>' : '') +
       '<div class="mh">Spaces</div>' + list.map((s) => row('#/s/' + esc(s.slug), 'list', esc(s.name), s.pages + ' page' + (s.pages === 1 ? '' : 's'))).join('') +
-      '<div class="mh">More</div>' + row('#/map', 'net', 'System map', 'Signal flow' + (can('editor') ? ', network and VLANs' : '')) +
+      '<div class="mh">More</div>' + row('#/patch', 'grid', 'Stage patch', 'Mic to speaker, every cable') + row('#/map', 'net', 'System map', 'Signal flow' + (can('editor') ? ', network and VLANs' : '')) +
       (can('editor') ? row('#/gear-setup', 'spark', 'Guided equipment setup', 'Console, stage boxes, wireless, in-ears') : '') +
       row('#/settings', 'gear', 'Settings', 'Display, account' + (can('admin') ? ', users, backups' : '')) +
       '</div>', (w, close) => {
@@ -128,6 +129,7 @@ const Shell = (() => {
   async function update(p) {
     section = sectionOf(p);
     document.body.classList.toggle('editing', EDITING(p));
+    document.body.classList.toggle('wideview', p[0] === 'patch');
     document.body.classList.toggle('setupmode', !!(S.state && S.state.setupNeeded));
     if (!['space'].includes(section)) ctx = {};
     const fabOn = can('editor') && (section === 'home' || (p[0] === 's'));

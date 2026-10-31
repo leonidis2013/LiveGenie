@@ -1,7 +1,7 @@
 /*
  * Guided equipment setup: console → stage boxes → other gear → review.
- * Creates device cards (with input and output counts) and a "Stage patch" page with
- * a Snake inputs and a Snake outputs list for every stage box, ready to assign.
+ * Creates device cards (with input and output counts) and puts the gear on the stage patch drawing,
+ * each stage box linked to the console, ready to draw the mics in.
  */
 'use strict';
 
@@ -110,8 +110,8 @@ async function viewGearSetup() {
       body = `<div class="card" style="margin:0 0 12px"><h2>Device cards</h2>
           ${fresh.length ? '<p>New: ' + fresh.map((n) => '<span class="chip">' + esc(n) + '</span>').join(' ') + '</p>' : ''}
           ${kept.length ? '<p class="note">Already have: ' + kept.map(esc).join(', ') + ' (kept, input and output counts filled in if missing)</p>' : ''}</div>
-        <label class="tog ${st.page ? 'on' : ''} gopt"><input type="checkbox" data-opt="page"${st.page ? ' checked' : ''}><span><b>Stage patch page</b><br><span class="note">${lists.length ? lists.join(' · ') + ', ready to assign' : 'Add a stage box, wireless or in-ears to get patch lists'}</span></span></label>
-        <label class="tog ${st.cables ? 'on' : ''} gopt"><input type="checkbox" data-opt="cables"${st.cables ? ' checked' : ''}${proc.length || amps.length ? '' : ' disabled'}><span><b>Main PA cable runs</b><br><span class="note">${proc.length || amps.length ? 'A starting list: ' + esc([st.console.name, ...proc.map((x) => x.name), ...amps.map((x) => x.name), ...spk.map((x) => x.name)].join(' → ')) + '. Check it against your rack.' : 'Tick a speaker processor or amplifier to get this'}</span></span></label>`;
+        <label class="tog ${st.page ? 'on' : ''} gopt"><input type="checkbox" data-opt="page"${st.page ? ' checked' : ''}><span><b>Put it on the stage patch</b><br><span class="note">${lists.length ? lists.join(' · ') + '. Then add your mics and draw the cables.' : 'Draws the console and the rest of your gear on the stage patch.'}</span></span></label>
+        <label class="tog ${st.cables ? 'on' : ''} gopt"><input type="checkbox" data-opt="cables"${st.cables ? ' checked' : ''}${proc.length || amps.length ? '' : ' disabled'}><span><b>Wire up the PA</b><br><span class="note">${proc.length || amps.length ? 'A starting point: ' + esc([st.console.name, ...proc.map((x) => x.name), ...amps.map((x) => x.name), ...spk.map((x) => x.name)].join(' → ')) + '. Check it against your rack.' : 'Tick a speaker processor or amplifier to get this'}</span></span></label>`;
     }
     app.innerHTML = `<div class="ed gsetup"><div class="crumbs"><a href="#/">Home</a><span>/</span><a href="#/devices">Devices</a><span>/</span><span>Guided setup</span></div>
       <h1 class="title" style="font-size:22px;margin:6px 0 10px">Guided equipment setup</h1>
@@ -188,52 +188,44 @@ async function viewGearSetup() {
     const btn = $('#gnext'); btn.disabled = true; btn.textContent = 'Creating…';
     try {
       const c = st.console;
-      await upsert({ name: c.name.trim(), category: 'audio', make: c.make, model: c.model || c.name, location: c.location, ip: c.ip.trim(), inputs: Number(c.inputs) || 0, outputs: Number(c.outputs) || 0 });
-      for (const b of st.boxes) await upsert({ name: b.name.trim(), category: 'audio', make: b.make, model: b.model || b.name, location: b.location, inputs: Number(b.inputs) || 0, outputs: Number(b.outputs) || 0, notes: 'Connected to the ' + c.name + ' over ' + b.link + '.' });
+      const P = PatchCore;
+      const ids = {};
+      ids[c.name.trim()] = await upsert({ name: c.name.trim(), category: 'audio', make: c.make, model: c.model || c.name, location: c.location, ip: c.ip.trim(), inputs: Number(c.inputs) || 0, outputs: Number(c.outputs) || 0 });
+      for (const b of st.boxes) ids[b.name.trim()] = await upsert({ name: b.name.trim(), category: 'audio', make: b.make, model: b.model || b.name, location: b.location, inputs: Number(b.inputs) || 0, outputs: Number(b.outputs) || 0, notes: 'Connected to the ' + c.name + ' over ' + b.link + '.' });
       for (const o of st.other) {
-        if (o.role === 'wireless') for (const n of unitNames(o)) await upsert({ name: n, category: 'audio', make: o.make, model: o.model, outputs: o.ch || 0, notes: o.ch ? o.ch + '-channel wireless receiver.' : '' });
-        else if (o.role === 'iem') for (const n of unitNames(o)) await upsert({ name: n, category: 'audio', make: o.make, model: o.model, inputs: (o.tx || 1) * 2, notes: 'In-ear transmitter' + (o.tx > 1 ? ' (' + o.tx + ' transmitters)' : '') + '.' });
-        else await upsert({ name: o.name, category: 'audio', make: o.make, model: o.model });
-      }
-      const blocks = [];
-      if (st.page && st.boxes.length) {
-        for (const b of st.boxes) {
-          const P = Blk.PRESETS.snake, Q = Blk.PRESETS.snakeout;
-          const ins = [], outs = [];
-          for (let i = 1; i <= Number(b.inputs); i++) ins.push([String(Number(b.start) + i - 1), '', '', b.name, String(i), b.link, c.name, '']);
-          for (let i = 1; i <= Number(b.outputs); i++) outs.push(['', c.name, b.link, b.name, String(i), '', '']);
-          if (ins.length) blocks.push({ type: 'patch', preset: 'snake', title: b.name + ' inputs', columns: P.columns, trace: P.trace, roles: P.roles, assign: P.assign, rows: ins });
-          if (outs.length) blocks.push({ type: 'patch', preset: 'snakeout', title: b.name + ' outputs', columns: Q.columns, trace: Q.trace, roles: Q.roles, assign: Q.assign, rows: outs });
-        }
-      }
-      if (st.page) {
-        const W = Blk.PRESETS.wireless, I = Blk.PRESETS.iem;
-        const rx = [];
-        st.other.filter((o) => o.role === 'wireless').forEach((o) => unitNames(o).forEach((n) => { for (let ch = 1; ch <= (o.ch || 1); ch++) rx.push(['', '', '', '', '', n, String(ch), '', '', c.name, '']); }));
-        if (rx.length) blocks.push({ type: 'patch', preset: 'wireless', title: 'Wireless mics', columns: W.columns, trace: W.trace, roles: W.roles, assign: W.assign, rows: rx });
-        const tx = [];
-        st.other.filter((o) => o.role === 'iem').forEach((o) => unitNames(o).forEach((n) => { for (let t = 1; t <= (o.tx || 1); t++) tx.push(['', c.name, '', '', '', (o.tx || 1) > 1 ? n + ' ' + String.fromCharCode(64 + t) : n, 'Stereo', '', '', '', '', '']); }));
-        if (tx.length) blocks.push({ type: 'patch', preset: 'iem', title: 'In-ears', columns: I.columns, trace: I.trace, roles: I.roles, assign: I.assign, rows: tx });
-      }
-      const proc = st.other.filter((o) => o.role === 'processor'), amps = st.other.filter((o) => o.role === 'amp'), spk = st.other.filter((o) => o.role === 'speaker');
-      if (st.cables && (proc.length || amps.length)) {
-        const rows = [];
-        let n = 1;
-        const L = () => 'C' + n++;
-        const first = proc[0] || null;
-        if (first) rows.push([L(), c.name, first.name, 'XLR', '', '']);
-        amps.forEach((a) => rows.push([L(), first ? first.name : c.name, a.name, 'XLR', '', '']));
-        spk.forEach((sp, i) => rows.push([L(), amps.length ? amps[i % amps.length].name : (first ? first.name : c.name), sp.name, 'Speakon', '', '']));
-        blocks.push({ type: 'text', md: 'Starting point from the guided setup. Check each run against the rack and fix labels, lengths and routes.' });
-        blocks.push({ type: 'patch', preset: 'cable', title: 'Main PA', columns: Blk.PRESETS.cable.columns, trace: Blk.PRESETS.cable.trace, rows });
+        if (o.role === 'wireless') for (const n of unitNames(o)) ids[n] = await upsert({ name: n, category: 'audio', make: o.make, model: o.model, outputs: o.ch || 0, notes: o.ch ? o.ch + '-channel wireless receiver.' : '' });
+        else if (o.role === 'iem') for (const n of unitNames(o)) ids[n] = await upsert({ name: n, category: 'audio', make: o.make, model: o.model, inputs: (o.tx || 1) * 2, notes: 'In-ear transmitter' + (o.tx > 1 ? ' (' + o.tx + ' transmitters)' : '') + '.' });
+        else ids[o.name] = await upsert({ name: o.name, category: 'audio', make: o.make, model: o.model });
       }
       forgetDevices();
-      if (blocks.length) {
-        blocks.unshift({ type: 'text', md: 'Made by the guided setup. Tap **Edit**, then a list\'s **Draw** button, and drag from a source to the stage box to assign it to the next free input. Or type sources into the table. In **Wireless mics**, fill in who uses each receiver channel, the capsule, transmitter and frequency, and where the receiver plugs in. In **In-ears**, fill in the mix, outputs, bodypack and who wears it.' });
-        const r = await call('POST', '/api/pages', { title: 'Stage patch', space: 'audio', blocks });
-        toast('Setup done', 'ok');
-        location.hash = '#/p/' + r.id;
-      } else { toast('Device cards ready', 'ok'); location.hash = '#/devices'; }
+      if (!st.page) { toast('Device cards ready', 'ok'); location.hash = '#/devices'; return; }
+      // put it all on the stage patch drawing (adding to what is there; gear already on it is kept)
+      const cur = await get('/api/patch');
+      const doc = cur.doc;
+      const place = (item) => P.findGear(doc, item.name) || P.addGear(doc, item);
+      const con = place({ kind: 'console', name: c.name.trim(), make: c.make, model: c.model || c.name, nin: Number(c.inputs) || 0, nout: Number(c.outputs) || 0, device_id: ids[c.name.trim()], localstart: st.boxes.reduce((m, b) => Math.max(m, Number(b.start) + Number(b.inputs)), 1) });
+      for (const b of st.boxes) {
+        const sb = place({ kind: 'stagebox', name: b.name.trim(), make: b.make, model: b.model || b.name, nin: Number(b.inputs) || 0, nout: Number(b.outputs) || 0, start: Number(b.start) || 1, device_id: ids[b.name.trim()] });
+        if (!doc.cables.some((x) => x.ap === 'link' && ((x.a === sb.id && x.b === con.id) || (x.b === sb.id && x.a === con.id)))) P.connect(doc, sb, 'link', con, 'link', { label: b.link });
+      }
+      for (const o of st.other) {
+        if (o.role === 'wireless') unitNames(o).forEach((n) => place({ kind: 'receiver', name: n, make: o.make, model: o.model, nin: o.ch || 1, device_id: ids[n] }));
+        else if (o.role === 'iem') unitNames(o).forEach((n) => { for (let t = 1; t <= (o.tx || 1); t++) place({ kind: 'iemtx', name: (o.tx || 1) > 1 ? n + ' ' + String.fromCharCode(64 + t) : n, make: o.make, model: o.model, mode: 'Stereo', device_id: (o.tx || 1) > 1 ? undefined : ids[n] }); });
+      }
+      const proc = st.other.filter((o) => o.role === 'processor'), amps = st.other.filter((o) => o.role === 'amp'), spk = st.other.filter((o) => o.role === 'speaker');
+      const pg = proc.map((o) => place({ kind: 'processor', name: o.name, make: o.make, model: o.model, nin: 2, nout: 6, device_id: ids[o.name] }));
+      const ag = amps.map((o) => place({ kind: 'amp', name: o.name, make: o.make, model: o.model, nin: 2, device_id: ids[o.name] }));
+      const sg = spk.map((o) => place({ kind: 'speaker', name: o.name, make: o.make, model: o.model, group: 'Mains' }));
+      if (st.cables) {
+        // a starting point for the PA: console LR → processor → amps → speakers (check it against the rack)
+        const first = pg[0];
+        if (first) { con.feeds = { ...(con.feeds || {}), 0: 'LR', 1: 'LR' }; if (con.outs.length > 1) { P.connect(doc, con, 0, first, 0); P.connect(doc, con, 1, first, 1); } }
+        ag.forEach((a, i) => { const src = first || con; if (src.outs.length) { P.connect(doc, src, (i * 2) % src.outs.length, a, 0); if (a.ins.length > 1) P.connect(doc, src, (i * 2 + 1) % src.outs.length, a, 1); } });
+        sg.forEach((sp, i) => { const a = ag.length ? ag[Math.floor(i / 2) % ag.length] : first; if (a && a.outs.length) P.connect(doc, a, i % a.outs.length, sp, 0); });
+      }
+      await call('PUT', '/api/patch', { doc, baseVersion: cur.version, note: 'Guided setup' });
+      toast('Setup done: now add your mics and draw the cables', 'ok');
+      location.hash = '#/patch?edit=1';
     } catch (e) { toast(e.message, 'bad'); btn.disabled = false; btn.textContent = 'Create'; }
   }
 

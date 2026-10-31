@@ -438,7 +438,7 @@ async function viewHome() {
     <div class="bar"><div class="grow"></div>${newBtn}</div>
     ${t.todo.length ? '<div class="section" id="todo"><h2>To do</h2><div class="list">' + t.todo.map(todoRow).join('') + '</div></div>' : ''}
     ${d.pinned.length ? '<div class="section"><h2>Pinned</h2><div class="list">' + d.pinned.map((p) => pageRow(p, { showSpace: true, noPin: true })).join('') + '</div></div>' : ''}
-    <div class="section"><h2>Spaces</h2><div class="spaces">${d.spaces.map((s) => `<a class="space" href="#/s/${esc(s.slug)}"><i></i><b>${esc(s.name)}</b><span>${esc(s.blurb)}</span><em class="n">${s.pages} page${s.pages === 1 ? '' : 's'}</em></a>`).join('')}<a class="space devtile" href="#/devices"><i></i><b>Devices</b><span>Every device, its IP and where it is used</span><em class="n">${devs.length} device${devs.length === 1 ? '' : 's'}</em></a><a class="space maptile" href="#/map"><i></i><b>System map</b><span>Signal flow${can('editor') ? ', network and VLANs' : ''} drawn from your pages</span><em class="n">${icon('net')}</em></a></div></div>
+    <div class="section"><h2>Spaces</h2><div class="spaces">${d.spaces.map((s) => `<a class="space" href="#/s/${esc(s.slug)}"><i></i><b>${esc(s.name)}</b><span>${esc(s.blurb)}</span><em class="n">${s.pages} page${s.pages === 1 ? '' : 's'}</em></a>`).join('')}<a class="space devtile" href="#/devices"><i></i><b>Devices</b><span>Every device, its IP and where it is used</span><em class="n">${devs.length} device${devs.length === 1 ? '' : 's'}</em></a><a class="space patchtile" href="#/patch"><i></i><b>Stage patch</b><span>Every mic, wireless, stage box and speaker, drawn mic to speaker</span><em class="n">${icon('grid')}</em></a><a class="space maptile" href="#/map"><i></i><b>System map</b><span>Signal flow${can('editor') ? ', network and VLANs' : ''} drawn from your pages</span><em class="n">${icon('net')}</em></a></div></div>
     <div class="section"><h2>Recently updated</h2>${d.recent.length ? '<div class="list">' + d.recent.map((p) => pageRow(p, { showSpace: true })).join('') + '</div>'
       : '<div class="card empty">No pages yet.' + (can('editor') ? ' Start with the Sunday startup checklist or a page about the SQ-5.' : (S.state.user ? '' : ' Editors can sign in to add the first pages.')) + '</div>'}</div>`;
   const nb = $('#newPage');
@@ -511,6 +511,7 @@ function renderBlocks(blocks, live = true) {
         return '<div class="callout ' + b.kind + '">' + icon(meta[0], 'ci') + '<div class="cb"><span class="cl">' + meta[1] + '</span>' + md(b.md) + '</div></div>';
       }
       case 'checklist': case 'patch': case 'iplist': return Blk.render(b, live);
+      case 'patchview': return PatchView.blockHtml(b);
       case 'image': return '<figure class="pic"><img src="/uploads/' + esc(b.upload) + '" alt="' + esc(b.caption) + '" loading="lazy">' + (b.caption ? '<figcaption>' + esc(b.caption) + '</figcaption>' : '') + '</figure>';
       case 'divider': return '<hr>';
       default: return '';
@@ -520,6 +521,7 @@ function renderBlocks(blocks, live = true) {
 
 function wireBlocks(root, page, live = true) {
   Blk.wire(root, page, live);
+  PatchView.wireBlocks(root);
   $$('figure.pic img', root).forEach((img) => img.addEventListener('click', () => {
     const z = document.createElement('div');
     z.className = 'zoom';
@@ -589,14 +591,15 @@ async function viewPage(id, focusChecklist) {
 
 // ----- editor -----
 const BLOCK_TYPES = [
-  ['text', 'Text', 'text'], ['callout', 'Callout', 'info'], ['checklist', 'Checklist', 'check'], ['patch', 'Patch list', 'grid'],
+  ['text', 'Text', 'text'], ['callout', 'Callout', 'info'], ['checklist', 'Checklist', 'check'], ['patchview', 'Patch list', 'grid'],
   ['iplist', 'IP list', 'net'], ['image', 'Picture', 'image'], ['divider', 'Divider', 'line']
 ];
-const BLOCK_LABELS = { text: 'Text', callout: 'Callout', checklist: 'Checklist', patch: 'Patch list', iplist: 'IP list', image: 'Picture', divider: 'Divider' };
+const BLOCK_LABELS = { text: 'Text', callout: 'Callout', checklist: 'Checklist', patch: 'Patch list (old)', patchview: 'Patch list', iplist: 'IP list', image: 'Picture', divider: 'Divider' };
 const newBlock = (t, preset) => ({
   text: { type: 'text', md: '' }, callout: { type: 'callout', kind: 'tip', md: '' }, checklist: { type: 'checklist', title: '', items: [], schedule: [] },
   patch: { type: 'patch', title: '', preset: preset || 'input', columns: Blk.PRESETS[preset || 'input'].columns.slice(), rows: [], trace: Blk.PRESETS[preset || 'input'].trace.slice(),
     roles: { ...(Blk.PRESETS[preset || 'input'].roles || {}) }, assign: (Blk.PRESETS[preset || 'input'].assign || []).slice(), _setup: ['snake', 'snakeout', 'wireless', 'iem'].includes(preset) },
+  patchview: { type: 'patchview', title: '', report: 'inputs', filter: '' },
   iplist: { type: 'iplist', title: '', net: { name: '', vlan: '', cidr: '', gateway: '' }, rows: [] },
   image: { type: 'image', upload: '', caption: '' }, divider: { type: 'divider' }
 }[t]);
@@ -681,6 +684,10 @@ async function viewEdit(id, spaceSlug, drawBlock) {
       if (b.type === 'image') body = (b.upload ? '<img class="imgprev" src="/uploads/' + esc(b.upload) + '" alt=""><button data-repick>Replace picture</button>' : '<div class="drop" data-pick>' + icon('image') + '<div>Tap to choose a picture or take a photo</div><div class="note">Large photos are shrunk before upload</div></div>') +
         '<input type="file" accept="image/*" class="hide" data-file><input class="full" data-f="caption" placeholder="Caption (optional)" value="' + esc(b.caption) + '" style="margin-top:8px">';
       if (b.type === 'divider') body = '<hr style="border:0;border-top:1px solid var(--line);margin:4px 0">';
+      if (b.type === 'patchview') body = '<p class="note" style="margin:0 0 8px">Shows a list made from the <a href="#/patch">stage patch</a> drawing. Change the patch there; this list follows it.</p>' +
+        '<div class="two"><label>List<select data-f="report">' + PatchView.REPORTS.map((r) => '<option value="' + r[0] + '"' + (b.report === r[0] ? ' selected' : '') + '>' + r[1] + '</option>').join('') + '</select></label>' +
+        '<label>Only gear matching <span class="note">(optional)</span><input data-f="filter" value="' + esc(b.filter || '') + '" placeholder="AR2412, SQ-5, Drums"></label></div>' +
+        '<label>Title <span class="note">(optional)</span><input class="full" data-f="title" value="' + esc(b.title || '') + '" placeholder="Sunday inputs"></label>';
       return '<div class="blk" data-i="' + i + '"><div class="bh"><b>' + label + '</b>' +
         '<button data-mv="-1" title="Move up"' + (i === 0 ? ' disabled' : '') + '>' + icon('up') + '</button>' +
         '<button data-mv="1" title="Move down"' + (i === ed.blocks.length - 1 ? ' disabled' : '') + '>' + icon('down') + '</button>' +
@@ -690,7 +697,7 @@ async function viewEdit(id, spaceSlug, drawBlock) {
     $$('.blk', host).forEach((el) => {
       const i = Number(el.dataset.i);
       const b = ed.blocks[i];
-      $$('[data-f]', el).forEach((f) => f.addEventListener('input', () => { b[f.dataset.f] = f.value; dirty(); }));
+      $$('[data-f]', el).forEach((f) => f.addEventListener(f.tagName === 'SELECT' ? 'change' : 'input', () => { b[f.dataset.f] = f.value; dirty(); }));
       $$('[data-kind]', el).forEach((k) => k.addEventListener('click', () => { b.kind = k.dataset.kind; dirty(); $$('[data-kind]', el).forEach((x) => x.classList.toggle('on', x === k)); }));
       $$('[data-mv]', el).forEach((m) => m.addEventListener('click', () => {
         const j = i + Number(m.dataset.mv);
@@ -830,6 +837,7 @@ async function viewSearch(q) {
   }
   const d = await get('/api/search?q=' + encodeURIComponent(q));
   app.innerHTML = box + `<div class="bar"><div class="grow"><h2 style="margin:0">Results for “${esc(q)}”</h2></div><span class="note">${d.results.length} page${d.results.length === 1 ? '' : 's'}</span></div>
+    ${(d.gear || []).length ? '<div class="section"><h2>On the stage patch</h2><div class="dgrid">' + d.gear.map((g) => '<a class="dcard" href="#/patch?g=' + esc(g.id) + '"><div class="t"><b>' + esc(g.name) + '</b><span>' + esc([g.kind, g.use, g.model].filter(Boolean).join(' · ')) + '</span>' + (g.freq ? '<span class="mono">' + esc(g.freq) + ' MHz</span>' : '') + '</div></a>').join('') + '</div></div>' : ''}
     ${d.devices.length ? '<div class="section"><div class="dgrid">' + d.devices.map((v) => '<a class="dcard" href="#/d/' + v.id + '">' + devThumb(v, 40) + '<div class="t"><b>' + esc(v.name) + '</b><span>' + esc([v.make, v.model].filter(Boolean).join(' ')) + '</span><span>' + esc(v.location) + (v.ips.length ? ' <span class="mono">' + esc(v.ips[0]) + '</span>' : '') + '</span></div></a>').join('') + '</div></div>' : ''}
     ${d.results.length ? '<div class="list">' + d.results.map((p) => pageRow(p, { snip: true })).join('') + '</div>'
       : '<div class="card empty">Nothing matches that yet.' + (S.state.user ? '' : ' Some pages are Tech only and need you to sign in.') + (can('editor') ? '<div style="margin-top:12px"><a href="#/new">Write a page about it</a></div>' : '') + '</div>'}`;
@@ -1075,6 +1083,7 @@ async function route() {
   const p = pathPart.split('/').filter(Boolean);
   markGear(p[0] === 'settings');
   Shell.setCtx({});
+  document.body.classList.toggle('wideview', p[0] === 'patch');
   if (p[0] !== 'settings') S.lastRoute = h;
   if (p[0] !== 'search') $('#q').value = '';
   try {
@@ -1087,6 +1096,7 @@ async function route() {
     else if (p[0] === 'p' && p[1]) await viewPage(p[1], qs.get('c'));
     else if (p[0] === 'new') await viewEdit(null, qs.get('space'));
     else if (p[0] === 'map') await viewMap(p[1]);
+    else if (p[0] === 'patch') await PatchView.view(qs);
     else if (p[0] === 'gear-setup') await viewGearSetup();
     else if (p[0] === 'devices' && p[1] === 'new') await viewDeviceEdit(null);
     else if (p[0] === 'devices') await viewDevices(qs);

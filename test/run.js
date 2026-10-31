@@ -511,6 +511,129 @@ test('sign-in QR links: once, for yourself (or anyone if admin), sign a phone in
   assert.ok(QR.svg('x').startsWith('<svg'));
 });
 
+test('stage patch: one drawing, saved with versions; lists, checks, search and map come from it', async () => {
+  const P = require(path.join(ROOT, 'public', 'patchcore.js'));
+  let r = await anon.get('/api/patch');
+  assert.strictEqual(r.status, 200);
+  assert.strictEqual(r.data.canEdit, false);
+  const base = r.data.version;
+  const d = r.data.doc;
+  const con = P.addGear(d, { kind: 'console', name: 'SQ-5', make: 'Allen & Heath', model: 'SQ-5', nin: 16, nout: 12, localstart: 25 });
+  const sb = P.addGear(d, { kind: 'stagebox', name: 'AR2412', model: 'AR2412', nin: 24, nout: 12, start: 1 });
+  P.connect(d, sb, 'link', con, 'link', { label: 'SLink' });
+  const kick = P.addGear(d, { kind: 'mic', name: 'Kick mic', model: 'Beta 91A', use: 'Kick' });
+  P.connect(d, kick, 0, sb, 0);
+  const tx1 = P.addGear(d, { kind: 'txmic', name: 'Handheld 1', use: 'Worship lead', freq: '524.125' });
+  const tx2 = P.addGear(d, { kind: 'txmic', name: 'Pastor lav', use: 'Pastor', freq: '524.125 MHz' });
+  const rx = P.addGear(d, { kind: 'receiver', name: 'SLX-D4D', model: 'SLX-D4D', nin: 2 });
+  P.connect(d, tx1, 0, rx, 0); P.connect(d, tx2, 0, rx, 1); P.connect(d, rx, 0, sb, 8); P.connect(d, rx, 1, sb, 9);
+  const iem = P.addGear(d, { kind: 'iemtx', name: 'PSM300', mode: 'Stereo' });
+  sb.feeds = { 4: 'Mix 3', 5: 'Mix 3' };
+  P.connect(d, sb, 4, iem, 0); P.connect(d, sb, 5, iem, 1);
+  ['Keys', 'Bass'].forEach((u) => { const pk = P.addGear(d, { kind: 'bodypack', name: u + ' pack', use: u }); P.connect(d, iem, 0, pk, 0); });
+  // a cable into an input that is already taken replaces the old one
+  const dup = P.addGear(d, { kind: 'mic', name: 'Spare mic' });
+  P.connect(d, dup, 0, sb, 0); P.connect(d, kick, 0, sb, 0);
+  assert.strictEqual(d.cables.filter((c) => c.b === sb.id && c.bp === 0).length, 1, 'an input takes one cable');
+  assert.strictEqual((await vol.put('/api/patch', { doc: d, baseVersion: base })).status, 403, 'volunteers cannot change it');
+  r = await editor.put('/api/patch', { doc: d, baseVersion: base });
+  assert.strictEqual(r.status, 200);
+  const v1 = r.data.version;
+  assert.strictEqual((await admin.put('/api/patch', { doc: d, baseVersion: base })).status, 409, 'saving over a newer version is refused');
+  const doc = (await anon.get('/api/patch')).data.doc;
+  // the lists
+  const ins = P.inputs(doc).filter((x) => x.used);
+  assert.deepStrictEqual(ins.map((x) => [x.ch, x.up.source]), [[1, 'Kick'], [9, 'Worship lead'], [10, 'Pastor']]);
+  const w = P.wireless(doc).find((x) => x.tx.name === 'Pastor lav');
+  assert.strictEqual(w.land.ch, 10, 'a wireless mic lands on console input 10 through receiver ch 2 and AR2412 In 10');
+  const ie = P.inears(doc)[0];
+  assert.strictEqual(ie.mix, 'Mix 3');
+  assert.deepStrictEqual(ie.packs.map((p) => p.use), ['Keys', 'Bass']);
+  assert.ok(P.outputs(doc).some((o) => o.mix === 'Mix 3' && /PSM300/.test(o.chain)));
+  const issues = P.checks(doc);
+  assert.ok(issues.some((i) => i.level === 'bad' && /524\.125/.test(i.text)), 'two transmitters on one frequency are flagged');
+  // channel collision: a second stage box starting at input 1
+  const d2 = JSON.parse(JSON.stringify(doc));
+  const sb2 = P.addGear(d2, { kind: 'stagebox', name: 'AR84', nin: 8, nout: 4, start: 1 });
+  P.connect(d2, sb2, 'link', P.findGear(d2, 'SQ-5'), 'link');
+  P.connect(d2, P.addGear(d2, { kind: 'mic', name: 'Choir' }), 0, sb2, 0);
+  assert.ok(P.checks(d2).some((i) => /input 1 gets/.test(i.text)), 'two sockets on one console input are flagged');
+  // versions and restore
+  r = await editor.put('/api/patch', { doc: { ...doc, title: 'Changed' }, baseVersion: v1 });
+  assert.strictEqual(r.data.doc.title, 'Changed');
+  const vs = (await editor.get('/api/patch/versions')).data.versions;
+  assert.ok(vs.length >= 2 && vs[0].version === r.data.version);
+  r = await editor.post('/api/patch/versions/' + v1 + '/restore');
+  assert.strictEqual(r.data.doc.title, doc.title, 'restoring brings the old one back as a new version');
+  // search, map and the device card
+  const sr = (await anon.get('/api/search?q=pastor lav')).data;
+  assert.ok(sr.gear.some((g) => g.name === 'Pastor lav'), 'search finds gear on the patch');
+  const devs = (await editor.get('/api/devices')).data.devices;
+  const sqDev = devs.find((x) => x.name === 'SQ-5'), arDev = devs.find((x) => x.name === 'AR2412');
+  const doc3 = (await editor.get('/api/patch')).data;
+  doc3.doc.gear.find((g) => g.name === 'SQ-5').device_id = sqDev.id;
+  doc3.doc.gear.find((g) => g.name === 'AR2412').device_id = arDev.id;
+  await editor.put('/api/patch', { doc: doc3.doc, baseVersion: doc3.version });
+  const sig = (await editor.get('/api/map')).data.sigLinks;
+  assert.ok(sig.some((l) => l.from === arDev.id && l.to === sqDev.id && l.pages.some((p) => p.page_id === 'patch')), 'the map draws AR2412 → SQ-5 from the stage patch');
+  const card = (await editor.get('/api/devices/' + arDev.id)).data;
+  assert.strictEqual(card.usedOn[0].title, 'Stage patch', 'the device card lists the stage patch');
+  // a page block that shows a list from the drawing
+  r = await editor.post('/api/pages', { title: 'Sunday inputs', space: 'audio', blocks: [{ type: 'patchview', report: 'inputs', filter: 'AR2412', title: 'Stage inputs' }, { type: 'patchview', report: 'bogus' }] });
+  const pb = (await editor.get('/api/pages/' + r.data.id)).data.page.blocks;
+  assert.strictEqual(pb[0].report, 'inputs'); assert.strictEqual(pb[0].filter, 'AR2412'); assert.strictEqual(pb[1].report, 'inputs', 'unknown lists fall back to inputs');
+});
+
+test('old patch lists move onto the stage patch once, and pages keep a live list in their place', async () => {
+  const os2 = require('os'), fs2 = require('fs');
+  const dir = fs2.mkdtempSync(path.join(os2.tmpdir(), 'lg-conv-'));
+  const DBm = require(path.join(ROOT, 'lib', 'db')), StoreM = require(path.join(ROOT, 'lib', 'store')), PatchM = require(path.join(ROOT, 'lib', 'patch')), Conv = require(path.join(ROOT, 'lib', 'patchconvert'));
+  const P = require(path.join(ROOT, 'public', 'patchcore.js'));
+  const db = DBm.open(path.join(dir, 'x.db'));
+  const st = StoreM.create(db, dir);
+  const pt = PatchM.create(db, { UserError: StoreM.UserError, audit: st.audit });
+  const who = { id: null, name: 'test' };
+  const snake = [['1', 'Kick', 'Beta 91A', 'AR2412', '1', 'SLink', 'SQ-5', ''], ['2', '', '', 'AR2412', '2', 'SLink', 'SQ-5', ''], ['3', 'Bass', 'DI', 'AR2412', '3', 'SLink', 'SQ-5', ''], ['4', 'Keys L', 'DI', 'AR2412', '4', 'SLink', 'SQ-5', '']];
+  const out = [['Mix 1', 'SQ-5', 'SLink', 'AR2412', '1', 'Wedge 1', '']];
+  const wl = [['9', 'Pastor', 'TL47', 'SLX-D1', '524.125', 'SLX-D4D', '1', 'AR2412', '9', 'SQ-5', '']];
+  const ie = [['IEM 1', 'SQ-5', '', 'AR2412', '5/6', 'PSM300', 'Stereo', '518.200', 'P3R 1', 'SE215', 'Keys', '']];
+  const cab = [['C1', 'SQ-5', 'DriveRack PA2', 'XLR', '50 ft', 'Floor trough'], ['C2', 'DriveRack PA2', 'Crown XLi 2500', 'XLR', '3 ft', ''], ['C3', 'Crown XLi 2500', 'CBT 70J-1', 'Speakon', '75 ft', '']];
+  const id = st.createPage({ title: 'Stage patch', space: 'audio', blocks: [
+    { type: 'text', md: 'Our patch' }, { type: 'patch', preset: 'snake', title: 'AR2412 inputs', rows: snake }, { type: 'patch', preset: 'snakeout', rows: out },
+    { type: 'patch', preset: 'wireless', rows: wl }, { type: 'patch', preset: 'iem', rows: ie }, { type: 'patch', preset: 'cable', title: 'Main PA', rows: cab },
+    { type: 'patch', preset: 'custom', title: 'Stands', columns: ['Stand', 'Where'], rows: [['Tall boom', 'Pulpit | left']] }] }, who);
+  const DevM = require(path.join(ROOT, 'lib', 'devices'));
+  const dv = DevM.create(db, { UserError: StoreM.UserError, audit: st.audit });
+  const res = Conv.run({ db, store: st, patch: pt, devices: dv });
+  assert.strictEqual(res.lists, 6);
+  const page = st.getPage(id, { role: 'admin' });
+  assert.deepStrictEqual(page.blocks.map((b) => b.type), ['text', 'patchview', 'patchview', 'patchview', 'patchview', 'patchview', 'text']);
+  assert.strictEqual(page.blocks[1].filter, 'AR2412');
+  assert.strictEqual(page.blocks[1].title, 'AR2412 inputs');
+  assert.ok(page.blocks[6].md.includes('Pulpit \\| left'), 'a custom list becomes a plain table');
+  assert.strictEqual(page.version, 2, 'the old version stays in history');
+  const doc = pt.get().doc;
+  const ins = P.inputs(doc).filter((x) => x.used).map((x) => x.ch + ' ' + x.up.source);
+  assert.deepStrictEqual(ins, ['1 Kick', '3 Bass', '4 Keys L', '9 Pastor']);
+  assert.ok(P.findGear(doc, 'Bass').kind === 'di' && P.findGear(doc, 'Keys L').kind === 'di', 'two rows that both said DI become two DIs, named for what they pick up');
+  assert.strictEqual(P.findGear(doc, 'Kick').model, 'Beta 91A');
+  assert.ok(P.findGear(doc, 'AR2412').ins.length >= 4, 'spare stage box inputs are kept as sockets');
+  assert.ok(P.inputs(doc).find((x) => x.ch === 1).up.mic === 'Beta 91A', 'the input list shows the mic model');
+  assert.strictEqual(P.wireless(doc)[0].land.ch, 9);
+  const o = P.outputs(doc);
+  assert.ok(o.some((x) => x.mix === 'Mix 1' && /Wedge 1/.test(x.chain)));
+  assert.ok(o.some((x) => x.mix === 'IEM 1' && /PSM300/.test(x.chain)));
+  assert.strictEqual(P.inears(doc)[0].packs[0].use, 'Keys');
+  assert.ok(P.cableList(doc).some((c) => c.c.label === 'C3' && c.c.kind === 'speaker' && c.c.length === '75 ft'));
+  assert.strictEqual(P.findGear(doc, 'Crown XLi 2500').kind, 'amp');
+  assert.ok(P.findGear(doc, 'AR2412').device_id && P.findGear(doc, 'SQ-5').device_id && P.findGear(doc, 'Crown XLi 2500').device_id, 'big gear gets device cards');
+  assert.ok(!P.findGear(doc, 'Kick').device_id, 'mics stay on the drawing only');
+  assert.strictEqual(page.blocks[5].report, 'cables');
+  assert.ok(/SQ-5/.test(page.blocks[5].filter) && /CBT 70J-1/.test(page.blocks[5].filter), 'the cable list keeps to the gear it was made from');
+  assert.strictEqual(Conv.run({ db, store: st, patch: pt, devices: dv }), null, 'it runs only once');
+  db.close();
+});
+
 test('backup, then restore brings the data back after a restart', async () => {
   let r = await admin.post('/api/backups/now');
   assert.strictEqual(r.status, 200);

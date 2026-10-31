@@ -1014,14 +1014,6 @@ button.xs { padding:1px 3px; vertical-align:-2px; } button.xs .icon { width:12px
 .pfacts span { color:var(--dim); }
 
 /* ===== 1.0: sign-in screen, admin area, problems, manuals ===== */
-.signpage { max-width:420px; margin:6vh auto 0; }
-.signbrand { text-align:center; margin-bottom:16px; }
-.signbrand img { width:84px; height:84px; object-fit:contain; }
-.signbrand img.orglogo { width:auto; max-width:220px; height:84px; }
-.signbrand h1 { font-size:20px; margin:8px 0 2px; }
-.signbrand .orgname { font-size:14px; color:var(--dim); font-weight:600; }
-.signcard { padding:18px; }
-.signcard .signin h3 { margin-top:0; }
 .homeorg { margin:2px 0 0; }
 .welcome h2 { margin-bottom:6px; }
 .welcome p { margin:0 0 12px; color:var(--dim); }
@@ -1069,3 +1061,60 @@ table.grid tr.live td:first-child { box-shadow:inset 3px 0 0 var(--acc); }
 @media print { .vasbar { display:none !important; } }
 body.setupmode #hdr .hright { display:none !important; }
 .sc input.txt#orgn { min-width:min(320px, 60vw); }
+
+/* ---------- sign-in screen (0.15.0) ---------- */
+body.signmode #hdr { display:none !important; }
+body.signmode #app { max-width:none !important; padding:0 !important; margin:0 !important; }
+body.signmode { padding:0 !important; }
+.signpage { margin:0; max-width:none; min-height:100vh; min-height:100dvh; display:grid; grid-template-columns:minmax(0, 1fr); background:var(--bg); }
+.signside { display:none; }
+.signmain { display:flex; align-items:flex-start; justify-content:center; padding:max(28px, env(safe-area-inset-top)) 16px 32px; }
+.signbox { width:100%; max-width:380px; }
+.signmob { display:flex; align-items:center; gap:12px; margin:8px 0 26px; }
+.signmob img { width:48px; height:48px; border-radius:12px; object-fit:contain; }
+.signmob img.orglogo { width:auto; max-width:120px; background:#fff; padding:4px; }
+.sword { font-weight:800; letter-spacing:.16em; font-size:15px; }
+.ssub { font-size:13px; color:var(--dim); font-weight:600; margin-top:1px; }
+.shello { font-size:13px; font-weight:700; letter-spacing:.06em; text-transform:uppercase; color:var(--teal); margin-bottom:4px; }
+.signbox .signin h3 { text-align:left; font-size:26px; margin:0 0 4px; letter-spacing:-.01em; }
+.signbox .signin > p { text-align:left; color:var(--dim); margin:0 0 20px; }
+.snform label { display:block; font-weight:600; font-size:13.5px; margin-bottom:6px; }
+.snform input { width:100%; font-size:17px; padding:13px 14px; border-radius:12px; }
+.snform .err { text-align:left !important; margin-top:6px; }
+.snext { width:100%; padding:13px; font-size:16px; border-radius:12px; display:flex; align-items:center; justify-content:center; gap:8px; margin-top:4px; }
+.snext .icon { width:18px; height:18px; }
+.sback { width:100%; margin-top:8px; padding:11px; }
+.signbox .people { grid-template-columns:repeat(auto-fill, minmax(104px, 1fr)); }
+.signbox .signin h3 + .people { margin-top:18px; }
+.signbox .pinhead { justify-content:flex-start; background:var(--card); border:1px solid var(--line); border-radius:14px; padding:12px 14px; margin:6px 0 22px; }
+.signbox .pdots { margin-bottom:8px; }
+.signbox .signin p.sqr { margin-top:24px; }
+.shelp { display:flex; gap:8px; align-items:flex-start; font-size:13px; color:var(--dim); line-height:1.45; margin-top:14px; padding:0 2px; }
+.shelp .icon { width:17px; height:17px; flex:none; margin-top:1px; }
+.pad button[data-k=go]:disabled { opacity:1; background:var(--card2); color:var(--faint); }
+.pad button[data-k=go]:not(:disabled) { background:var(--acc); color:var(--onacc); }
+
+@media (min-width:900px) {
+  .signpage { grid-template-columns:minmax(380px, 46%) 1fr; }
+  .signside { display:flex; flex-direction:column; position:relative; overflow:hidden; color:#e6edf5; padding:40px 48px;
+    background:radial-gradient(120% 80% at 0% 0%, #1d3a6e 0%, transparent 60%), radial-gradient(90% 70% at 100% 100%, #0f4f4a 0%, transparent 60%), linear-gradient(160deg, #0f1622, #0a0d12); }
+  .signflow { position:absolute; inset:0; width:100%; height:100%; opacity:.9; pointer-events:none; }
+  .signtop, .signmid, .sfoot { position:relative; }
+  .signtop { display:flex; align-items:center; gap:14px; }
+  .signtop img { width:52px; height:52px; border-radius:13px; box-shadow:0 6px 20px #0006; }
+  .signtop .ssub { color:#9fb0c3; }
+  .signmid { margin:auto 0; max-width:440px; }
+  .slogo { display:inline-flex; background:#fff; border-radius:14px; padding:10px 14px; margin-bottom:22px; box-shadow:0 8px 24px #0005; }
+  .slogo img { height:56px; width:auto; max-width:240px; object-fit:contain; }
+  .signmid h2::before { display:none; }
+  .signmid h2 { text-transform:none; font-weight:800; font-size:34px; line-height:1.15; margin:0 0 10px; letter-spacing:-.015em; color:#fff; }
+  .signmid > p { color:#a9b8c9; font-size:16px; margin:0 0 28px; }
+  .sfeat { list-style:none; padding:0; margin:0; display:grid; gap:14px; }
+  .sfeat li { display:flex; gap:14px; align-items:flex-start; background:#ffffff0d; border:1px solid #ffffff17; border-radius:12px; padding:12px 14px; backdrop-filter:blur(4px); }
+  .sfeat .icon { width:22px; height:22px; color:#2ec4b6; flex:none; margin-top:2px; }
+  .sfeat b { display:block; color:#fff; font-size:14.5px; }
+  .sfeat span { color:#9fb0c3; font-size:13px; }
+  .sfoot { font-size:12px; color:#6f8195; letter-spacing:.04em; }
+  .signmain { align-items:center; padding:40px; }
+  .signmob { display:none; }
+}

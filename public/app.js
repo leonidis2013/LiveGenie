@@ -17,6 +17,10 @@ const viewAs = () => { try { return sessionStorage.getItem('livegenie-view-as') 
 
 // ---------- icons ----------
 const ICONS = {
+  chev: '<path d="M5 12h14M13 6l6 6-6 6"/>',
+  book: '<path d="M4 5a2 2 0 0 1 2-2h13v16H6a2 2 0 0 0-2 2z"/><path d="M4 19V5M8 7h7"/>',
+  wave: '<path d="M3 12h3l2-6 4 12 3-9 2 3h4"/>',
+  help: '<circle cx="12" cy="12" r="9"/><path d="M9.5 9.5a2.5 2.5 0 1 1 3.5 2.3c-.6.3-1 .8-1 1.5v.7M12 17h.01"/>',
   plus: '<path d="M12 5v14M5 12h14"/>',
   edit: '<path d="M4 20h4L19 9l-4-4L4 16z"/><path d="M14 6l4 4"/>',
   clock: '<circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/>',
@@ -206,6 +210,7 @@ function paintHeader() {
   $('#hdr').classList.toggle('hide', !!st.setupNeeded);
   $('#sVer').textContent = st.version;
   document.body.classList.toggle('setupmode', !!st.setupNeeded || !st.user);
+  document.body.classList.toggle('signmode', !st.setupNeeded && !st.user);
   document.body.classList.toggle('viewas', !!st.viewAs);
   let vb = $('#vasbar');
   if (st.viewAs && !vb) {
@@ -291,7 +296,7 @@ function signInPanel(host, opts = {}) {
   const w = host;
   {
     const av = (n) => '<span class="av">' + esc(n.slice(0, 1).toUpperCase()) + '</span>';
-    const qrHint = '<p class="note sqr">' + icon('grid') + '<span>Signed in on a computer? Open <b>Settings › Account › Sign in on your phone</b> and scan the code with your camera. No PIN needed.</span></p>';
+    const qrHint = '<p class="note sqr">' + icon('grid') + '<span><b>On a phone?</b> Someone signed in on a computer can open <b>Settings › Account › Sign in on your phone</b>. Scan the code with your camera and you are in. No PIN needed.</span></p>';
     const done = async (user) => {
       rememberPerson(user.name);
       close(); document.removeEventListener('keydown', keys);
@@ -334,9 +339,10 @@ function signInPanel(host, opts = {}) {
         return;
       }
       if (st.step === 'name') {
-        host.innerHTML = '<h3>Sign in</h3><p>Sign in with your name and PIN.</p><form id="snf"><label for="sn">Your name</label>' +
-          '<input id="sn" autocomplete="username" autocapitalize="words" enterkeyhint="next" value="' + esc(st.name) + '"><div class="err" id="se"></div>' +
-          '<div class="acts">' + (inline && !rememberedPeople().length ? '' : '<button type="button" id="sb">' + (rememberedPeople().length ? 'Back' : 'Cancel') + '</button>') + '<button class="primary">Next</button></div></form>' + qrHint;
+        host.innerHTML = '<h3>Sign in</h3><p>Type your name, then your PIN.</p><form id="snf" class="snform"><label for="sn">Your name</label>' +
+          '<input id="sn" autocomplete="username" autocapitalize="words" enterkeyhint="next" placeholder="First and last name" value="' + esc(st.name) + '"><div class="err" id="se"></div>' +
+          '<button class="primary snext">Continue' + icon('chev') + '</button>' +
+          (inline && !rememberedPeople().length ? '' : '<button type="button" class="ghost sback" id="sb">' + (rememberedPeople().length ? 'Back' : 'Cancel') + '</button>') + '</form>' + qrHint;
         const sbb = $('#sb', host); if (sbb) sbb.addEventListener('click', () => { if (rememberedPeople().length) { st.step = 'who'; paint(); } else { close(); document.removeEventListener('keydown', keys); } });
         $('#snf', host).addEventListener('submit', (e) => { e.preventDefault(); const n = $('#sn', host).value.trim(); if (!n) { $('#se', w).textContent = 'Type your name'; return; } st.name = n; st.step = 'pin'; paint(); });
         setTimeout(() => $('#sn', host).focus(), 40);
@@ -452,12 +458,33 @@ async function viewSetup() {
   });
 }
 
-/** Everyone signs in before seeing anything. */
+/** Everyone signs in before seeing anything: a full screen of its own, brand on one side, sign-in on the other. */
 function viewSignIn() {
   setTitle('Sign in');
   const org = (S.state && S.state.org) || {};
-  app.innerHTML = '<div class="signpage"><div class="signbrand">' + (org.logo ? '<img class="orglogo" src="/api/org/logo" alt="">' : '<img src="/icons/livegenie-mark.svg" alt="">') +
-    '<h1>LiveGenie</h1>' + (org.name ? '<div class="orgname">' + esc(org.name) + '</div>' : '<div class="note">AVL knowledge base</div>') + '</div><div class="card signcard"><div class="signin" id="sgp"></div></div></div>';
+  const ver = (S.state && S.state.version) || '';
+  const hour = new Date().getHours();
+  const hello = hour < 12 ? 'Good morning' : hour < 18 ? 'Good afternoon' : 'Good evening';
+  const feat = (ic, t, d) => '<li>' + icon(ic) + '<div><b>' + t + '</b><span>' + d + '</span></div></li>';
+  app.innerHTML = '<div class="signpage">' +
+    '<section class="signside" aria-hidden="true">' +
+      '<svg class="signflow" viewBox="0 0 600 900" preserveAspectRatio="xMidYMid slice"><defs><linearGradient id="sfl" x1="0" x2="1"><stop offset="0" stop-color="#2ec4b6" stop-opacity="0"/><stop offset=".5" stop-color="#2ec4b6" stop-opacity=".55"/><stop offset="1" stop-color="#4c8dff" stop-opacity="0"/></linearGradient></defs>' +
+        [120, 230, 340, 450, 560, 670, 780].map((y, i) => '<path d="M-20 ' + y + ' C 160 ' + (y - 60 + i * 9) + ', 300 ' + (y + 70 - i * 7) + ', 620 ' + (y - 30) + '" stroke="url(#sfl)" stroke-width="' + (i % 3 ? 1.2 : 2) + '" fill="none"/>').join('') +
+        [[150, 196], [330, 300], [470, 545], [210, 690]].map(([x, y]) => '<circle cx="' + x + '" cy="' + y + '" r="4" fill="#2ec4b6" opacity=".7"/>').join('') + '</svg>' +
+      '<div class="signtop"><img src="/icons/livegenie-mark.svg" alt=""><div><div class="sword">LIVEGENIE</div><div class="ssub">AVL knowledge base</div></div></div>' +
+      '<div class="signmid">' + (org.logo ? '<div class="slogo"><img src="/api/org/logo" alt=""></div>' : '') +
+        '<h2>' + (org.name ? esc(org.name) : 'Everything the tech team needs, in one place.') + '</h2>' +
+        '<p>' + (org.name ? 'Audio, video, lighting and stream help for the tech team.' : 'Help pages, checklists and the whole stage patch.') + '</p>' +
+        '<ul class="sfeat">' + feat('book', 'Help pages', 'How-tos for every console, camera and screen') + feat('check', 'Checklists', 'Pre-service checks everyone can tick') + feat('wave', 'Stage patch', 'Tap any mic to see its whole signal path') + '</ul></div>' +
+      '<div class="sfoot">LiveGenie ' + esc(ver) + '</div>' +
+    '</section>' +
+    '<section class="signmain"><div class="signbox">' +
+      '<div class="signmob">' + (org.logo ? '<img class="orglogo" src="/api/org/logo" alt="">' : '<img src="/icons/livegenie-mark.svg" alt="">') +
+        '<div><div class="sword">LIVEGENIE</div><div class="ssub">' + esc(org.name || 'AVL knowledge base') + '</div></div></div>' +
+      '<div class="shello">' + hello + '</div>' +
+      '<div class="signin" id="sgp"></div>' +
+      '<div class="shelp">' + icon('help') + '<span>Forgot your PIN or new to the team? Ask an admin. They can set you up under <b>Admin › People</b>.</span></div>' +
+    '</div></section></div>';
   signInPanel($('#sgp'), { then: () => { location.hash = location.hash && location.hash !== '#/' ? location.hash : '#/'; route(); } });
 }
 

@@ -252,24 +252,137 @@ function confirmBox(title, text, okLabel, danger) {
   });
 }
 
+/*
+ * Sign in, made for a phone: tap your name (this device remembers who signs in on it), then a big PIN pad.
+ * Or skip it: on a signed-in computer, Account › Sign in on your phone shows a QR code.
+ */
+const PEOPLE_KEY = 'livegenie-people';
+function rememberedPeople() { try { return JSON.parse(localStorage.getItem(PEOPLE_KEY) || '[]').filter((x) => typeof x === 'string').slice(0, 8); } catch (e) { return []; } }
+function rememberPerson(name) {
+  try { localStorage.setItem(PEOPLE_KEY, JSON.stringify([name, ...rememberedPeople().filter((x) => x.toLowerCase() !== String(name).toLowerCase())].slice(0, 8))); } catch (e) { /* private mode */ }
+}
+function forgetPerson(name) { try { localStorage.setItem(PEOPLE_KEY, JSON.stringify(rememberedPeople().filter((x) => x !== name))); } catch (e) { /* private mode */ } }
+
 function signInDialog(then) {
-  modal(`<h3>Sign in</h3><p>Volunteers, editors and admins sign in with their name and PIN.</p>
-    <form id="sf"><label for="sn">Name</label><input id="sn" autocomplete="username" autocapitalize="words">
-    <label for="sp">PIN</label><input id="sp" type="password" inputmode="numeric" autocomplete="current-password" maxlength="8">
-    <div class="err" id="se"></div>
-    <div class="acts"><button type="button" data-close>Cancel</button><button class="primary" type="submit">Sign in</button></div></form>`, (w, close) => {
-    $('#sf', w).addEventListener('submit', async (e) => {
-      e.preventDefault();
+  const st = { name: '', pin: '', busy: false, step: rememberedPeople().length ? 'who' : 'name' };
+  modal('<div class="signin" id="sgn"></div>', (w, close) => {
+    w.classList.add('signsheet');
+    const host = $('#sgn', w);
+    const av = (n) => '<span class="av">' + esc(n.slice(0, 1).toUpperCase()) + '</span>';
+    const qrHint = '<p class="note sqr">' + icon('grid') + '<span>Signed in on a computer? Open <b>Settings › Account › Sign in on your phone</b> and scan the code with your camera. No PIN needed.</span></p>';
+    const done = async (user) => {
+      rememberPerson(user.name);
+      close(); document.removeEventListener('keydown', keys);
+      await loadState(); paintHeader();
+      toast('Signed in as ' + user.name, 'ok');
+      if (then) then(); else route();
+    };
+    const submit = async () => {
+      if (st.busy || st.pin.length < 4) return;
+      st.busy = true; paint();
+      try { const r = await call('POST', '/api/signin', { name: st.name, pin: st.pin }); await done(r.user); }
+      catch (err) {
+        st.busy = false; st.pin = ''; paint();
+        $('#se', w).textContent = err.message;
+        const dots = $('.pdots', w); if (dots) { dots.classList.remove('shake'); void dots.offsetWidth; dots.classList.add('shake'); }
+        if (navigator.vibrate) navigator.vibrate(120);
+      }
+    };
+    const press = (k) => {
+      if (st.step !== 'pin' || st.busy) return;
+      if (k === 'back') st.pin = st.pin.slice(0, -1);
+      else if (k === 'go') return submit();
+      else if (st.pin.length < 8) st.pin += k;
       $('#se', w).textContent = '';
-      try {
-        await call('POST', '/api/signin', { name: $('#sn', w).value, pin: $('#sp', w).value });
-        close();
-        await loadState(); paintHeader();
-        toast('Signed in as ' + S.state.user.name, 'ok');
-        if (then) then(); else route();
-      } catch (err) { $('#se', w).textContent = err.message; $('#sp', w).select(); }
-    });
+      paintDots();
+    };
+    const paintDots = () => {
+      const d = $('.pdots', w); if (!d) return;
+      d.innerHTML = Array.from({ length: Math.max(4, st.pin.length) }, (_, i) => '<i class="' + (i < st.pin.length ? 'on' : '') + '"></i>').join('');
+      const go = $('[data-k=go]', w); if (go) go.disabled = st.pin.length < 4 || st.busy;
+    };
+    function paint() {
+      if (st.step === 'who') {
+        host.innerHTML = '<h3>Who is signing in?</h3><div class="people">' + rememberedPeople().map((n) => '<div class="pwrap"><button type="button" class="person" data-p="' + esc(n) + '">' + av(n) + '<b>' + esc(n) + '</b></button><button type="button" class="pforget" data-forget="' + esc(n) + '" aria-label="Forget ' + esc(n) + ' on this device" title="Forget on this device">' + icon('x') + '</button></div>').join('') +
+          '<button type="button" class="person other" data-p="">' + '<span class="av">' + icon('plus') + '</span><b>Someone else</b></button></div>' + qrHint +
+          '<div class="acts"><button type="button" data-close>Cancel</button></div>';
+        $$('[data-p]', host).forEach((b) => b.addEventListener('click', () => { st.name = b.dataset.p; st.pin = ''; st.step = st.name ? 'pin' : 'name'; paint(); }));
+        $$('[data-forget]', host).forEach((b) => b.addEventListener('click', () => { forgetPerson(b.dataset.forget); st.step = rememberedPeople().length ? 'who' : 'name'; paint(); }));
+        $$('[data-close]', host).forEach((b) => b.addEventListener('click', () => { close(); document.removeEventListener('keydown', keys); }));
+        return;
+      }
+      if (st.step === 'name') {
+        host.innerHTML = '<h3>Sign in</h3><p>Volunteers, editors and admins sign in with their name and PIN.</p><form id="snf"><label for="sn">Your name</label>' +
+          '<input id="sn" autocomplete="username" autocapitalize="words" enterkeyhint="next" value="' + esc(st.name) + '"><div class="err" id="se"></div>' +
+          '<div class="acts"><button type="button" id="sb">' + (rememberedPeople().length ? 'Back' : 'Cancel') + '</button><button class="primary">Next</button></div></form>' + qrHint;
+        $('#sb', host).addEventListener('click', () => { if (rememberedPeople().length) { st.step = 'who'; paint(); } else { close(); document.removeEventListener('keydown', keys); } });
+        $('#snf', host).addEventListener('submit', (e) => { e.preventDefault(); const n = $('#sn', host).value.trim(); if (!n) { $('#se', w).textContent = 'Type your name'; return; } st.name = n; st.step = 'pin'; paint(); });
+        setTimeout(() => $('#sn', host).focus(), 40);
+        return;
+      }
+      host.innerHTML = '<div class="pinhead">' + av(st.name) + '<div><b>' + esc(st.name) + '</b><button type="button" class="linkbtn" id="nyou">Not you?</button></div></div>' +
+        '<div class="pdots" aria-live="polite"></div><div class="err" id="se"></div>' +
+        '<div class="pad">' + ['1', '2', '3', '4', '5', '6', '7', '8', '9'].map((k) => '<button type="button" data-k="' + k + '">' + k + '</button>').join('') +
+        '<button type="button" data-k="back" aria-label="Delete">⌫</button><button type="button" data-k="0">0</button><button type="button" data-k="go" class="primary" aria-label="Sign in">' + (st.busy ? '<span class="spin"></span>' : 'Go') + '</button></div>' +
+        '<div class="acts"><button type="button" data-close>Cancel</button></div>';
+      $$('[data-k]', host).forEach((b) => b.addEventListener('click', () => press(b.dataset.k)));
+      $('#nyou', host).addEventListener('click', () => { st.pin = ''; st.step = rememberedPeople().length ? 'who' : 'name'; paint(); });
+      $$('[data-close]', host).forEach((b) => b.addEventListener('click', () => { close(); document.removeEventListener('keydown', keys); }));
+      paintDots();
+    }
+    // a computer keyboard works too
+    function keys(e) {
+      if (!w.isConnected) return document.removeEventListener('keydown', keys);
+      if (st.step !== 'pin') return;
+      if (/^[0-9]$/.test(e.key)) { e.preventDefault(); press(e.key); }
+      else if (e.key === 'Backspace') { e.preventDefault(); press('back'); }
+      else if (e.key === 'Enter') { e.preventDefault(); press('go'); }
+    }
+    document.addEventListener('keydown', keys);
+    paint();
   });
+}
+
+/** A QR code that signs a phone in as someone (yourself, or anyone if you are an admin). Works once, for 5 minutes. */
+async function signInQr(userId, name) {
+  let timer = null;
+  modal('<h3>' + (userId ? 'Sign ' + esc(name) + ' in on a phone' : 'Sign in on your phone') + '</h3><p>Open the camera on the phone, point it at the code and tap the link. The phone stays signed in' + (userId ? ' as ' + esc(name) : '') + ' for 60 days from its last use.</p>' +
+    '<div class="qrbox" id="qrb"><span class="spin"></span></div><p class="note qrnote" id="qrn"></p>' +
+    '<div class="acts"><button type="button" id="qrr">New code</button><button type="button" class="primary" data-close>Done</button></div>', (w, close) => {
+    const make = async () => {
+      clearInterval(timer);
+      try {
+        const r = await call('POST', '/api/links', userId ? { user_id: userId } : {});
+        const url = location.origin + location.pathname + '#/link/' + r.token;
+        $('#qrb', w).innerHTML = QR.svg(url, { size: 232 });
+        const tick = () => {
+          const left = Math.max(0, Math.round((r.expires - Date.now()) / 1000));
+          if (!w.isConnected) return clearInterval(timer);
+          if (!left) { clearInterval(timer); $('#qrb', w).classList.add('expired'); $('#qrn', w).textContent = 'This code has expired. Tap New code.'; return; }
+          $('#qrb', w).classList.remove('expired');
+          $('#qrn', w).innerHTML = 'Works once · ' + Math.floor(left / 60) + ':' + String(left % 60).padStart(2, '0') + ' left<br><span class="mono">' + esc(location.host) + '</span>';
+        };
+        tick(); timer = setInterval(tick, 1000);
+      } catch (e) { $('#qrb', w).innerHTML = ''; $('#qrn', w).textContent = e.message; }
+    };
+    $('#qrr', w).addEventListener('click', make);
+    $$('[data-close]', w).forEach((b) => b.addEventListener('click', () => clearInterval(timer)));
+    make();
+  });
+}
+
+/** Opening a sign-in QR code on a phone lands here. */
+async function useSignInLink(token) {
+  app.innerHTML = '<div class="card empty"><span class="spin"></span><div style="margin-top:10px">Signing in…</div></div>';
+  try {
+    const r = await call('POST', '/api/links/use', { token });
+    rememberPerson(r.user.name);
+    await loadState(); paintHeader();
+    toast('Signed in as ' + r.user.name, 'ok');
+  } catch (e) { toast(e.message, 'bad'); }
+  history.replaceState(null, '', '#/');
+  lastHash = '#/';
+  route();
 }
 
 // ---------- shared bits ----------
@@ -769,12 +882,14 @@ function tabAccount(pane) {
     return;
   }
   const roleText = { admin: 'Admin: everything, including users and backups', editor: 'Editor: write pages, see Tech only pages', volunteer: 'Volunteer: read pages and use checklists' }[u.role];
-  pane.innerHTML = '<div class="card"><h2>Account</h2>' + setRow(esc(u.name), roleText, '<button id="so">Sign out</button>', true) + '</div>' +
+  pane.innerHTML = '<div class="card"><h2>Account</h2>' + setRow(esc(u.name), roleText, '<button id="so">Sign out</button>', true) +
+    setRow('Sign in on your phone', 'Shows a QR code. Scan it with the phone\'s camera and the phone is signed in as you, no typing.', '<button class="btn" id="qrMe">' + icon('grid') + 'Show QR code</button>') + '</div>' +
     '<div class="card"><h2>Change PIN</h2><form id="pf">' +
     setRow('Current PIN', '', '<input class="num" id="p0" type="password" inputmode="numeric" maxlength="8" autocomplete="current-password">', true) +
     setRow('New PIN', '4 to 8 digits', '<input class="num" id="p1" type="password" inputmode="numeric" maxlength="8" autocomplete="new-password">') +
     setRow('New PIN again', '', '<input class="num" id="p2" type="password" inputmode="numeric" maxlength="8" autocomplete="new-password">') +
     setRow('', '', '<button class="primary">Change PIN</button>') + '</form></div>';
+  $('#qrMe').addEventListener('click', () => signInQr());
   $('#so').addEventListener('click', async () => { await call('POST', '/api/signout'); await loadState(); paintHeader(); toast('Signed out'); location.hash = '#/'; });
   $('#pf').addEventListener('submit', async (e) => {
     e.preventDefault();
@@ -790,7 +905,7 @@ async function tabUsers(pane) {
   pane.innerHTML = '<p class="note pnote">Admins manage everything. Editors write pages and see Tech only pages. Volunteers read and use checklists. People who are not signed in can read pages that are not Tech only.</p>' +
     '<div class="card"><h2>Users</h2>' + d.users.map((u, i) => setRow(esc(u.name) + (u.id === S.state.user.id ? ' <span class="note">(you)</span>' : ''),
       roleName[u.role] + (u.locked ? ' · <span style="color:var(--warn)">locked after wrong PINs</span>' : '') + ' · added ' + esc(ago(u.created_at)),
-      '<button data-edit="' + u.id + '">Edit</button>' + (u.id !== S.state.user.id ? '<button class="danger ghost" data-rm="' + u.id + '">Remove</button>' : ''), i === 0)).join('') +
+      '<button class="btn" data-qr="' + u.id + '" title="Sign ' + esc(u.name) + ' in on a phone">' + icon('grid') + '<span class="hide-sm">Phone</span></button><button data-edit="' + u.id + '">Edit</button>' + (u.id !== S.state.user.id ? '<button class="danger ghost" data-rm="' + u.id + '">Remove</button>' : ''), i === 0)).join('') +
     setRow('', '', '<button class="primary btn" id="addU">' + icon('plus') + 'Add user</button>') + '</div>';
   const form = (u) => `<h3>${u ? 'Edit ' + esc(u.name) : 'Add a user'}</h3><p>${u ? 'Leave the PIN empty to keep it.' : 'They sign in with this name and PIN.'}</p><form id="uf">
     <label for="un">Name</label><input id="un" value="${esc(u ? u.name : '')}" autocapitalize="words">
@@ -812,6 +927,7 @@ async function tabUsers(pane) {
     });
   });
   $('#addU').addEventListener('click', () => open(null));
+  $$('[data-qr]', pane).forEach((b) => b.addEventListener('click', () => { const u = d.users.find((x) => x.id === Number(b.dataset.qr)); signInQr(u.id === S.state.user.id ? null : u.id, u.name); }));
   $$('[data-edit]', pane).forEach((b) => b.addEventListener('click', () => open(d.users.find((u) => u.id === Number(b.dataset.edit)))));
   $$('[data-rm]', pane).forEach((b) => b.addEventListener('click', async () => {
     const u = d.users.find((x) => x.id === Number(b.dataset.rm));
@@ -963,6 +1079,7 @@ async function route() {
   if (p[0] !== 'search') $('#q').value = '';
   try {
     if (S.state.setupNeeded) return await viewSetup();
+    if (p[0] === 'link' && p[1]) return await useSignInLink(p[1]);
     if (!p.length) await viewHome();
     else if (p[0] === 's' && p[1]) await viewSpace(p[1]);
     else if (p[0] === 'p' && p[1] && p[2] === 'edit') await viewEdit(p[1], null, qs.get('draw'));

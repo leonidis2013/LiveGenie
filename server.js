@@ -239,6 +239,23 @@ async function api(req, res, url, user, token) {
     store.audit(r.user, 'signin', '', '');
     return send(res, 200, { ok: true, user: r.user }, { 'set-cookie': sessionCookie(r.token, 60 * 86400) });
   }
+  if (m === 'POST' && a === 'links' && b === 'use') {
+    const body = await readJson(req);
+    const r = auth.useLink(body.token);
+    if (!r.ok) return fail(res, 410, r.error);
+    store.audit(r.user, 'signin', '', 'with a QR code');
+    return send(res, 200, { ok: true, user: r.user }, { 'set-cookie': sessionCookie(r.token, 60 * 86400) });
+  }
+  if (m === 'POST' && a === 'links' && !b) {
+    need(user, 'volunteer');
+    const body = await readJson(req);
+    const target = body.user_id ? Number(body.user_id) : user.id;
+    if (target !== user.id) need(user, 'admin');
+    const l = auth.makeLink(target);
+    if (!l) return fail(res, 404, 'No such person');
+    store.audit(user, 'signin.link', l.name, target === user.id ? 'for their own phone' : 'for ' + l.name);
+    return send(res, 200, { ok: true, ...l });
+  }
   if (m === 'POST' && a === 'signout') {
     auth.signOut(token);
     return send(res, 200, { ok: true }, { 'set-cookie': sessionCookie('', 0) });

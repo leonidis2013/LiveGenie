@@ -800,3 +800,44 @@ body.setupmode #side, body.setupmode #tabs, body.setupmode #fab { display:none !
   body { padding-left:0 !important; }
   .pagewrap { display:block !important; }
 }
+
+/* ===== sign in: tap your name, then the PIN pad ===== */
+.modal.signsheet .box { max-width:360px; }
+.signin h3 { text-align:center; }
+.signin > p { text-align:center; }
+.people { display:grid; grid-template-columns:repeat(auto-fill, minmax(96px, 1fr)); gap:10px; margin:14px 0 6px; }
+.pwrap { position:relative; }
+.person { width:100%; display:flex; flex-direction:column; align-items:center; gap:8px; padding:14px 6px 12px; border-radius:14px; background:var(--card2); min-height:104px; }
+.person .av { width:48px; height:48px; border-radius:50%; background:var(--acc); color:var(--onacc); display:flex; align-items:center; justify-content:center; font-size:20px; font-weight:800; }
+.person.other .av { background:var(--inset); color:var(--dim); border:1px dashed var(--line); }
+.person.other .av .icon { width:22px; height:22px; }
+.person b { font-size:13.5px; font-weight:600; max-width:100%; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.pforget { position:absolute; top:4px; right:4px; width:26px; height:26px; padding:0; border-radius:50%; background:transparent; color:var(--faint); display:flex; align-items:center; justify-content:center; }
+.pforget:hover { color:var(--bad); background:var(--card); }
+.pforget .icon { width:13px; height:13px; }
+.sqr { display:flex; gap:8px; align-items:flex-start; background:var(--inset); border-radius:10px; padding:10px 12px; margin:14px 0 0; line-height:1.4; }
+.sqr .icon { width:18px; height:18px; margin-top:1px; color:var(--acc); }
+.pinhead { display:flex; align-items:center; justify-content:center; gap:12px; margin:2px 0 14px; }
+.pinhead .av { width:44px; height:44px; border-radius:50%; background:var(--acc); color:var(--onacc); display:flex; align-items:center; justify-content:center; font-size:18px; font-weight:800; }
+.pinhead b { display:block; font-size:17px; }
+.linkbtn { background:none; border:0; padding:0; color:var(--acc); font-size:12.5px; font-weight:600; }
+.linkbtn:hover { background:none; text-decoration:underline; }
+.pdots { display:flex; justify-content:center; gap:14px; height:18px; margin:4px 0 2px; }
+.pdots i { width:14px; height:14px; border-radius:50%; border:2px solid var(--faint); transition:background .1s, border-color .1s; }
+.pdots i.on { background:var(--fg); border-color:var(--fg); }
+.pdots.shake { animation:pinshake .35s; }
+@keyframes pinshake { 20%, 60% { transform:translateX(-8px); } 40%, 80% { transform:translateX(8px); } }
+.signin .err { text-align:center; min-height:20px; }
+.pad { display:grid; grid-template-columns:repeat(3, 72px); gap:14px 22px; justify-content:center; margin:8px 0 4px; }
+.pad button { width:72px; height:72px; border-radius:50%; font-size:28px; font-weight:500; padding:0; background:var(--card2); display:flex; align-items:center; justify-content:center; font-variant-numeric:tabular-nums; -webkit-tap-highlight-color:transparent; }
+.pad button:active { background:color-mix(in srgb, var(--card2) 60%, var(--fg) 20%); }
+.pad button[data-k=back] { background:transparent; font-size:24px; color:var(--dim); }
+.pad button[data-k=go] { font-size:17px; font-weight:700; }
+.pad .spin { width:20px; height:20px; }
+.signin .acts { justify-content:center; }
+/* the sign-in QR code */
+.qrbox { display:flex; align-items:center; justify-content:center; margin:6px auto 4px; min-width:248px; min-height:248px; width:max-content; background:#fff; border-radius:14px; padding:6px; }
+.qrbox svg { display:block; image-rendering:pixelated; }
+.qrbox.expired svg { opacity:.12; }
+.qrnote { text-align:center; line-height:1.5; }
+.qrbox .spin { border-color:#0002; border-top-color:#2563d6; }

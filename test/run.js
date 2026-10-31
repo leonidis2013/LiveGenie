@@ -481,6 +481,36 @@ test('wireless mics and in-ears: layouts saved, frequency and port checks, dashe
   assert.ok(Blk.RF_GEAR.receivers.find((g) => g.name === 'SLX-D4D').ch === 2);
 });
 
+test('sign-in QR links: once, for yourself (or anyone if admin), sign a phone in', async () => {
+  const anonLink = await anon.post('/api/links', {});
+  assert.strictEqual(anonLink.status, 401, 'you have to be signed in to make one');
+  let r = await vol.post('/api/links', {});
+  assert.strictEqual(r.status, 200);
+  assert.strictEqual(r.data.name, 'Val');
+  assert.ok(r.data.token.length >= 20 && r.data.expires > Date.now());
+  const users = (await admin.get('/api/users')).data.users;
+  const ed = users.find((u) => u.role === 'editor');
+  assert.strictEqual((await vol.post('/api/links', { user_id: ed.id })).status, 403, 'a volunteer cannot make one for someone else');
+  const phone = client();
+  let u = await phone.post('/api/links/use', { token: r.data.token });
+  assert.strictEqual(u.status, 200);
+  assert.strictEqual(u.data.user.name, 'Val');
+  assert.strictEqual((await phone.get('/api/state')).data.user.name, 'Val', 'the phone is signed in');
+  assert.strictEqual((await client().post('/api/links/use', { token: r.data.token })).status, 410, 'works only once');
+  assert.strictEqual((await client().post('/api/links/use', { token: 'nope' })).status, 410);
+  r = await admin.post('/api/links', { user_id: ed.id });
+  assert.strictEqual(r.data.name, ed.name, 'an admin can make one for anyone');
+  const phone2 = client();
+  await phone2.post('/api/links/use', { token: r.data.token });
+  assert.strictEqual((await phone2.get('/api/state')).data.role, 'editor');
+  assert.strictEqual((await admin.post('/api/links', { user_id: 99999 })).status, 404);
+  // the QR maker in the browser encodes a sign-in link
+  const QR = require(path.join(ROOT, 'public', 'qr.js'));
+  const m = QR.matrix('http://192.168.1.20:9090/#/link/' + r.data.token);
+  assert.ok(m.length >= 21 && m.length <= 57 && (m.length - 17) % 4 === 0, 'a small, valid QR size (' + m.length + ')');
+  assert.ok(QR.svg('x').startsWith('<svg'));
+});
+
 test('backup, then restore brings the data back after a restart', async () => {
   let r = await admin.post('/api/backups/now');
   assert.strictEqual(r.status, 200);

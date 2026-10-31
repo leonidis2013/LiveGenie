@@ -215,7 +215,7 @@ function paintHeader() {
   let vb = $('#vasbar');
   if (st.viewAs && !vb) {
     vb = document.createElement('div'); vb.id = 'vasbar'; vb.className = 'vasbar';
-    vb.innerHTML = '<span>' + icon('user') + 'You are seeing LiveGenie as a user sees it.</span><button type="button">Back to admin view</button>';
+    vb.innerHTML = '<span>' + icon('user') + '<span>Viewing as a user<span class="long"> · this is what users see</span></span></span><button type="button">Back to admin view</button>';
     vb.querySelector('button').addEventListener('click', () => Shell.setViewAs(false));
     document.body.appendChild(vb);
   } else if (!st.viewAs && vb) vb.remove();
@@ -490,25 +490,57 @@ function viewSignIn() {
 
 async function viewHome() {
   setTitle('');
-  const [d, t, devs] = await Promise.all([get('/api/home'), get('/api/todo'), loadDevices(true)]);
+  const [d, t, devs, pd] = await Promise.all([get('/api/home'), get('/api/todo'), loadDevices(true), get('/api/patch').catch(() => null)]);
   S.spaces = d.spaces;
-  const newBtn = can('admin') ? '<button class="primary btn" id="newPage">' + icon('plus') + 'New page</button>' : '';
-  const fresh = can('admin') && !d.spaces.length;
-  app.innerHTML = `
-    <div class="bar"><div class="grow">${S.state.org && S.state.org.name ? '<div class="pkicker homeorg">' + esc(S.state.org.name.toUpperCase()) + '</div>' : ''}</div>${newBtn}</div>
-    ${fresh ? '<div class="card welcome"><h2>Get started</h2><p>LiveGenie starts empty so it fits the way your team works. A few good first steps:</p><div class="wsteps">' +
+  const st = S.state, org = st.org || {}, u = st.user;
+  const admin = can('admin');
+  const fresh = admin && !d.spaces.length;
+  const now = new Date(), hr = now.getHours();
+  const hello = (hr < 12 ? 'Good morning' : hr < 18 ? 'Good afternoon' : 'Good evening') + (u ? ', ' + u.name.split(' ')[0] : '');
+  const doc = pd && pd.doc;
+  const checks = admin && doc && typeof PatchCore !== 'undefined' ? PatchCore.checks(doc).filter((c) => c.level !== 'note') : [];
+  const manuals = devs.reduce((n, x) => n + (x.files || 0), 0);
+  const tile = (href, ic, title, sub, cls) => '<a class="htile ' + (cls || '') + '" href="' + href + '"><span class="hti">' + icon(ic) + '</span><b>' + title + '</b><span>' + sub + '</span></a>';
+  const latestRow = (sp) => sp.latest ? '<a class="hsl" href="#/p/' + sp.latest.id + '">' + esc(sp.latest.title) + '<em>' + esc(ago(sp.latest.updated_at)) + '</em></a>' : '<span class="hsl none">No pages yet</span>';
+  const todoHtml = (list) => {
+    const open = list.filter((x) => !x.complete), done = list.filter((x) => x.complete);
+    if (!list.length) return '';
+    return '<section class="hsec htodo' + (open.some((x) => x.overdue) ? ' bad' : '') + '" id="todo"><div class="hsh"><h2>' + icon('check') + (open.length ? open.length + ' checklist' + (open.length === 1 ? '' : 's') + ' to finish' : 'All checklists done') + '</h2><a href="#/todo">Open To do ›</a></div>' +
+      '<div class="tstrip">' + open.map((x) => {
+        const n = x.total - x.left, pct = x.total ? Math.round(100 * n / x.total) : 0;
+        return '<a class="tcard' + (x.overdue ? ' overdue' : '') + '" href="#/p/' + x.page_id + '?c=' + esc(x.block_id) + '"><div class="tct"><b>' + esc(x.title) + '</b><span>' + esc(x.page_title) + '</span></div>' +
+          '<div class="tbar"><i style="width:' + pct + '%"></i></div><div class="tcf"><span>' + n + ' of ' + x.total + (x.overdue ? ' · overdue' : x.lastBy && n ? ' · ' + esc(x.lastBy) : '') + '</span><span class="tgo">Continue ›</span></div></a>';
+      }).join('') + done.map((x) => '<a class="tcard done" href="#/p/' + x.page_id + '?c=' + esc(x.block_id) + '"><div class="tct"><b>' + esc(x.title) + '</b><span>Done' + (x.completedBy ? ' by ' + esc(x.completedBy) : '') + '</span></div><span class="tok">' + icon('check') + '</span></a>').join('') + '</div></section>';
+  };
+  app.innerHTML = `<div class="home2">
+    <header class="hhero">
+      ${org.logo ? '<img class="hlogo" src="/api/org/logo" alt="">' : '<img class="hlogo mark" src="/icons/livegenie-mark.svg" alt="">'}
+      <div class="hht"><div class="hdate">${esc(now.toLocaleDateString([], { weekday: 'long', month: 'long', day: 'numeric' }))}</div><h1>${esc(hello)}</h1>${org.name ? '<div class="horg">' + esc(org.name) + '</div>' : ''}</div>
+      ${admin ? '<button class="primary btn" id="newPage">' + icon('plus') + 'New page</button>' : ''}
+    </header>
+    <form class="hsearch" id="hsF" role="search">${icon('search')}<input id="hsQ" type="search" placeholder="Search pages, gear, people, IP addresses…" autocomplete="off"></form>
+    ${fresh ? '<section class="card welcome"><h2>Get started</h2><p>LiveGenie starts empty so it fits the way your team works. A few good first steps:</p><div class="wsteps">' +
       '<a class="wstep" href="#/admin/spaces">' + icon('list') + '<b>Make your spaces</b><span>Audio, Video, Training… or add a starter set</span></a>' +
       '<a class="wstep" href="#/gear-setup">' + icon('spark') + '<b>Guided equipment setup</b><span>Console, stage boxes, wireless, in-ears, PA onto the stage patch</span></a>' +
       '<a class="wstep" href="#/admin/people">' + icon('users') + '<b>Add people</b><span>Admins build; users read and tick checklists</span></a>' +
-      '<a class="wstep" href="#/admin/church">' + icon('image') + '<b>Church name and logo</b><span>Shown on sign in and on every PDF</span></a></div></div>' : ''}
-    ${t.todo.length ? '<div class="section" id="todo"><h2>To do</h2><div class="list">' + t.todo.map(todoRow).join('') + '</div></div>' : ''}
-    ${d.pinned.length ? '<div class="section"><h2>Pinned</h2><div class="list">' + d.pinned.map((p) => pageRow(p, { showSpace: true, noPin: true })).join('') + '</div></div>' : ''}
-    <div class="section"><h2>Spaces</h2><div class="spaces">${d.spaces.map((s) => `<a class="space" href="#/s/${esc(s.slug)}" style="--sc:${esc(s.color || '#4c8dff')}"><i></i><b>${esc(s.name)}${s.admin_only ? ' ' + icon('lock') : ''}</b><span>${esc(s.blurb)}</span><em class="n">${s.pages} page${s.pages === 1 ? '' : 's'}</em></a>`).join('')}<a class="space devtile" href="#/devices"><i></i><b>Devices</b><span>Every device, its IP and where it is used</span><em class="n">${devs.length} device${devs.length === 1 ? '' : 's'}</em></a><a class="space patchtile" href="#/patch"><i></i><b>Stage patch</b><span>Every mic, wireless, stage box and speaker, drawn mic to speaker</span><em class="n">${icon('grid')}</em></a><a class="space maptile" href="#/map"><i></i><b>System map</b><span>Signal flow${can('admin') ? ', network and VLANs' : ''} drawn from the stage patch</span><em class="n">${icon('net')}</em></a></div></div>
-    <div class="section"><h2>Recently updated</h2>${d.recent.length ? '<div class="list">' + d.recent.map((p) => pageRow(p, { showSpace: true })).join('') + '</div>'
-      : '<div class="card empty">No pages yet.' + (can('admin') ? (d.spaces.length ? ' Start with the Sunday startup checklist or a page about the console.' : ' Make a space first, then add pages to it.') : ' The admins have not written any yet.') + '</div>'}</div>`;
+      '<a class="wstep" href="#/admin/church">' + icon('image') + '<b>Church name and logo</b><span>Shown on sign in and on every PDF</span></a></div></section>' : ''}
+    ${todoHtml(t.todo)}
+    <section class="htiles">
+      ${tile('#/patch', 'grid', 'Stage patch', doc ? doc.gear.length + ' pieces · ' + doc.cables.length + ' cables' : 'Mic to speaker', 'tpatch')}
+      ${tile('#/gear', 'box', 'Gear Locker', devs.length + ' piece' + (devs.length === 1 ? '' : 's') + (manuals ? ' · ' + manuals + ' manual' + (manuals === 1 ? '' : 's') : ''), 'tgear')}
+      ${tile('#/map', 'net', 'System map', admin ? 'Signal, network, VLANs' : 'Signal flow', 'tmap')}
+      ${admin ? tile(st.problems ? '#/admin/problems' : '#/patch', st.problems || checks.length ? 'alert' : 'check', st.problems || checks.length ? 'Needs attention' : 'All good',
+        [st.problems ? st.problems + ' problem' + (st.problems === 1 ? '' : 's') + ' reported' : '', checks.length ? checks.length + ' patch check' + (checks.length === 1 ? '' : 's') : ''].filter(Boolean).join(' · ') || 'No problems reported', st.problems || checks.length ? 'tattn' : 'tok') : ''}
+    </section>
+    ${d.pinned.length ? '<section class="hsec"><div class="hsh"><h2>' + icon('pin') + 'Pinned</h2></div><div class="hpins">' + d.pinned.map((p) => '<a class="hpin" href="#/p/' + p.id + '"><b>' + esc(p.title) + '</b><span>' + esc(p.space_name) + '</span></a>').join('') + '</div></section>' : ''}
+    ${d.spaces.length ? '<section class="hsec"><div class="hsh"><h2>' + icon('list') + 'Spaces</h2>' + (admin ? '<a href="#/admin/spaces">Manage ›</a>' : '') + '</div><div class="hspaces">' + d.spaces.map((sp) => '<div class="hspace" style="--sc:' + esc(sp.color || '#4c8dff') + '"><a class="hsh2" href="#/s/' + esc(sp.slug) + '"><i></i><b>' + esc(sp.name) + (sp.admin_only ? ' ' + icon('lock') : '') + '</b><em>' + sp.pages + '</em></a>' + (sp.blurb ? '<p>' + esc(sp.blurb) + '</p>' : '') + latestRow(sp) + '</div>').join('') + '</div></section>' : ''}
+    <section class="hsec"><div class="hsh"><h2>${icon('clock')}Recently updated</h2></div>${d.recent.length ? '<div class="hrecent">' + d.recent.slice(0, 8).map((p) => '<a href="#/p/' + p.id + '"><b>' + esc(p.title) + '</b><span>' + esc(p.space_name) + (p.updated_by ? ' · ' + esc(p.updated_by) : '') + '</span><em>' + esc(ago(p.updated_at)) + '</em></a>').join('') + '</div>'
+      : '<div class="card empty">No pages yet.' + (admin ? (d.spaces.length ? ' Start with the Sunday startup checklist or a page about the console.' : ' Make a space first, then add pages to it.') : ' The admins have not written any yet.') + '</div>'}</section>
+  </div>`;
   const nb = $('#newPage');
   if (nb) nb.addEventListener('click', () => { location.hash = '#/new'; });
-  // refresh the To do list while the home page is open
+  $('#hsF').addEventListener('submit', (e) => { e.preventDefault(); const q = $('#hsQ').value.trim(); if (q) location.hash = '#/search?q=' + encodeURIComponent(q); });
+  // refresh the To do strip while the home page is open
   const mine = app.firstElementChild;
   const timer = setInterval(async () => {
     if (!mine.isConnected) return clearInterval(timer);
@@ -516,10 +548,9 @@ async function viewHome() {
     try {
       const x = await get('/api/todo');
       if (!mine.isConnected) return;
-      const sec = $('#todo');
-      const html = x.todo.length ? '<h2>To do</h2><div class="list">' + x.todo.map(todoRow).join('') + '</div>' : '';
-      if (sec) { if (html) sec.innerHTML = html; else sec.remove(); }
-      else if (html) { const div = document.createElement('div'); div.className = 'section'; div.id = 'todo'; div.innerHTML = html; app.querySelector('.bar').after(div); }
+      const sec = $('#todo'), html = todoHtml(x.todo);
+      if (sec) { if (html) sec.outerHTML = html; else sec.remove(); }
+      else if (html) $('.hsearch', mine).insertAdjacentHTML('afterend', html);
     } catch (e) { /* offline banner */ }
   }, 30000);
 }
@@ -529,9 +560,9 @@ function todoRow(t) {
   const done = t.total - t.left;
   const status = t.complete ? '<span class="chip ok">Done' + (t.completedAt ? ' ' + esc(tmText(t.completedAt)) : '') + '</span>'
     : t.overdue ? '<span class="chip bad">Overdue</span>'
-    : t.dueAt ? '<span class="chip acc">Due ' + esc(tmText(t.dueAt)) + '</span>' : '<span class="chip acc">Today</span>';
+    : t.dueAt ? '<span class="chip acc">Due ' + esc(tmText(t.dueAt)) + '</span>' : t.scheduled ? '<span class="chip acc">Today</span>' : '<span class="chip warn">In progress</span>';
   const sub = t.complete ? 'Finished' + (t.completedBy ? ' by ' + esc(t.completedBy) : '') + ' · ' + esc(t.page_title)
-    : done + ' of ' + t.total + ' done · ' + esc(t.page_title) + (t.overdue ? ' · was due ' + esc(tmText(t.dueAt)) : '');
+    : done + ' of ' + t.total + ' done · ' + esc(t.page_title) + (t.overdue ? ' · was due ' + esc(tmText(t.dueAt)) : '') + (t.lastBy && done ? ' · last ticked by ' + esc(t.lastBy) + ' ' + esc(ago(t.lastAt)) : '');
   return '<a class="row todo' + (t.overdue ? ' overdue' : '') + (t.complete ? ' complete' : '') + '" href="#/p/' + t.page_id + '?c=' + esc(t.block_id) + '">' +
     '<span class="ring" style="--p:' + (t.total ? Math.round(100 * done / t.total) : 0) + '"></span>' +
     '<div class="t"><b>' + esc(t.title) + '</b><span>' + sub + '</span></div>' + status + '</a>';
@@ -541,9 +572,9 @@ function todoRow(t) {
 async function viewTodo() {
   setTitle('To do');
   const paint = (t) => '<div class="bar"><div class="grow"><h1 class="title" style="font-size:22px;letter-spacing:.06em;margin:4px 0 2px">To do</h1>' +
-    '<div class="note">Scheduled checklists, from their reset time until the end of the day</div></div></div>' +
+    '<div class="note">Checklists someone has started and not finished, and scheduled ones from their reset time until the end of the day</div></div></div>' +
     (t.todo.length ? '<div class="list">' + t.todo.map(todoRow).join('') + '</div>'
-      : '<div class="card empty">' + icon('check') + '<div style="margin-top:8px">Nothing to do right now.</div><div class="note" style="margin-top:4px">A checklist with an auto reset shows up here from its reset time, like Sundays at 6:00 AM.</div></div>');
+      : '<div class="card empty">' + icon('check') + '<div style="margin-top:8px">Nothing to do right now.</div><div class="note" style="margin-top:4px">A checklist shows up here once someone starts it, and a scheduled one from its reset time (like Sundays at 6:00 AM).</div></div>');
   app.innerHTML = '<div class="todov">' + paint(await get('/api/todo')) + '</div>';
   const mine = app.firstElementChild;
   const timer = setInterval(async () => {
@@ -926,7 +957,7 @@ async function viewAdmin(tab) {
   setTitle('Admin');
   const n = (S.state && S.state.problems) || 0;
   app.innerHTML = `<div class="crumbs"><a href="#/">Home</a><span>/</span></div><h1 class="title" style="font-size:22px;letter-spacing:.06em;margin:4px 0 12px">ADMIN</h1>
-    <div class="setup"><div class="side">${ADMIN_TABS.map((t) => '<button data-tab="' + t[0] + '" class="' + (t[0] === tab ? 'on' : '') + '">' + icon(t[2]) + t[1] + (t[0] === 'problems' && n ? '<em class="cnt bad">' + n + '</em>' : '') + '</button>').join('')}</div><div class="pane" id="pane"></div></div>`;
+    <div class="setup adminv"><div class="side">${ADMIN_TABS.map((t) => '<button data-tab="' + t[0] + '" class="' + (t[0] === tab ? 'on' : '') + '">' + icon(t[2]) + t[1] + (t[0] === 'problems' && n ? '<em class="cnt bad">' + n + '</em>' : '') + '</button>').join('')}</div><div class="pane" id="pane"></div></div>`;
   $$('[data-tab]').forEach((b) => b.addEventListener('click', () => { location.hash = '#/admin/' + b.dataset.tab; }));
   const pane = $('#pane');
   await ({ spaces: tabSpaces, people: tabUsers, problems: tabProblems, checklog: tabChecklog, church: tabChurch, notify: tabNotify, backups: tabBackups, trash: tabTrash, activity: tabActivity, reset: tabReset }[tab])(pane);
@@ -1350,8 +1381,8 @@ async function route() {
     else if (p[0] === 'map') await viewMap(p[1]);
     else if (p[0] === 'patch') await PatchView.view(qs);
     else if (p[0] === 'gear-setup') await viewGearSetup();
-    else if (p[0] === 'devices' && p[1] === 'new') await viewDeviceEdit(null);
-    else if (p[0] === 'devices') await viewDevices(qs);
+    else if ((p[0] === 'devices' || p[0] === 'gear') && p[1] === 'new') await viewDeviceEdit(null);
+    else if (p[0] === 'devices' || p[0] === 'gear') await viewDevices(qs);
     else if (p[0] === 'd' && p[1] && p[2] === 'edit') await viewDeviceEdit(p[1]);
     else if (p[0] === 'd' && p[1]) await viewDevice(p[1]);
     else if (p[0] === 'search') await viewSearch(qs.get('q') || '');

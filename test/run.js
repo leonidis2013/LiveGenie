@@ -609,6 +609,75 @@ test('stage patch: one drawing, saved with versions; lists, checks, search and m
   assert.strictEqual(pb[0].report, 'inputs'); assert.strictEqual(pb[0].filter, 'AR2412'); assert.strictEqual(pb[1].report, 'inputs', 'unknown lists fall back to inputs');
 });
 
+test('stage patch 0.16: cards have places, wireless systems hold their mics and packs, box channels are assigned by hand', async () => {
+  const P = require(path.join(ROOT, 'public', 'patchcore.js'));
+  const d = P.clean({});
+  const con = P.addGear(d, { kind: 'console', name: 'SQ-5', nin: 16, nout: 12 });
+  const sb = P.addGear(d, { kind: 'stagebox', name: 'AR2412', nin: 24, nout: 12, x: 300, y: 40 });
+  assert.deepStrictEqual(sb.chmap, {}, 'a new stage box lands on no console channels until someone assigns them');
+  P.connect(d, sb, 'link', con, 'link', { label: 'SLink' });
+  const rx = P.addGear(d, { kind: 'receiver', name: 'SLX-D4D', nin: 2 });
+  const mic = P.addMember(d, rx, { person: 'Sarah', use: 'Lead vocal', freq: '518.2' });
+  assert.strictEqual(P.hostOf(d, mic).id, rx.id, 'the mic lives in the receiver');
+  P.connect(d, rx, 0, sb, 22);
+  let ins = P.inputs(d).filter((r) => r.used);
+  assert.strictEqual(ins[0].ch, null, 'used but not assigned yet');
+  assert.ok(P.checks(d).some((c) => /not on a SQ-5 channel yet/.test(c.text)), 'an unassigned input is flagged');
+  P.assignChannels(sb, 22, 22, 23);
+  ins = P.inputs(d).filter((r) => r.used);
+  assert.deepStrictEqual([ins[0].ch, ins[0].up.source, ins[0].up.person], [23, 'Lead vocal', 'Sarah']);
+  const iem = P.addGear(d, { kind: 'iemtx', name: 'PTM-10' });
+  const pk = P.addMember(d, iem, { person: 'Mike', use: 'Drums' });
+  assert.strictEqual(P.members(d, iem)[0].g.id, pk.id);
+  // places and open cards survive cleaning; removing a receiver takes its mics with it
+  const c2 = P.clean(JSON.parse(JSON.stringify(d)));
+  assert.deepStrictEqual([c2.gear[1].x, c2.gear[1].y, c2.gear[1].chmap[22]], [300, 40, 23]);
+  P.removeGear(c2, rx.id);
+  assert.ok(!c2.gear.some((g) => g.id === mic.id), 'the mic went with its receiver');
+  // an older drawing (stage box "In 1 is console input N") keeps the channels of its used inputs only
+  const old = { gear: [{ id: 'c', kind: 'console', name: 'SQ-5' }, { id: 's', kind: 'stagebox', name: 'AR', start: 9, ins: ['In 1', 'In 2', 'In 3'], outs: [] }, { id: 'm', kind: 'mic', name: 'Kick' }],
+    cables: [{ a: 's', ap: 'link', b: 'c', bp: 'link' }, { a: 'm', ap: 0, b: 's', bp: 1 }] };
+  assert.deepStrictEqual(P.clean(old).gear[1].chmap, { 1: 10 });
+  // the server keeps all of it
+  let r = await admin.get('/api/patch');
+  r = await admin.put('/api/patch', { doc: d, baseVersion: r.data.version });
+  assert.strictEqual(r.status, 200);
+  const back = (await vol.get('/api/patch')).data.doc;
+  assert.strictEqual(back.gear.find((g) => g.name === 'AR2412').chmap[22], 23);
+  assert.strictEqual(back.gear.find((g) => g.id === mic.id).person, 'Sarah');
+  assert.ok((await vol.get('/api/search?q=sarah')).data.gear.some((g) => g.id === mic.id), 'search finds who uses a mic');
+});
+
+test('Gear Locker buckets: automatic, then the admin renames and orders them; To do shows checklists in progress', async () => {
+  let r = await admin.post('/api/devices', { name: 'Spare SM58', category: 'audio', make: 'Shure', model: 'SM58', bucket: 'Spares' });
+  const id = r.data.id;
+  r = await vol.get('/api/devices');
+  assert.strictEqual(r.data.devices.find((x) => x.id === id).bucket, 'Spares');
+  assert.strictEqual((await vol.put('/api/devices/buckets', { buckets: ['X'] })).status, 403, 'only admins change buckets');
+  r = await admin.put('/api/devices/buckets', { buckets: ['Mics & wireless', 'Closet spares'], renames: { Spares: 'Closet spares' } });
+  assert.deepStrictEqual(r.data.buckets, ['Mics & wireless', 'Closet spares']);
+  r = await vol.get('/api/devices');
+  assert.strictEqual(r.data.devices.find((x) => x.id === id).bucket, 'Closet spares', 'renaming a bucket moves its gear');
+  assert.deepStrictEqual(r.data.buckets, ['Mics & wireless', 'Closet spares']);
+  // editing the card without a bucket keeps it
+  const dev = (await admin.get('/api/devices/' + id)).data.device; delete dev.bucket;
+  await admin.put('/api/devices/' + id, { ...dev, location: 'Closet' });
+  assert.strictEqual((await vol.get('/api/devices')).data.devices.find((x) => x.id === id).bucket, 'Closet spares');
+  await admin.put('/api/devices/buckets', { buckets: ['Mics & wireless'] });
+  assert.strictEqual((await vol.get('/api/devices')).data.devices.find((x) => x.id === id).bucket, '', 'a removed bucket sends its gear back to automatic');
+  // a checklist with no schedule shows on To do once started, until finished
+  r = await admin.post('/api/pages', { title: 'Strike', space: 'audio', blocks: [{ type: 'checklist', title: 'Strike the stage', items: ['Coil cables', 'Cover desk'] }] });
+  const pid = r.data.id;
+  const bid = (await admin.get('/api/pages/' + pid)).data.page.blocks[0].id;
+  const has = async () => (await vol.get('/api/todo')).data.todo.some((t) => t.page_id === pid);
+  assert.strictEqual(await has(), false, 'not started: not on To do');
+  await vol.post('/api/pages/' + pid + '/checklists/' + bid + '/tick', { item: 'Coil cables', done: true });
+  assert.strictEqual(await has(), true, 'started: on To do');
+  assert.ok((await vol.get('/api/state')).data.todo.open >= 1, 'the To do count includes it');
+  await vol.post('/api/pages/' + pid + '/checklists/' + bid + '/tick', { item: 'Cover desk', done: true });
+  assert.strictEqual(await has(), false, 'finished: off To do');
+});
+
 test('old patch lists move onto the stage patch once, and pages keep a live list in their place', async () => {
   const os2 = require('os'), fs2 = require('fs');
   const dir = fs2.mkdtempSync(path.join(os2.tmpdir(), 'lg-conv-'));

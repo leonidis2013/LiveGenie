@@ -58,8 +58,7 @@ async function viewGearSetup() {
   function addBox(model) {
     const g = GEAR.boxes.find((x) => x.model === model) || { model: model || '', make: '', inputs: 16, outputs: 8, link: linkFor() };
     const same = st.boxes.filter((b) => b.model === g.model).length;
-    const start = st.boxes.reduce((n, b) => Math.max(n, Number(b.start) + Number(b.inputs)), 1);
-    st.boxes.push({ model: g.model, make: g.make, name: g.model + (same ? ' #' + (same + 1) : ''), location: same ? 'Stage right' : 'Stage', link: g.link || linkFor(), inputs: g.inputs, outputs: g.outputs, start });
+    st.boxes.push({ model: g.model, make: g.make, name: g.model + (same ? ' #' + (same + 1) : ''), location: same ? 'Stage right' : 'Stage', link: g.link || linkFor(), inputs: g.inputs, outputs: g.outputs });
   }
 
   function render() {
@@ -77,7 +76,7 @@ async function viewGearSetup() {
           <label>IP address<input data-c="ip" class="mono" inputmode="decimal" value="${sv(st.console, 'ip')}" placeholder="optional"></label>
         </div>${known(st.console.name) ? '<p class="note">A card called ' + esc(st.console.name) + ' already exists; it will be kept and its input and output counts filled in if missing.</p>' : ''}`;
     } else if (st.step === 1) {
-      body = `<p class="note">Add each stage box. LiveGenie makes one row per stage box input and output, already wired to the ${esc(st.console.name)} over the link, so later you only assign what plugs in.</p>
+      body = `<p class="note">Add each stage box. LiveGenie adds it to the stage patch, linked to the ${esc(st.console.name)}. Which console channel each box input lands on is up to you: assign them in the stage patch.</p>
         ${st.boxes.map((b, i) => `<div class="gbox" data-i="${i}"><div class="gbh"><b>Stage box ${i + 1}</b><button type="button" class="ghost danger" data-rm="${i}">${icon('x')}</button></div><div class="gform">
           <label>Model<select data-b="model">${GEAR.boxes.map((g) => '<option' + (g.model === b.model ? ' selected' : '') + '>' + g.model + '</option>').join('')}<option value=""${GEAR.boxes.some((g) => g.model === b.model) ? '' : ' selected'}>Other…</option></select></label>
           <label>Name<input data-b="name" value="${sv(b, 'name')}"></label>
@@ -85,12 +84,11 @@ async function viewGearSetup() {
           <label>Link to console<input data-b="link" value="${sv(b, 'link')}"></label>
           <label>Inputs<input data-b="inputs" type="number" min="0" max="128" value="${sv(b, 'inputs')}"></label>
           <label>Outputs<input data-b="outputs" type="number" min="0" max="128" value="${sv(b, 'outputs')}"></label>
-          <label>Console input for box input 1<input data-b="start" type="number" min="1" value="${sv(b, 'start')}"></label>
         </div></div>`).join('') || '<div class="card empty" style="padding:20px">No stage boxes yet.</div>'}
         <div class="adder"><span class="note">Add</span>${GEAR.boxes.slice(0, 5).map((g) => '<button type="button" class="btn" data-add="' + g.model + '">' + icon('plus') + g.model + '</button>').join('')}<button type="button" class="btn" data-add="">${icon('plus')}Other</button></div>
         <p class="note">No stage box? Skip this step: everything plugs straight into the console.</p>`;
     } else if (st.step === 2) {
-      body = '<p class="note">Tick the rest of the gear you have. Each becomes a device card you can add a photo, IP and notes to later.</p>' +
+      body = '<p class="note">Tick the rest of the gear you have. Each gets a Gear Locker card you can add a photo, IP and notes to later.</p>' +
         GEAR.other.map((g) => '<div class="ggroup"><b>' + g.group + '</b><div class="gchips">' + g.items.map((it) => {
           const sel = st.other.find((o) => o.name === it.name), on = !!sel;
           const sub = it.ch ? it.ch + ' ch' : it.tx > 1 ? it.tx + ' transmitters' : '';
@@ -107,13 +105,13 @@ async function viewGearSetup() {
       const lists = [...st.boxes.map((b) => esc(b.name) + ': ' + b.inputs + ' inputs, ' + b.outputs + ' outputs'), rxCh ? 'Wireless mics: ' + rxCh + ' receiver channels' : '', iemTx ? 'In-ears: ' + iemTx + ' transmitter' + (iemTx === 1 ? '' : 's') : ''].filter(Boolean);
       const fresh = cards.filter((n) => !known(n)), kept = cards.filter((n) => known(n));
       const proc = st.other.filter((o) => o.role === 'processor'), amps = st.other.filter((o) => o.role === 'amp'), spk = st.other.filter((o) => o.role === 'speaker');
-      body = `<div class="card" style="margin:0 0 12px"><h2>Device cards</h2>
+      body = `<div class="card" style="margin:0 0 12px"><h2>Gear Locker cards</h2>
           ${fresh.length ? '<p>New: ' + fresh.map((n) => '<span class="chip">' + esc(n) + '</span>').join(' ') + '</p>' : ''}
           ${kept.length ? '<p class="note">Already have: ' + kept.map(esc).join(', ') + ' (kept, input and output counts filled in if missing)</p>' : ''}</div>
         <label class="tog ${st.page ? 'on' : ''} gopt"><input type="checkbox" data-opt="page"${st.page ? ' checked' : ''}><span><b>Put it on the stage patch</b><br><span class="note">${lists.length ? lists.join(' · ') + '. Then add your mics and draw the cables.' : 'Draws the console and the rest of your gear on the stage patch.'}</span></span></label>
         <label class="tog ${st.cables ? 'on' : ''} gopt"><input type="checkbox" data-opt="cables"${st.cables ? ' checked' : ''}${proc.length || amps.length ? '' : ' disabled'}><span><b>Wire up the PA</b><br><span class="note">${proc.length || amps.length ? 'A starting point: ' + esc([st.console.name, ...proc.map((x) => x.name), ...amps.map((x) => x.name), ...spk.map((x) => x.name)].join(' → ')) + '. Check it against your rack.' : 'Tick a speaker processor or amplifier to get this'}</span></span></label>`;
     }
-    app.innerHTML = `<div class="ed gsetup"><div class="crumbs"><a href="#/">Home</a><span>/</span><a href="#/devices">Devices</a><span>/</span><span>Guided setup</span></div>
+    app.innerHTML = `<div class="ed gsetup"><div class="crumbs"><a href="#/">Home</a><span>/</span><a href="#/gear">Gear Locker</a><span>/</span><span>Guided setup</span></div>
       <h1 class="title" style="font-size:22px;margin:6px 0 10px">Guided equipment setup</h1>
       <div class="gsteps">${STEPS.map((t, i) => '<button type="button" data-step="' + i + '" class="' + (i === st.step ? 'on' : i < st.step ? 'done' : '') + '"><i>' + (i + 1) + '</i>' + t + '</button>').join('')}</div>
       <div class="card">${body}</div>
@@ -124,7 +122,7 @@ async function viewGearSetup() {
   function wire() {
     $$('[data-step]').forEach((x) => x.addEventListener('click', () => { st.step = Number(x.dataset.step); render(); }));
     const back = $('#gback'); if (back) back.addEventListener('click', () => { st.step--; render(); });
-    const cancel = $('#gcancel'); if (cancel) cancel.addEventListener('click', () => { location.hash = '#/devices'; });
+    const cancel = $('#gcancel'); if (cancel) cancel.addEventListener('click', () => { location.hash = '#/gear'; });
     $('#gnext').addEventListener('click', () => { if (st.step < 3) { if (st.step === 0 && !st.console.name.trim()) return toast('Give the console a name', 'bad'); st.step++; render(); } else create(); });
     $$('[data-c]').forEach((x) => x.addEventListener(x.tagName === 'SELECT' ? 'change' : 'input', () => {
       const k = x.dataset.c;
@@ -198,14 +196,14 @@ async function viewGearSetup() {
         else ids[o.name] = await upsert({ name: o.name, category: 'audio', make: o.make, model: o.model });
       }
       forgetDevices();
-      if (!st.page) { toast('Device cards ready', 'ok'); location.hash = '#/devices'; return; }
+      if (!st.page) { toast('Gear Locker cards ready', 'ok'); location.hash = '#/gear'; return; }
       // put it all on the stage patch drawing (adding to what is there; gear already on it is kept)
       const cur = await get('/api/patch');
       const doc = cur.doc;
       const place = (item) => P.findGear(doc, item.name) || P.addGear(doc, item);
-      const con = place({ kind: 'console', name: c.name.trim(), make: c.make, model: c.model || c.name, nin: Number(c.inputs) || 0, nout: Number(c.outputs) || 0, device_id: ids[c.name.trim()], localstart: st.boxes.reduce((m, b) => Math.max(m, Number(b.start) + Number(b.inputs)), 1) });
+      const con = place({ kind: 'console', name: c.name.trim(), make: c.make, model: c.model || c.name, nin: Number(c.inputs) || 0, nout: Number(c.outputs) || 0, device_id: ids[c.name.trim()] });
       for (const b of st.boxes) {
-        const sb = place({ kind: 'stagebox', name: b.name.trim(), make: b.make, model: b.model || b.name, nin: Number(b.inputs) || 0, nout: Number(b.outputs) || 0, start: Number(b.start) || 1, device_id: ids[b.name.trim()] });
+        const sb = place({ kind: 'stagebox', name: b.name.trim(), make: b.make, model: b.model || b.name, nin: Number(b.inputs) || 0, nout: Number(b.outputs) || 0, device_id: ids[b.name.trim()] });
         if (!doc.cables.some((x) => x.ap === 'link' && ((x.a === sb.id && x.b === con.id) || (x.b === sb.id && x.a === con.id)))) P.connect(doc, sb, 'link', con, 'link', { label: b.link });
       }
       for (const o of st.other) {

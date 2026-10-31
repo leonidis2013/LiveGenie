@@ -579,7 +579,7 @@ const Blk = (() => {
         '<button type="button" class="btn ghost" data-paste>Paste rows</button><button type="button" class="btn ghost" data-cols>Columns</button>' +
         (spare ? '<button type="button" class="btn ghost" data-spares>' + (showSpare ? 'Hide' : 'Show') + ' ' + spare + ' spare</button>' : '') +
         '<span class="note grow">Wire trace: ' + esc(traceTxt) + '</span><button type="button" class="btn ghost" data-trace>Trace path</button></div>' +
-        '<div class="mdhelp">Enter moves down. Names suggest themselves from this list and the device library. ⋯ on a row: duplicate it for a double patch, ' + (isSnake() ? 'make it spare' : 'insert a row') + ', move or delete it.</div>';
+        '<div class="mdhelp">Enter moves down. Names suggest themselves from this list and the Gear Locker. ⋯ on a row: duplicate it for a double patch, ' + (isSnake() ? 'make it spare' : 'insert a row') + ', move or delete it.</div>';
       wireTop();
       markDups();
       host.querySelectorAll('input[data-r]').forEach((f) => f.addEventListener('input', () => {

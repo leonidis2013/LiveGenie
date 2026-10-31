@@ -359,10 +359,15 @@ async function api(req, res, url, user, token) {
   if (a === 'devices') {
     if (m === 'GET' && !b) {
       const fileCount = adm.fileCounts();
-      return send(res, 200, { ok: true, categories: Devices.CATEGORIES, devices: devices.list(user).map((d) => ({
-        id: d.id, name: d.name, aliases: d.aliases, category: d.category, make: d.make, model: d.model, location: d.location,
+      // what each one is on the stage patch: sorts it into a Gear Locker bucket
+      const pk = new Map();
+      for (const g of patch.get().doc.gear) if (g.device_id) { if (!pk.has(g.device_id)) pk.set(g.device_id, g.kind); }
+      let buckets = []; try { buckets = JSON.parse(store.getSetting('gear_buckets', '[]')); } catch (e) { /* default */ }
+      return send(res, 200, { ok: true, categories: Devices.CATEGORIES, buckets, devices: devices.list(user).map((d) => ({
+        id: d.id, name: d.name, aliases: d.aliases, category: d.category, make: d.make, model: d.model, location: d.location, bucket: d.bucket, kind: pk.get(d.id) || '',
         ips: d.ips, photo: d.photo, tech_only: d.tech_only, inputs: d.inputs, outputs: d.outputs, files: fileCount.get(d.id) || 0 })) });
     }
+    if (m === 'PUT' && b === 'buckets') { need(user, 'admin'); const body = await readJson(req); return send(res, 200, { ok: true, buckets: devices.setBuckets(body.buckets, body.renames, user, store.setSetting) }); }
     if (m === 'GET' && b === 'suggestions') { need(user, 'admin'); return send(res, 200, { ok: true, suggestions: devices.suggestions(user) }); }
     if (m === 'POST' && b === 'import') { need(user, 'admin'); const body = await readJson(req); return send(res, 200, { ok: true, made: devices.importFromLists(body.names, user) }); }
     if (m === 'POST' && !b) { need(user, 'admin'); return send(res, 200, { ok: true, id: devices.add(await readJson(req), user, uploadExists) }); }

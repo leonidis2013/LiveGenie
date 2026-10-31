@@ -107,7 +107,7 @@ function drawMap(host, data, view) {
     host.innerHTML = '<div class="card empty" style="text-align:left;max-width:720px">' + (view === 'signal'
       ? '<b>Nothing to draw yet.</b><p>The signal map draws an arrow for every cable on the <a href="#/patch">stage patch</a> between two pieces of gear that have device cards (the SQ-5, the AR2412, the DriveRack PA2). Big gear added to the stage patch from its catalog gets a device card by itself; for other gear, open it on the stage patch and choose <b>Make a device card</b>.</p>'
       : '<b>No network links yet.</b><p>Open a device card, choose Edit, and set <b>Plugged into</b> (the switch or router it connects to) and the port. Start with the switches: USW-16-PoE into the UDM Pro, the FOH switch into the USW-16-PoE, and so on.</p>') +
-      '<p><a href="#/patch">Open the stage patch</a> · <a href="#/devices">Open the device library</a></p></div>' + trayHtml(tray);
+      '<p><a href="#/patch">Open the stage patch</a> · <a href="#/gear">Open the Gear Locker</a></p></div>' + trayHtml(tray);
     return;
   }
   const saved = (data.layouts && data.layouts[view]) || {};
@@ -206,7 +206,7 @@ function drawMap(host, data, view) {
       (n.location ? '<div class="sr"><span>Location</span><div>' + esc(n.location) + '</div></div>' : '') +
       (n.ips.length ? '<div class="sr"><span>IP</span><div>' + n.ips.map((ip) => '<a class="mono" href="http://' + esc(ip) + '" target="_blank" rel="noopener">' + esc(ip) + '</a>').join('<br>') + '</div></div>' : '') +
       (n.vlans.length ? '<div class="sr"><span>VLAN</span><div>' + n.vlans.map((v) => { const x = data.vlans.find((y) => y.vid === v); return '<span class="chip"><i class="sw" style="background:' + esc(vColor.get(v)) + '"></i>' + v + (x ? ' ' + esc(x.name) : '') + '</span>'; }).join(' ') + '</div></div>' : '') +
-      rows + '<a class="btn primary" style="margin-top:10px;justify-content:center" href="#/d/' + id + '">Open device card</a>';
+      rows + '<a class="btn primary" style="margin-top:10px;justify-content:center" href="#/d/' + id + '">Open gear card</a>';
     box.classList.remove('hide');
     box.querySelector('.mx').addEventListener('click', () => { st.sel = null; highlight(); side(null); });
     box.querySelectorAll('[data-go]').forEach((a) => a.addEventListener('click', (ev) => { ev.preventDefault(); select(Number(a.dataset.go), true); }));

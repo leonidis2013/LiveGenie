@@ -5,13 +5,41 @@
 'use strict';
 
 const CAT = { audio: 'Audio', video: 'Video', lighting: 'Lighting', network: 'Network', computer: 'Computer', power: 'Power', other: 'Other' };
-const DEV = { list: null, at: 0, dm: null, loading: null };
+const DEV = { list: null, at: 0, dm: null, loading: null, buckets: [] };
+
+/*
+ * Gear Locker buckets. Gear sorts itself by what it is (its kind on the stage patch, else its model and category);
+ * an admin can move a piece to another bucket, rename, reorder or add buckets.
+ */
+const AUTO_BUCKETS = ['Mics & wireless', 'In-ears', 'Stage I/O', 'Mixing', 'Processing', 'Amps', 'Speakers & monitors', 'Video', 'Lighting', 'Network', 'Computers', 'Power', 'Other'];
+const BUCKET_OF_KIND = { mic: 'Mics & wireless', di: 'Mics & wireless', txmic: 'Mics & wireless', receiver: 'Mics & wireless', source: 'Other', iemtx: 'In-ears', bodypack: 'In-ears', headamp: 'In-ears',
+  stagebox: 'Stage I/O', network: 'Network', console: 'Mixing', computer: 'Computers', processor: 'Processing', amp: 'Amps', speaker: 'Speakers & monitors', wedge: 'Speakers & monitors' };
+function autoBucket(d) {
+  if (d.kind && BUCKET_OF_KIND[d.kind]) return BUCKET_OF_KIND[d.kind];
+  const t = (d.make + ' ' + d.model + ' ' + d.name).toLowerCase();
+  if (/slx|ulx|qlx|axient|\bad4|ew-?dx|wireless|sm58|beta ?5|sm57|beta ?91|ksm|\bmic\b|\bdi\b/.test(t)) return 'Mics & wireless';
+  if (/psm|iem|ptm-|in-?ear|p3r|p9ra/.test(t)) return 'In-ears';
+  if (/ar2412|ar84|ab168|dx168|\bs16\b|\bs32\b|dl16|dl32|rio|tio|stage ?box|snake/.test(t)) return 'Stage I/O';
+  if (/\bsq-?\d|x32|m32|tf\d|dm7|console|mixer|qu-|dlive|avantis/.test(t)) return 'Mixing';
+  if (/driverack|venu|dsp|processor|crossover/.test(t)) return 'Processing';
+  if (/crown|xli|xls|amplifier|\bamp\b|powersoft|qsc gx|qsc plx/.test(t)) return 'Amps';
+  if (/cbt|dxs|dxr|speaker|sub|wedge|monitor|k12|k10|elx|ekx/.test(t)) return 'Speakers & monitors';
+  return { video: 'Video', lighting: 'Lighting', network: 'Network', computer: 'Computers', power: 'Power', audio: 'Other', other: 'Other' }[d.category] || 'Other';
+}
+const bucketOf = (d) => d.bucket || autoBucket(d);
+/** Every bucket name in order: the admin's list first, then automatic ones that have gear. */
+function bucketOrder(list) {
+  const out = (DEV.buckets || []).slice();
+  AUTO_BUCKETS.forEach((b) => { if (!out.includes(b) && list.some((d) => bucketOf(d) === b)) out.push(b); });
+  list.forEach((d) => { const b = bucketOf(d); if (!out.includes(b)) out.push(b); });
+  return out;
+}
 
 async function loadDevices(force) {
   if (!force && DEV.list && Date.now() - DEV.at < 30000) return DEV.list;
   if (DEV.loading) return DEV.loading;
   DEV.loading = get('/api/devices').then((d) => {
-    DEV.list = d.devices; DEV.at = Date.now();
+    DEV.list = d.devices; DEV.buckets = d.buckets || []; DEV.at = Date.now();
     DEV.dm = DevMatch.build(d.devices);
     return DEV.list;
   }).catch(() => DEV.list || []).finally(() => { DEV.loading = null; });
@@ -81,37 +109,85 @@ function devThumb(d, size) {
     : '<span class="dthumb" style="width:' + s + 'px;height:' + s + 'px">' + esc(d.name.replace(/[^\p{L}\p{N}]/gu, '').slice(0, 2).toUpperCase()) + '</span>';
 }
 
-// ---------- the library ----------
+// ---------- the Gear Locker ----------
 async function viewDevices(qs) {
-  setTitle('Devices');
+  setTitle('Gear Locker');
   const list = await loadDevices(true);
-  let cat = qs.get('cat') || '';
+  let bk = qs.get('b') || '';
   let q = '';
+  let shut = {}; try { shut = JSON.parse(localStorage.getItem('lg-gl-shut') || '{}'); } catch (e) { /* private mode */ }
   const sug = can('admin') ? (await get('/api/devices/suggestions')).suggestions : [];
+  // who uses a piece of gear, from the stage patch (a mic, a pack)
+  let users = new Map();
+  try { const doc = await PatchView.load(); doc.gear.forEach((g) => { if (g.device_id && (g.person || g.use)) users.set(g.device_id, g.person || g.use); }); } catch (e) { /* the patch is optional */ }
+  const order = bucketOrder(list);
   app.innerHTML = `<div class="crumbs"><a href="#/">Home</a><span>/</span></div>
-    <div class="bar"><div class="grow"><h1 class="title" style="font-size:22px;letter-spacing:.06em;margin:4px 0 2px">DEVICES</h1>
-      <div class="note">Every device name, nickname or IP address typed on a page links to its card here.</div></div>
-      ${can('admin') ? '<a class="btn" href="#/gear-setup">' + icon('spark') + 'Guided setup</a>' : ''}
-      ${sug.length ? '<button class="btn" id="imp">' + icon('net') + 'Create from IP lists (' + sug.length + ')</button>' : ''}
-      ${can('admin') ? '<button class="primary btn" id="newDev">' + icon('plus') + 'New device</button>' : ''}</div>
-    <div class="bar"><input type="search" id="dq" placeholder="Filter by name, model, location or IP" style="flex:1;min-width:200px">
-      <div class="seg" id="dcat"><button data-c="" class="on">All</button>${Object.keys(CAT).filter((k) => list.some((d) => d.category === k)).map((k) => '<button data-c="' + k + '">' + CAT[k] + '</button>').join('')}</div></div>
+    <div class="bar"><div class="grow"><h1 class="title" style="font-size:22px;letter-spacing:.06em;margin:4px 0 2px">GEAR LOCKER</h1>
+      <div class="note">Every piece of gear, sorted into buckets. Its name, nickname or IP typed on a page links to its card here.</div></div>
+      ${can('admin') ? '<a class="btn" href="#/gear-setup">' + icon('spark') + '<span class="hide-sm">Guided setup</span></a>' : ''}
+      ${can('admin') ? '<button class="btn" id="gBk">' + icon('list') + '<span class="hide-sm">Buckets</span></button>' : ''}
+      ${sug.length ? '<button class="btn" id="imp">' + icon('net') + 'From IP lists (' + sug.length + ')</button>' : ''}
+      ${can('admin') ? '<button class="primary btn" id="newDev">' + icon('plus') + 'Add gear</button>' : ''}</div>
+    <div class="bar"><input type="search" id="dq" placeholder="Find gear: name, model, location, IP or who uses it" style="flex:1;min-width:200px"></div>
+    <div class="gchips" id="dcat"><button data-b="" class="chipb on">All <em>${list.length}</em></button>${order.filter((b) => list.some((d) => bucketOf(d) === b)).map((b) => '<button class="chipb" data-b="' + esc(b) + '">' + esc(b) + ' <em>' + list.filter((d) => bucketOf(d) === b).length + '</em></button>').join('')}</div>
     <div id="dgrid"></div>`;
+  const cardHtml = (d) => '<a class="dcard" href="#/d/' + d.id + '">' + devThumb(d, 46) +
+    '<div class="t"><b>' + esc(d.name) + '</b><span>' + esc([d.make, d.model].filter(Boolean).join(' ') || CAT[d.category]) + '</span>' +
+    '<span class="dmeta">' + [d.location ? icon('pin') + esc(d.location) : '', d.ips.length ? '<span class="mono">' + esc(d.ips[0]) + '</span>' + (d.ips.length > 1 ? ' +' + (d.ips.length - 1) : '') : '', users.get(d.id) ? icon('user') + esc(users.get(d.id)) : ''].filter(Boolean).join('<i>·</i>') + '</span></div>' +
+    '<div class="dbadges">' + (d.files ? '<span class="badge" title="' + d.files + ' manual' + (d.files === 1 ? '' : 's') + '">' + icon('pdf') + d.files + '</span>' : '') + (d.tech_only ? '<span class="badge tech">Tech only</span>' : '') + '</div></a>';
   const paint = () => {
     const words = q.toLowerCase().split(/\s+/).filter(Boolean);
-    const shown = list.filter((d) => (!cat || d.category === cat) && words.every((w) => [d.name, ...d.aliases, d.make, d.model, d.location, ...d.ips].join(' ').toLowerCase().includes(w)));
-    $('#dgrid').innerHTML = shown.length ? '<div class="dgrid">' + shown.map((d) => '<a class="dcard" href="#/d/' + d.id + '">' + devThumb(d, 46) +
-      '<div class="t"><b>' + esc(d.name) + '</b><span>' + esc([d.make, d.model].filter(Boolean).join(' ') || CAT[d.category]) + '</span>' +
-      '<span>' + esc(d.location) + (d.location && d.ips.length ? ' · ' : '') + (d.ips.length ? '<span class="mono">' + esc(d.ips[0]) + '</span>' + (d.ips.length > 1 ? ' +' + (d.ips.length - 1) : '') : '') + '</span></div>' +
-      (d.tech_only ? '<span class="badge tech">Tech only</span>' : '') + '</a>').join('') + '</div>'
-      : '<div class="card empty">' + (list.length ? 'No devices match.' : 'No devices yet.' + (can('admin') ? ' Try the <a href="#/gear-setup">guided setup</a>, or add the SQ-5, the DriveRack PA2 or a stage box' + (sug.length ? ', or create cards from the names already in your IP lists' : '') + '.' : '')) + '</div>';
+    const shown = list.filter((d) => (!bk || bucketOf(d) === bk) && words.every((w) => [d.name, ...d.aliases, d.make, d.model, d.location, ...d.ips, users.get(d.id) || '', bucketOf(d)].join(' ').toLowerCase().includes(w)));
+    if (!shown.length) {
+      $('#dgrid').innerHTML = '<div class="card empty">' + (list.length ? 'No gear matches.' : 'The Gear Locker is empty.' + (can('admin') ? ' Try the <a href="#/gear-setup">guided setup</a>, or add the SQ-5, the DriveRack PA2 or a stage box' + (sug.length ? ', or make cards from the names already in your IP lists' : '') + '.' : '')) + '</div>';
+      return;
+    }
+    $('#dgrid').innerHTML = order.map((b) => {
+      const inB = shown.filter((d) => bucketOf(d) === b);
+      if (!inB.length) return '';
+      const closed = !bk && !words.length && shut[b];
+      return '<section class="gbucket' + (closed ? ' shut' : '') + '"><button type="button" class="gbh" data-shut="' + esc(b) + '"><span>' + esc(b) + '</span><em>' + inB.length + '</em><i>' + (closed ? '▸' : '▾') + '</i></button>' +
+        (closed ? '' : '<div class="dgrid">' + inB.map(cardHtml).join('') + '</div>') + '</section>';
+    }).join('');
+    $$('[data-shut]').forEach((x) => x.addEventListener('click', () => { const b = x.dataset.shut; shut[b] = !shut[b]; try { localStorage.setItem('lg-gl-shut', JSON.stringify(shut)); } catch (e) { /* private mode */ } paint(); }));
   };
-  if (cat && !$('#dcat [data-c="' + cat + '"]')) cat = '';
-  $$('#dcat button').forEach((b) => { b.classList.toggle('on', b.dataset.c === cat); b.addEventListener('click', () => { cat = b.dataset.c; $$('#dcat button').forEach((x) => x.classList.toggle('on', x === b)); paint(); }); });
+  if (bk && !$('#dcat [data-b="' + CSS.escape(bk) + '"]')) bk = '';
+  $$('#dcat button').forEach((b) => { b.classList.toggle('on', b.dataset.b === bk); b.addEventListener('click', () => { bk = b.dataset.b; $$('#dcat button').forEach((x) => x.classList.toggle('on', x === b)); paint(); }); });
   $('#dq').addEventListener('input', (e) => { q = e.target.value; paint(); });
-  const nb = $('#newDev'); if (nb) nb.addEventListener('click', () => { location.hash = '#/devices/new'; });
+  const nb = $('#newDev'); if (nb) nb.addEventListener('click', () => { location.hash = '#/gear/new' + (bk ? '?b=' + encodeURIComponent(bk) : ''); });
   const ib = $('#imp'); if (ib) ib.addEventListener('click', () => importDialog(sug));
+  const gb = $('#gBk'); if (gb) gb.addEventListener('click', () => bucketsDialog(list));
   paint();
+}
+
+/** Admin: rename, reorder, add or remove buckets. */
+function bucketsDialog(list) {
+  const rows = bucketOrder(list).map((b) => ({ name: b, was: b, n: list.filter((d) => bucketOf(d) === b).length }));
+  const paint = (w) => {
+    $('#bkl', w).innerHTML = rows.map((r, i) => '<div class="bkrow"><input data-i="' + i + '" value="' + esc(r.name) + '" maxlength="40"><span class="note">' + r.n + '</span>' +
+      '<button type="button" class="ghost xs" data-up="' + i + '"' + (i ? '' : ' disabled') + '>' + icon('up') + '</button><button type="button" class="ghost xs" data-dn="' + i + '"' + (i < rows.length - 1 ? '' : ' disabled') + '>' + icon('down') + '</button>' +
+      '<button type="button" class="ghost xs danger" data-rm="' + i + '" title="Remove (its gear goes back to its automatic bucket)">' + icon('x') + '</button></div>').join('');
+    $$('[data-i]', w).forEach((x) => x.addEventListener('input', () => { rows[Number(x.dataset.i)].name = x.value; }));
+    $$('[data-up]', w).forEach((x) => x.addEventListener('click', () => { const i = Number(x.dataset.up); [rows[i - 1], rows[i]] = [rows[i], rows[i - 1]]; paint(w); }));
+    $$('[data-dn]', w).forEach((x) => x.addEventListener('click', () => { const i = Number(x.dataset.dn); [rows[i + 1], rows[i]] = [rows[i], rows[i + 1]]; paint(w); }));
+    $$('[data-rm]', w).forEach((x) => x.addEventListener('click', () => { rows.splice(Number(x.dataset.rm), 1); paint(w); }));
+  };
+  modal('<h3>Gear Locker buckets</h3><p class="note">Gear sorts itself into these by what it is. Rename or reorder them, add your own (Spares, Youth room), and move a piece of gear on its card (Edit › Bucket).</p><div id="bkl" class="bkl"></div>' +
+    '<button type="button" class="btn" id="bkadd">' + icon('plus') + 'Add a bucket</button><div class="acts"><button type="button" data-close>Cancel</button><button class="primary" id="bkok">Save</button></div>', (w, close) => {
+    paint(w);
+    $('#bkadd', w).addEventListener('click', () => { rows.push({ name: '', was: '', n: 0 }); paint(w); const ins = $$('[data-i]', w); ins[ins.length - 1].focus(); });
+    $('#bkok', w).addEventListener('click', async () => {
+      const names = rows.map((r) => r.name.trim()).filter(Boolean);
+      const renames = {}; rows.forEach((r) => { if (r.was && r.name.trim() && r.was !== r.name.trim()) renames[r.was] = r.name.trim(); });
+      // gear in an automatic bucket that was renamed: give it the new name for real
+      const moves = list.filter((d) => !d.bucket && renames[autoBucket(d)]);
+      try {
+        await call('PUT', '/api/devices/buckets', { buckets: names, renames });
+        for (const d of moves) await call('PUT', '/api/devices/' + d.id, { ...(await get('/api/devices/' + d.id)).device, bucket: renames[autoBucket(d)] });
+        close(); forgetDevices(); toast('Buckets saved', 'ok'); route();
+      } catch (e) { toast(e.message, 'bad'); }
+    });
+  });
 }
 
 function importDialog(sug) {
@@ -132,7 +208,7 @@ async function viewDevice(id) {
   let d;
   try { d = await get('/api/devices/' + id); }
   catch (e) {
-    if (e.status === 404) { app.innerHTML = '<div class="card empty">' + esc(e.message) + '<div style="margin-top:12px"><a href="#/devices">All devices</a></div></div>'; return; }
+    if (e.status === 404) { app.innerHTML = '<div class="card empty">' + esc(e.message) + '<div style="margin-top:12px"><a href="#/gear">Gear Locker</a></div></div>'; return; }
     throw e;
   }
   await loadDevices();
@@ -156,7 +232,7 @@ async function viewDevice(id) {
   ].filter((f) => f[1]);
   const used = d.usedOn;
   app.innerHTML = `<div class="page dev">
-    <div class="crumbs"><a href="#/">Home</a><span>/</span><a href="#/devices">Devices</a></div>
+    <div class="crumbs"><a href="#/">Home</a><span>/</span><a href="#/gear">Gear Locker</a></div>
     <div class="devhead">${v.photo ? '<img class="devphoto" src="/uploads/' + esc(v.photo) + '" alt="">' : devThumb(v, 84)}
       <div class="grow"><h1 class="title">${esc(v.name)}</h1><div class="meta" style="margin:0">${esc([v.make, v.model].filter(Boolean).join(' '))}
         <span class="chip">${CAT[v.category] || 'Other'}</span>${v.tech_only ? '<span class="badge tech">Tech only</span>' : ''}</div></div>
@@ -179,7 +255,7 @@ async function viewDevice(id) {
     $('#eD').addEventListener('click', () => { location.hash = '#/d/' + v.id + '/edit'; });
     $('#xD').addEventListener('click', async () => {
       if (!await confirmBox('Delete ' + v.name + '?', 'The card is removed and pages stop linking to it. The pages themselves do not change.', 'Delete', true)) return;
-      try { await call('DELETE', '/api/devices/' + v.id); forgetDevices(); toast('Device deleted', 'ok'); location.hash = '#/devices'; } catch (e) { toast(e.message, 'bad'); }
+      try { await call('DELETE', '/api/devices/' + v.id); forgetDevices(); toast('Removed from the Gear Locker', 'ok'); location.hash = '#/gear'; } catch (e) { toast(e.message, 'bad'); }
     });
   }
 }
@@ -212,18 +288,20 @@ function paintFiles(host, v, files) {
 
 async function viewDeviceEdit(id) {
   if (!can('admin')) { app.innerHTML = '<div class="card empty">Admins can add and change devices.</div>'; if (!S.state.user) signInDialog(() => route()); return; }
-  const d = id ? (await get('/api/devices/' + id)).device : { inputs: '', outputs: '', uplink_id: '', uplink_port: '', name: '', aliases: [], category: 'audio', make: '', model: '', location: '', ip: '', mac: '', photo: '', manual_url: '', notes: '', tech_only: false };
-  setTitle(id ? 'Edit ' + d.name : 'New device');
+  await loadDevices();
+  const d = id ? (await get('/api/devices/' + id)).device : { bucket: new URLSearchParams((location.hash.split('?')[1] || '')).get('b') || '', inputs: '', outputs: '', uplink_id: '', uplink_port: '', name: '', aliases: [], category: 'audio', make: '', model: '', location: '', ip: '', mac: '', photo: '', manual_url: '', notes: '', tech_only: false };
+  setTitle(id ? 'Edit ' + d.name : 'Add gear');
   S.dirty = false;
   const f = (k, label, ph, extra) => '<label class="dfield' + (extra && extra.wide ? ' wide' : '') + '"><span>' + label + '</span><input data-k="' + k + '" value="' + esc(d[k]) + '" placeholder="' + esc(ph || '') + '"' + (extra && extra.mono ? ' class="mono" autocapitalize="off" spellcheck="false"' : '') + (extra && extra.mode ? ' inputmode="' + extra.mode + '"' : '') + '>' + (extra && extra.hint ? '<em>' + extra.hint + '</em>' : '') + '</label>';
   app.innerHTML = `<div class="ed">
-    <div class="crumbs"><a href="#/">Home</a><span>/</span><a href="#/devices">Devices</a><span>/</span><span>${id ? 'Edit' : 'New device'}</span></div>
+    <div class="crumbs"><a href="#/">Home</a><span>/</span><a href="#/gear">Gear Locker</a><span>/</span><span>${id ? 'Edit' : 'Add gear'}</span></div>
     <div class="card" style="margin-top:8px">
       <div class="dphoto"><div id="dph"></div><input type="file" accept="image/*" class="hide" id="dpf"><div><button type="button" id="dpb">${d.photo ? 'Replace photo' : 'Add photo'}</button>${d.photo ? ' <button type="button" class="ghost danger" id="dpx">Remove</button>' : ''}<div class="note">A photo of the device or its rack position helps volunteers find it.</div></div></div>
       <div class="dform">
         ${f('name', 'Name', 'SQ-5', { wide: true })}
         <label class="dfield wide"><span>Also called</span><input data-k="aliases" value="${esc(d.aliases.join(', '))}" placeholder="FOH desk, A&amp;H"><em>Other names people type, separated by commas. Each one links to this card.</em></label>
         <label class="dfield"><span>Category</span><select data-k="category">${Object.keys(CAT).map((k) => '<option value="' + k + '"' + (k === d.category ? ' selected' : '') + '>' + CAT[k] + '</option>').join('')}</select></label>
+        <label class="dfield"><span>Bucket</span><select data-k="bucket"><option value="">Automatic (${esc(autoBucket({ ...d, kind: (DEV.list || []).find((x) => x.id === d.id)?.kind || '' }))})</option>${bucketOrder(DEV.list || []).map((b) => '<option' + (b === d.bucket ? ' selected' : '') + '>' + esc(b) + '</option>').join('')}</select><em>Where it sits in the Gear Locker</em></label>
         ${f('make', 'Make', 'Allen & Heath')}${f('model', 'Model', 'SQ-5')}
         ${f('location', 'Location', 'FOH, front AV rack U4…')}
         ${f('ip', 'IP address', '10.10.20.11', { mono: true, mode: 'decimal', hint: 'Optional. Addresses in IP lists link here too when the device name matches.' })}
@@ -237,7 +315,7 @@ async function viewDeviceEdit(id) {
       </div>
       <div class="dfield wide" style="margin-top:12px"><span>Notes</span><div id="dnotes"></div></div>
     </div>
-    <div class="edbar"><span class="note" id="eMsg"></span><button id="dCancel">Cancel</button><button class="primary" id="dSave">${id ? 'Save' : 'Add device'}</button></div>
+    <div class="edbar"><span class="note" id="eMsg"></span><button id="dCancel">Cancel</button><button class="primary" id="dSave">${id ? 'Save' : 'Add to the Gear Locker'}</button></div>
   </div>`;
   const dirty = () => { S.dirty = true; $('#eMsg').textContent = 'Unsaved changes'; };
   $$('[data-k]').forEach((x) => x.addEventListener(x.type === 'checkbox' || x.tagName === 'SELECT' ? 'change' : 'input', () => {
@@ -258,12 +336,12 @@ async function viewDeviceEdit(id) {
     try { const pic = await shrink(file); const up = await call('POST', '/api/uploads', pic.blob, { raw: true, type: pic.type }); d.photo = up.id; photo(); dirty(); }
     catch (e) { toast(e.message, 'bad'); $('#eMsg').textContent = S.dirty ? 'Unsaved changes' : ''; }
   });
-  $('#dCancel').addEventListener('click', () => { location.hash = id ? '#/d/' + id : '#/devices'; });
+  $('#dCancel').addEventListener('click', () => { location.hash = id ? '#/d/' + id : '#/gear'; });
   $('#dSave').addEventListener('click', async () => {
     $('#dSave').disabled = true;
     try {
       if (id) { await call('PUT', '/api/devices/' + id, d); S.dirty = false; forgetDevices(); toast('Saved', 'ok'); location.hash = '#/d/' + id; }
-      else { const x = await call('POST', '/api/devices', d); S.dirty = false; forgetDevices(); toast('Device added', 'ok'); location.hash = '#/d/' + x.id; }
+      else { const x = await call('POST', '/api/devices', d); S.dirty = false; forgetDevices(); toast('Added to the Gear Locker', 'ok'); location.hash = '#/d/' + x.id; }
     } catch (e) { toast(e.message, 'bad'); }
     finally { const b = $('#dSave'); if (b) b.disabled = false; }
   });

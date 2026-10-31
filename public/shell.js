@@ -19,9 +19,9 @@ const Shell = (() => {
   /** Which tab / sidebar item a route belongs to. */
   function sectionOf(p) {
     if (!p.length) return 'home';
-    return { todo: 'todo', search: 'search', devices: 'devices', d: 'devices', 'gear-setup': 'devices', map: 'map', patch: 'patch', settings: 'settings', admin: 'admin', s: 'space', p: 'space', new: 'space' }[p[0]] || 'home';
+    return { todo: 'todo', search: 'search', gear: 'devices', devices: 'devices', d: 'devices', 'gear-setup': 'devices', map: 'map', patch: 'patch', settings: 'settings', admin: 'admin', s: 'space', p: 'space', new: 'space' }[p[0]] || 'home';
   }
-  const EDITING = (p) => (p[0] === 'p' && (p[2] === 'edit')) || p[0] === 'new' || (p[0] === 'devices' && p[1] === 'new') || (p[0] === 'd' && p[2] === 'edit') || p[0] === 'gear-setup';
+  const EDITING = (p) => (p[0] === 'p' && (p[2] === 'edit')) || p[0] === 'new' || ((p[0] === 'devices' || p[0] === 'gear') && p[1] === 'new') || (p[0] === 'd' && p[2] === 'edit') || p[0] === 'gear-setup';
 
   async function loadSpaces() {
     try { spaces = (await get('/api/spaces')).spaces; S.spaces = spaces; } catch (e) { /* offline banner */ }
@@ -44,12 +44,28 @@ const Shell = (() => {
     const list = spaces || [];
     const cur = ctx.space;
     const st0 = S.state;
+    const td = st0.todo || { open: 0, overdue: 0 };
+    // the admin group: only for admins (not while viewing as a user)
+    let adm = '';
+    if (can('admin')) {
+      let shut = false; try { shut = localStorage.getItem('lg-admgrp') === '0'; } catch (e) { /* private mode */ }
+      const tab = section === 'admin' ? (location.hash.split('/')[2] || 'spaces').split('?')[0] : '';
+      const ai = (t, label, ic, extra) => '<a class="sn sa' + (tab === t ? ' on' : '') + '" href="#/admin/' + t + '">' + icon(ic) + '<span>' + label + '</span>' + (extra || '') + '</a>';
+      adm = '<button type="button" class="shd shdbtn' + (shut ? ' shut' : '') + '" id="sAdm">' + icon('gear') + 'Admin' + (shut && st0.problems ? '<b class="cnt bad">' + st0.problems + '</b>' : '') + '<i>' + (shut ? '▸' : '▾') + '</i></button>' +
+        (shut ? '' : '<div class="sadm">' +
+          ai('people', 'Users', 'users') + ai('spaces', 'Spaces', 'list') +
+          ai('problems', 'Problems', 'alert', st0.problems ? '<b class="cnt bad" title="Open problem reports">' + st0.problems + '</b>' : '') +
+          ai('checklog', 'Checklist log', 'check') +
+          '<a class="sn sa' + (section === 'devices' && location.hash.startsWith('#/gear-setup') ? ' on' : '') + '" href="#/gear-setup">' + icon('spark') + '<span>Guided setup</span></a>' +
+          ai('church', 'Church', 'image') + ai('notify', 'Notifications', 'bell') + ai('backups', 'Backups', 'box') +
+          ai('trash', 'Trash', 'trash') + ai('activity', 'Activity', 'clock') + ai('reset', 'Reset', 'restore') + '</div>');
+    }
     nav.innerHTML = item('#/', 'Home', 'home', section === 'home') +
-      item('#/todo', 'To do', 'check', section === 'todo', todoBadge()) +
-      item('#/devices', 'Devices', 'box', section === 'devices') +
+      '<a class="sn' + (section === 'todo' ? ' on' : '') + (td.open ? ' glow' + (td.overdue ? ' bad' : '') : '') + '" href="#/todo">' + icon('check') + '<span>To do</span>' + todoBadge() + '</a>' +
+      item('#/gear', 'Gear Locker', 'box', section === 'devices' && !location.hash.startsWith('#/gear-setup')) +
       item('#/patch', 'Stage patch', 'grid', section === 'patch') +
       item('#/map', 'System map', 'net', section === 'map') +
-      (can('admin') ? item('#/admin', 'Admin', 'gear', section === 'admin', st0.problems ? '<b class="cnt bad" title="Open problem reports">' + st0.problems + '</b>' : '') : '') +
+      adm +
       '<div class="shd">Spaces</div>' +
       list.map((s) => {
         const open = s.slug === cur;
@@ -69,13 +85,15 @@ const Shell = (() => {
     const sn = $('#sNew'); if (sn) sn.addEventListener('click', newPage);
     const va = $('#sVas'); if (va) va.addEventListener('change', () => setViewAs(va.checked));
     const ss = $('#sSign'); if (ss) ss.addEventListener('click', () => signInDialog());
+    const sa = $('#sAdm'); if (sa) sa.addEventListener('click', () => { try { localStorage.setItem('lg-admgrp', sa.classList.contains('shut') ? '1' : '0'); } catch (e) { /* private mode */ } paintSide(); });
   }
 
   function paintTabs() {
     const tabs = $('#tabs');
     if (!tabs || !S.state) return;
-    tabs.querySelectorAll('[data-t]').forEach((t) => t.classList.toggle('on', t.dataset.t === section || (t.dataset.t === 'more' && ['space', 'map', 'patch', 'settings'].includes(section))));
+    tabs.querySelectorAll('[data-t]').forEach((t) => t.classList.toggle('on', t.dataset.t === section || (t.dataset.t === 'more' && ['space', 'map', 'patch', 'settings', 'admin'].includes(section))));
     const b = tabs.querySelector('[data-t=todo] .cnt'), td = S.state.todo || { open: 0, overdue: 0 };
+    const tt = tabs.querySelector('[data-t=todo]'); tt.classList.toggle('glow', td.open > 0); tt.classList.toggle('bad', td.overdue > 0);
     b.textContent = td.overdue || td.open || '';
     b.classList.toggle('hide', !td.open);
     b.classList.toggle('bad', td.overdue > 0);
@@ -103,9 +121,11 @@ const Shell = (() => {
       (upd ? row('#/settings/about', 'download', 'Update available', esc(st.update.latest || '')) : '') +
       (can('admin') ? '<button class="mbtn" id="mNew">' + icon('plus') + 'New page</button>' : '') +
       '<div class="mh">Spaces</div>' + list.map((s) => row('#/s/' + esc(s.slug), 'list', esc(s.name), s.pages + ' page' + (s.pages === 1 ? '' : 's'))).join('') +
-      '<div class="mh">More</div>' + row('#/patch', 'grid', 'Stage patch', 'Mic to speaker, every cable') + row('#/map', 'net', 'System map', 'Signal flow' + (can('admin') ? ', network and VLANs' : '')) +
+      '<div class="mh">More</div>' + row('#/gear', 'box', 'Gear Locker', 'Every piece of gear, its manuals and IP') + row('#/patch', 'grid', 'Stage patch', 'Mic to speaker, every cable') + row('#/map', 'net', 'System map', 'Signal flow' + (can('admin') ? ', network and VLANs' : '')) +
       (can('admin') ? row('#/gear-setup', 'spark', 'Guided equipment setup', 'Console, stage boxes, wireless, in-ears') : '') +
-      (can('admin') ? row('#/admin', 'gear', 'Admin' + (st.problems ? ' · ' + st.problems + ' problem' + (st.problems === 1 ? '' : 's') : ''), 'Spaces, people, problems, checklist log, backups, reset') : '') +
+      (can('admin') ? '<div class="mh">Admin</div>' + row('#/admin/people', 'users', 'Users', 'Admins and users, PINs, phone sign-in') + row('#/admin/spaces', 'list', 'Spaces', 'Make, colour, order, admins only') +
+        row('#/admin/problems', 'alert', 'Problems' + (st.problems ? ' · ' + st.problems + ' open' : ''), 'What users reported') + row('#/admin/checklog', 'check', 'Checklist log', 'Who ran what, when') +
+        row('#/admin/church', 'image', 'System settings', 'Church, notifications, backups, trash, activity, reset') : '') +
       (canViewAs() ? '<button class="mbtn" id="mVas">' + icon('user') + (viewAs() ? 'Back to admin view' : 'View as user') + '</button>' : '') +
       row('#/settings', 'gear', 'Settings', 'Display, account' + (can('admin') ? ', users, backups' : '')) +
       '</div>', (w, close) => {
@@ -121,7 +141,7 @@ const Shell = (() => {
     tabs.innerHTML = '<a href="#/" data-t="home">' + icon('home') + '<span>Home</span></a>' +
       '<a href="#/todo" data-t="todo">' + icon('check') + '<span>To do</span><b class="cnt hide"></b></a>' +
       '<a href="#/search" data-t="search">' + icon('search') + '<span>Search</span></a>' +
-      '<a href="#/devices" data-t="devices">' + icon('box') + '<span>Devices</span></a>' +
+      '<a href="#/gear" data-t="devices">' + icon('box') + '<span>Gear</span></a>' +
       '<button type="button" data-t="more">' + icon('menu') + '<span>More</span><i class="dot acc hide"></i></button>';
     tabs.querySelector('[data-t=more]').addEventListener('click', moreSheet);
     $('#fab').innerHTML = icon('plus');

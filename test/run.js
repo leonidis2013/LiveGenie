@@ -676,6 +676,29 @@ test('the model list starts empty and grows as gear is added; channel names and 
   assert.deepStrictEqual([c2.gear[0].namelen, c2.gear[0].colors, c2.gear[1].chname, c2.gear[1].chcolor], [6, ['Red', 'Green'], 'KICKDRUM', 'Purple']);
 });
 
+test('highlight boxes on a gear photo: admins draw them, everyone sees them, a new photo clears them', async () => {
+  const up = (await admin.post('/api/uploads', PNG, { raw: true, type: 'image/png' })).data.id;
+  let r = await admin.post('/api/devices', { name: 'Rack PDU', category: 'power' });
+  const id = r.data.id;
+  assert.strictEqual((await admin.put('/api/devices/' + id + '/marks', { marks: [{ x: 0.1, y: 0.1, w: 0.2, h: 0.2 }] })).status, 400, 'needs a photo first');
+  const dev = (await admin.get('/api/devices/' + id)).data.device;
+  await admin.put('/api/devices/' + id, { ...dev, photo: up });
+  assert.strictEqual((await vol.put('/api/devices/' + id + '/marks', { marks: [] })).status, 403, 'users cannot draw them');
+  r = await admin.put('/api/devices/' + id + '/marks', { marks: [{ x: 0.1, y: 0.2, w: 0.3, h: 0.25, label: 'Main breaker', color: 'red' }, { x: 0.9, y: 0.9, w: 0.5, h: 0.5, color: 'pink' }, { x: 0.5, y: 0.5, w: 0, h: 0.1 }] });
+  assert.strictEqual(r.status, 200);
+  assert.deepStrictEqual(r.data.marks[0], { x: 0.1, y: 0.2, w: 0.3, h: 0.25, label: 'Main breaker', color: 'red' });
+  assert.strictEqual(r.data.marks.length, 2, 'a box with no size is dropped');
+  assert.ok(Math.abs(r.data.marks[1].w - 0.1) < 1e-9 && r.data.marks[1].color === 'yellow', 'kept inside the picture; unknown colours become yellow');
+  const seen = (await vol.get('/api/devices/' + id)).data.device;
+  assert.strictEqual(seen.marks[0].label, 'Main breaker', 'users see them');
+  // editing other fields keeps them; a new photo clears them
+  await admin.put('/api/devices/' + id, { ...seen, location: 'Rack' });
+  assert.strictEqual((await vol.get('/api/devices/' + id)).data.device.marks.length, 2);
+  const up2 = (await admin.post('/api/uploads', PNG, { raw: true, type: 'image/png' })).data.id;
+  await admin.put('/api/devices/' + id, { ...seen, photo: up2 });
+  assert.strictEqual((await vol.get('/api/devices/' + id)).data.device.marks.length, 0);
+});
+
 test('Gear Locker buckets: automatic, then the admin renames and orders them; To do shows checklists in progress', async () => {
   let r = await admin.post('/api/devices', { name: 'Spare SM58', category: 'audio', make: 'Shure', model: 'SM58', bucket: 'Spares' });
   const id = r.data.id;
@@ -869,7 +892,7 @@ test('backup, then restore brings the data back after a restart', async () => {
   assert.strictEqual(r.status, 200);
   const name = r.data.name;
   r = await admin.get('/api/backups/' + name + '/inspect');
-  assert.strictEqual(r.data.info.pictures, 1 + 6 + 1, 'one picture, the six training diagrams and the church logo');
+  assert.strictEqual(r.data.info.pictures, 1 + 6 + 1 + 2, 'one picture, the six training diagrams, the church logo and two gear photos');
   const before = r.data.info.pages;
   const dl = await admin.get('/api/backups/' + name + '/download');
   assert.ok(dl.data.length > 1024 && dl.data.toString('ascii', 257, 262) === 'ustar', 'download is a tar file');

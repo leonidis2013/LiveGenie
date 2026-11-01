@@ -266,12 +266,13 @@ async function viewDevice(id) {
   const used = d.usedOn;
   app.innerHTML = `<div class="page dev">
     <div class="crumbs"><a href="#/">Home</a><span>/</span><a href="#/gear">Gear Locker</a></div>
-    <div class="devhead">${v.photo ? '<img class="devphoto" src="/uploads/' + esc(v.photo) + '" alt="">' : devThumb(v, 84)}
+    <div class="devhead">${v.photo ? '<a href="#dphoto" class="devphotoa" id="dpa"><img class="devphoto" src="/uploads/' + esc(v.photo) + '" alt=""></a>' : devThumb(v, 84)}
       <div class="grow"><h1 class="title">${esc(v.name)}</h1><div class="meta" style="margin:0">${esc([v.make, v.model].filter(Boolean).join(' '))}
         <span class="chip">${CAT[v.category] || 'Other'}</span>${v.tech_only ? '<span class="badge tech">Tech only</span>' : ''}</div></div>
       <div class="acts-top">${can('admin') ? '<button class="btn" id="eD">' + icon('edit') + 'Edit</button><button class="ghost danger" id="xD" title="Delete device">' + icon('trash') + '</button>' : '<button class="btn ghost" id="rD">' + icon('alert') + 'Report a problem</button>'}</div></div>
     ${facts.length ? '<div class="card facts">' + facts.map((f) => '<div class="fact"><span>' + f[0] + '</span><div>' + f[1] + '</div></div>').join('') + '</div>' : ''}
     ${v.notes.trim() ? '<div class="doc" id="dnotes">' + md(v.notes) + '</div>' : ''}
+    ${v.photo ? '<div class="section" style="margin-top:20px" id="dphoto"><div class="hsh"><h2>Photo</h2>' + (can('admin') ? '<button class="btn" id="dmk">' + icon('edit') + (v.marks.length ? 'Edit highlights' : 'Highlight on the photo') + '</button>' : '') + '</div><div id="dmarks"></div></div>' : ''}
     <div class="section" style="margin-top:20px"><h2>Manuals and documents</h2><div id="dfiles"></div></div>
     <div class="section" style="margin-top:20px"><h2>Used on</h2>${used.length ? '<div class="list used">' + used.map((u) => {
       const first = u.hits.find((h) => h.block);
@@ -283,6 +284,12 @@ async function viewDevice(id) {
   </div>`;
   linkDevices($('#dnotes'));
   paintFiles($('#dfiles'), v, d.files || []);
+  if (v.photo) {
+    $('#dmarks').innerHTML = marksView(v.photo, v.marks);
+    wireMarksView($('#dmarks'));
+    $('#dpa').addEventListener('click', (e) => { e.preventDefault(); $('#dphoto').scrollIntoView({ behavior: 'smooth', block: 'start' }); });
+    const mk = $('#dmk'); if (mk) mk.addEventListener('click', () => marksEditor(v, (marks) => { v.marks = marks; $('#dmarks').innerHTML = marksView(v.photo, marks); wireMarksView($('#dmarks')); mk.lastChild.textContent = marks.length ? 'Edit highlights' : 'Highlight on the photo'; }));
+  }
   const rd = $('#rD'); if (rd) rd.addEventListener('click', () => reportProblem(v.name, { device_id: v.id }));
   if (can('admin')) {
     $('#eD').addEventListener('click', () => { location.hash = '#/d/' + v.id + '/edit'; });
@@ -291,6 +298,74 @@ async function viewDevice(id) {
       try { await call('DELETE', '/api/devices/' + v.id); forgetDevices(); toast('Removed from the Gear Locker', 'ok'); location.hash = '#/gear'; } catch (e) { toast(e.message, 'bad'); }
     });
   }
+}
+
+// ---------- highlight boxes on the gear photo ----------
+const MARK_COLORS = { yellow: '#facc15', red: '#ef4444', green: '#22c55e', blue: '#3b82f6', purple: '#a855f7' };
+const markBox = (m, i, cls) => '<div class="hmk ' + (cls || '') + '" data-mi="' + i + '" style="left:' + (m.x * 100) + '%;top:' + (m.y * 100) + '%;width:' + (m.w * 100) + '%;height:' + (m.h * 100) + '%;--mc:' + MARK_COLORS[m.color || 'yellow'] + '"' + (m.label ? ' title="' + esc(m.label) + '"' : '') + '><b>' + (i + 1) + '</b>' + (m.label ? '<span>' + esc(m.label) + '</span>' : '') + '</div>';
+/** The photo with its highlight boxes, numbered, and the list of what each one is. */
+function marksView(photo, marks) {
+  return '<div class="mkwrap"><div class="mkpic"><img src="/uploads/' + esc(photo) + '" alt="">' + marks.map((m, i) => markBox(m, i)).join('') + '</div>' +
+    (marks.length ? '<ol class="mklist">' + marks.map((m, i) => '<li data-mi="' + i + '" style="--mc:' + MARK_COLORS[m.color || 'yellow'] + '"><b>' + (i + 1) + '</b><span>' + esc(m.label || 'Highlight ' + (i + 1)) + '</span></li>').join('') + '</ol>' : '') + '</div>';
+}
+function wireMarksView(host) {
+  const hi = (i, on) => $$('[data-mi="' + i + '"]', host).forEach((x) => x.classList.toggle('hot', on));
+  $$('[data-mi]', host).forEach((x) => { x.addEventListener('mouseenter', () => hi(x.dataset.mi, true)); x.addEventListener('mouseleave', () => hi(x.dataset.mi, false)); x.addEventListener('click', () => { const on = !x.classList.contains('hot'); $$('.hot', host).forEach((y) => y.classList.remove('hot')); hi(x.dataset.mi, on); }); });
+}
+/** Admin: draw boxes on the photo (drag), move them, resize from the corner, name and colour them. */
+function marksEditor(v, done) {
+  const marks = (v.marks || []).map((m) => ({ ...m }));
+  let sel = marks.length ? 0 : -1, color = 'yellow';
+  modal('<h3>Highlight on the photo</h3><p class="note">Drag on the picture to draw a box around a switch, a socket or a label. Drag a box to move it, its corner to resize it, and name it on the right.</p>' +
+    '<div class="mked"><div class="mkpic edit" id="mkp"><img src="/uploads/' + esc(v.photo) + '" alt="" draggable="false"><div id="mkb"></div></div><div class="mkside" id="mks"></div></div>' +
+    '<div class="acts"><span class="grow note" id="mkn"></span><button type="button" data-close>Cancel</button><button class="primary" id="mkok">Save</button></div>', (w, close) => {
+    w.classList.add('mwide', 'mkmodal');
+    const pic = $('#mkp', w), boxes = $('#mkb', w), side = $('#mks', w);
+    function paint() {
+      boxes.innerHTML = marks.map((m, i) => markBox(m, i, i === sel ? 'sel' : '').replace('</div>', '<i class="mkh" data-h="' + i + '"></i></div>')).join('');
+      side.innerHTML = (marks.length ? marks.map((m, i) => '<div class="mkrow' + (i === sel ? ' sel' : '') + '" data-row="' + i + '"><b style="--mc:' + MARK_COLORS[m.color] + '">' + (i + 1) + '</b><input data-lab="' + i + '" value="' + esc(m.label || '') + '" placeholder="Power switch, Reset, Input 1…" maxlength="80">' +
+        '<div class="mkcol">' + Object.keys(MARK_COLORS).map((c) => '<button type="button" data-col="' + c + '" data-ci="' + i + '" class="' + (m.color === c ? 'on' : '') + '" style="--mc:' + MARK_COLORS[c] + '" title="' + c + '"></button>').join('') + '<button type="button" class="ghost xs danger" data-del="' + i + '" title="Remove">' + icon('trash') + '</button></div></div>').join('')
+        : '<p class="note">No highlights yet. Drag on the picture to draw the first one.</p>');
+      $('#mkn', w).textContent = marks.length + ' highlight' + (marks.length === 1 ? '' : 's');
+      $$('[data-row]', side).forEach((r) => r.addEventListener('click', (e) => { if (e.target.closest('button')) return; sel = Number(r.dataset.row); boxes.querySelectorAll('.hmk').forEach((b) => b.classList.toggle('sel', Number(b.dataset.mi) === sel)); $$('[data-row]', side).forEach((x) => x.classList.toggle('sel', x === r)); }));
+      $$('[data-lab]', side).forEach((x) => x.addEventListener('input', () => { marks[Number(x.dataset.lab)].label = x.value; const sp = boxes.querySelector('[data-mi="' + x.dataset.lab + '"] span'); if (sp) sp.textContent = x.value; else paintBoxesOnly(); }));
+      $$('[data-col]', side).forEach((x) => x.addEventListener('click', () => { const i = Number(x.dataset.ci); marks[i].color = x.dataset.col; color = x.dataset.col; sel = i; paint(); }));
+      $$('[data-del]', side).forEach((x) => x.addEventListener('click', () => { marks.splice(Number(x.dataset.del), 1); sel = Math.min(sel, marks.length - 1); paint(); }));
+    }
+    const paintBoxesOnly = () => { boxes.innerHTML = marks.map((m, i) => markBox(m, i, i === sel ? 'sel' : '').replace('</div>', '<i class="mkh" data-h="' + i + '"></i></div>')).join(''); };
+    // drawing, moving and resizing, in fractions of the picture
+    let drag = null;
+    const at = (e) => { const r = pic.getBoundingClientRect(); return { x: Math.max(0, Math.min(1, (e.clientX - r.left) / r.width)), y: Math.max(0, Math.min(1, (e.clientY - r.top) / r.height)) }; };
+    pic.addEventListener('pointerdown', (e) => {
+      e.preventDefault(); pic.setPointerCapture(e.pointerId);
+      const p = at(e), h = e.target.closest('.mkh'), b = e.target.closest('.hmk');
+      if (h) { sel = Number(h.dataset.h); drag = { mode: 'size', i: sel, p }; }
+      else if (b) { sel = Number(b.dataset.mi); const m = marks[sel]; drag = { mode: 'move', i: sel, p, ox: m.x, oy: m.y }; }
+      else { marks.push({ x: p.x, y: p.y, w: 0, h: 0, label: '', color }); sel = marks.length - 1; drag = { mode: 'new', i: sel, p }; }
+      paintBoxesOnly();
+    });
+    pic.addEventListener('pointermove', (e) => {
+      if (!drag) return;
+      const p = at(e), m = marks[drag.i];
+      if (drag.mode === 'new') { m.x = Math.min(p.x, drag.p.x); m.y = Math.min(p.y, drag.p.y); m.w = Math.abs(p.x - drag.p.x); m.h = Math.abs(p.y - drag.p.y); }
+      else if (drag.mode === 'move') { m.x = Math.max(0, Math.min(1 - m.w, drag.ox + p.x - drag.p.x)); m.y = Math.max(0, Math.min(1 - m.h, drag.oy + p.y - drag.p.y)); }
+      else { m.w = Math.max(0.02, Math.min(1 - m.x, p.x - m.x)); m.h = Math.max(0.02, Math.min(1 - m.y, p.y - m.y)); }
+      paintBoxesOnly();
+    });
+    const end = () => {
+      if (!drag) return;
+      const m = marks[drag.i];
+      if (drag.mode === 'new' && (m.w < 0.015 || m.h < 0.015)) { marks.splice(drag.i, 1); sel = marks.length - 1; }
+      drag = null; paint();
+      if (sel >= 0) { const inp = $('[data-lab="' + sel + '"]', side); if (inp && !inp.value) inp.focus(); }
+    };
+    pic.addEventListener('pointerup', end); pic.addEventListener('pointercancel', end);
+    $('#mkok', w).addEventListener('click', async () => {
+      try { const r = await call('PUT', '/api/devices/' + v.id + '/marks', { marks }); close(); toast('Highlights saved', 'ok'); done(r.marks); }
+      catch (e) { toast(e.message, 'bad'); }
+    });
+    paint();
+  });
 }
 
 /** Manuals, quick-start guides, wiring diagrams: stored in LiveGenie (and in its backups), opened in the browser. */

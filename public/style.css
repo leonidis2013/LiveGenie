@@ -1331,3 +1331,38 @@ header.hhero { background:none; border:0; box-shadow:none; padding:0; position:s
 @media (max-width:600px) { .gnew, .gnew:not(:has([data-nm=count])) { grid-template-columns:1fr 1fr; } .gform .wide2 { grid-column:auto; } }
 .modal.mwide .box { max-width:640px; }
 .pkbox .btn.sm { background:var(--card); border:1px solid var(--line); }
+
+/* ---------- highlights on a gear photo (0.18) ---------- */
+.devphotoa { display:block; line-height:0; }
+.mkwrap { display:flex; gap:16px; align-items:flex-start; flex-wrap:wrap; }
+.mkpic { position:relative; display:inline-block; max-width:min(100%, 760px); line-height:0; border-radius:12px; border:1px solid var(--line); background:var(--inset); }
+.mkpic img { border-radius:11px; }
+.mkpic img { display:block; max-width:100%; max-height:70vh; width:auto; height:auto; user-select:none; -webkit-user-drag:none; }
+.hmk { position:absolute; border:3px solid var(--mc); border-radius:6px; box-shadow:0 0 0 1px rgba(0,0,0,.35), inset 0 0 0 1px rgba(0,0,0,.25); background:color-mix(in srgb, var(--mc) 14%, transparent); line-height:1.2; transition:background .12s, box-shadow .12s; }
+.hmk > b { position:absolute; left:-3px; top:-3px; transform:translate(-40%, -40%); min-width:20px; height:20px; padding:0 4px; border-radius:99px; background:var(--mc); color:#111; font-size:11.5px; font-weight:800; display:flex; align-items:center; justify-content:center; box-shadow:0 1px 4px rgba(0,0,0,.4); }
+.hmk > span { position:absolute; left:-3px; top:100%; margin-top:4px; background:rgba(15,20,28,.88); color:#fff; font-size:11.5px; font-weight:600; padding:2px 7px; border-radius:6px; white-space:nowrap; max-width:220px; overflow:hidden; text-overflow:ellipsis; opacity:0; pointer-events:none; transition:opacity .12s; }
+.hmk.hot, .hmk:hover { background:color-mix(in srgb, var(--mc) 30%, transparent); box-shadow:0 0 0 2px #fff, 0 0 18px var(--mc); z-index:2; }
+.hmk.hot > span, .hmk:hover > span { opacity:1; }
+.mklist { list-style:none; margin:0; padding:0; display:flex; flex-direction:column; gap:6px; min-width:200px; flex:1; max-width:340px; }
+.mklist li { display:flex; align-items:center; gap:10px; padding:7px 10px; border-radius:10px; background:var(--card); border:1px solid var(--line); cursor:pointer; font-size:14px; }
+.mklist li b { min-width:22px; height:22px; border-radius:99px; background:var(--mc); color:#111; font-size:12px; display:flex; align-items:center; justify-content:center; }
+.mklist li.hot { border-color:var(--mc); box-shadow:0 0 0 2px color-mix(in srgb, var(--mc) 40%, transparent); }
+.mkmodal .box { max-width:min(1060px, 96vw) !important; }
+.mked { display:flex; gap:14px; align-items:flex-start; margin:8px 0; }
+.mked .mkpic { flex:1; max-width:none; cursor:crosshair; touch-action:none; }
+.mked .mkpic img { max-height:62vh; margin:0 auto; }
+.mked .hmk { cursor:move; }
+.mked .hmk.sel { box-shadow:0 0 0 2px #fff, 0 0 0 4px var(--acc); }
+.mkh { position:absolute; right:-7px; bottom:-7px; width:13px; height:13px; border-radius:3px; background:#fff; border:2px solid var(--mc); cursor:nwse-resize; }
+.mked .hmk:not(.sel) .mkh { display:none; }
+.mkside { width:290px; flex:none; display:flex; flex-direction:column; gap:8px; max-height:62vh; overflow:auto; }
+.mkrow { display:grid; grid-template-columns:24px 1fr; gap:6px 8px; align-items:center; padding:8px; border-radius:10px; background:var(--card2); border:1px solid transparent; }
+.mkrow.sel { border-color:var(--acc); }
+.mkrow > b { width:22px; height:22px; border-radius:99px; background:var(--mc); color:#111; font-size:12px; display:flex; align-items:center; justify-content:center; }
+.mkrow input { width:100%; padding:6px 8px; }
+.mkcol { grid-column:2; display:flex; gap:6px; align-items:center; }
+.mkcol [data-col] { width:20px; height:20px; padding:0; border-radius:99px; background:var(--mc); border:2px solid transparent; }
+.mkcol [data-col].on { border-color:var(--fg); }
+.mkcol .danger { margin-left:auto; }
+@media (max-width:760px) { .mked { flex-direction:column; } .mkside { width:100%; max-height:none; } }
+.hsh .btn { margin-left:auto; }

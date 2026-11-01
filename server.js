@@ -373,7 +373,7 @@ async function api(req, res, url, user, token) {
     if (m === 'GET' && b === 'suggestions') { need(user, 'admin'); return send(res, 200, { ok: true, suggestions: devices.suggestions(user) }); }
     if (m === 'POST' && b === 'import') { need(user, 'admin'); const body = await readJson(req); return send(res, 200, { ok: true, made: devices.importFromLists(body.names, user) }); }
     if (m === 'POST' && !b) { need(user, 'admin'); return send(res, 200, { ok: true, id: devices.add(await readJson(req), user, uploadExists) }); }
-    if (b && /^\d+$/.test(b)) {
+    if (b && /^\d+$/.test(b) && !c) {
       if (m === 'GET') {
         const d = devices.get(b, user);
         const mp = network.map(user);
@@ -553,6 +553,10 @@ async function api(req, res, url, user, token) {
   if (a === 'org' && !b && m === 'PUT') { need(user, 'admin'); return send(res, 200, { ok: true, org: adm.setOrg(await readJson(req), user) }); }
 
   // ----- manuals and documents on device cards -----
+  if (a === 'devices' && b && /^\d+$/.test(b) && c === 'marks' && m === 'PUT') {
+    need(user, 'admin');
+    return send(res, 200, { ok: true, marks: devices.setMarks(b, (await readJson(req)).marks, user) });
+  }
   if (a === 'devices' && b && /^\d+$/.test(b) && c === 'files' && m === 'POST') {
     need(user, 'admin');
     const buf = await readBody(req, Admin.MAX_FILE + 1024);

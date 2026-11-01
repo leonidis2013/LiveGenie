@@ -1366,3 +1366,17 @@ header.hhero { background:none; border:0; box-shadow:none; padding:0; position:s
 .mkcol .danger { margin-left:auto; }
 @media (max-width:760px) { .mked { flex-direction:column; } .mkside { width:100%; max-height:none; } }
 .hsh .btn { margin-left:auto; }
+
+/* ---------- Admin › To do lists (0.19) ---------- */
+.tllist { display:flex; flex-direction:column; gap:8px; }
+.tlrow { display:flex; align-items:center; gap:12px; flex-wrap:wrap; background:var(--card); border:1px solid var(--line); border-radius:12px; padding:10px 12px; }
+.tlt { flex:1; min-width:220px; display:flex; flex-direction:column; gap:2px; }
+.tlt b { font-size:15px; }
+.tlt span { font-size:12.5px; color:var(--dim); }
+.tlt .note { display:flex; align-items:center; gap:5px; flex-wrap:wrap; }
+.tlt .note .icon { width:13px; height:13px; }
+.tla { display:flex; gap:4px; }
+.tlsc { display:flex; flex-direction:column; gap:6px; margin:4px 0 8px; }
+.tlsr { display:flex; gap:8px; align-items:center; flex-wrap:wrap; background:var(--card2); border-radius:8px; padding:6px 8px; }
+.tlsr label { display:flex; align-items:center; gap:6px; margin:0; font-size:12.5px; color:var(--dim); }
+.tlsr input, .tlsr select { width:auto; padding:5px 8px; }

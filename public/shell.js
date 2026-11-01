@@ -55,7 +55,7 @@ const Shell = (() => {
         (shut ? '' : '<div class="sadm">' +
           ai('people', 'Users', 'users') + ai('spaces', 'Spaces', 'list') +
           ai('problems', 'Problems', 'alert', st0.problems ? '<b class="cnt bad" title="Open problem reports">' + st0.problems + '</b>' : '') +
-          ai('checklog', 'Checklist log', 'check') +
+          ai('todo', 'To do lists', 'check') + ai('checklog', 'Checklist log', 'clock') +
           '<a class="sn sa' + (section === 'devices' && location.hash.startsWith('#/gear-setup') ? ' on' : '') + '" href="#/gear-setup">' + icon('spark') + '<span>Guided setup</span></a>' +
           ai('church', 'Church', 'image') + ai('notify', 'Notifications', 'bell') + ai('backups', 'Backups', 'box') +
           ai('trash', 'Trash', 'trash') + ai('activity', 'Activity', 'clock') + ai('reset', 'Reset', 'restore') + '</div>');
@@ -124,7 +124,7 @@ const Shell = (() => {
       '<div class="mh">More</div>' + row('#/gear', 'box', 'Gear Locker', 'Every piece of gear, its manuals and IP') + row('#/patch', 'grid', 'Stage patch', 'Mic to speaker, every cable') + row('#/map', 'net', 'System map', 'Signal flow' + (can('admin') ? ', network and VLANs' : '')) +
       (can('admin') ? row('#/gear-setup', 'spark', 'Guided equipment setup', 'Console, stage boxes, wireless, in-ears') : '') +
       (can('admin') ? '<div class="mh">Admin</div>' + row('#/admin/people', 'users', 'Users', 'Admins and users, PINs, phone sign-in') + row('#/admin/spaces', 'list', 'Spaces', 'Make, colour, order, admins only') +
-        row('#/admin/problems', 'alert', 'Problems' + (st.problems ? ' · ' + st.problems + ' open' : ''), 'What users reported') + row('#/admin/checklog', 'check', 'Checklist log', 'Who ran what, when') +
+        row('#/admin/problems', 'alert', 'Problems' + (st.problems ? ' · ' + st.problems + ' open' : ''), 'What users reported') + row('#/admin/todo', 'check', 'To do lists', 'Every checklist, its steps and reset times') + row('#/admin/checklog', 'clock', 'Checklist log', 'Who ran what, when') +
         row('#/admin/church', 'image', 'System settings', 'Church, notifications, backups, trash, activity, reset') : '') +
       (canViewAs() ? '<button class="mbtn" id="mVas">' + icon('user') + (viewAs() ? 'Back to admin view' : 'View as user') + '</button>' : '') +
       row('#/settings', 'gear', 'Settings', 'Display, account' + (can('admin') ? ', users, backups' : '')) +

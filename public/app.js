@@ -946,7 +946,7 @@ async function viewSearch(q) {
 // ----- settings -----
 const TABS = [['display', 'Display', 'sun', 'user'], ['account', 'Account', 'user', 'user'], ['about', 'About', 'spark', 'user']];
 const ADMIN_TABS = [
-  ['spaces', 'Spaces', 'list'], ['people', 'People', 'users'], ['problems', 'Problems', 'alert'], ['checklog', 'Checklist log', 'check'],
+  ['spaces', 'Spaces', 'list'], ['people', 'People', 'users'], ['problems', 'Problems', 'alert'], ['todo', 'To do lists', 'check'], ['checklog', 'Checklist log', 'clock'],
   ['church', 'Church', 'image'], ['notify', 'Notifications', 'bell'], ['backups', 'Backups', 'box'], ['trash', 'Trash', 'trash'], ['activity', 'Activity', 'clock'], ['reset', 'Reset', 'restore']
 ];
 
@@ -960,7 +960,7 @@ async function viewAdmin(tab) {
     <div class="setup adminv"><div class="side">${ADMIN_TABS.map((t) => '<button data-tab="' + t[0] + '" class="' + (t[0] === tab ? 'on' : '') + '">' + icon(t[2]) + t[1] + (t[0] === 'problems' && n ? '<em class="cnt bad">' + n + '</em>' : '') + '</button>').join('')}</div><div class="pane" id="pane"></div></div>`;
   $$('[data-tab]').forEach((b) => b.addEventListener('click', () => { location.hash = '#/admin/' + b.dataset.tab; }));
   const pane = $('#pane');
-  await ({ spaces: tabSpaces, people: tabUsers, problems: tabProblems, checklog: tabChecklog, church: tabChurch, notify: tabNotify, backups: tabBackups, trash: tabTrash, activity: tabActivity, reset: tabReset }[tab])(pane);
+  await ({ spaces: tabSpaces, people: tabUsers, problems: tabProblems, todo: tabTodoLists, checklog: tabChecklog, church: tabChurch, notify: tabNotify, backups: tabBackups, trash: tabTrash, activity: tabActivity, reset: tabReset }[tab])(pane);
 }
 
 async function viewSettings(tab) {
@@ -1160,6 +1160,86 @@ function reportProblem(where, ctx = {}) {
 }
 
 // ----- admin: the checklist log -----
+/**
+ * Admin › To do lists: every checklist on every page in one place. See where each one is now, change its steps
+ * and reset times, start it over, open its page, remove it, or make a new one.
+ */
+const SCHED_DAYS = [['daily', 'Every day'], [0, 'Sundays'], [1, 'Mondays'], [2, 'Tuesdays'], [3, 'Wednesdays'], [4, 'Thursdays'], [5, 'Fridays'], [6, 'Saturdays']];
+async function tabTodoLists(pane) {
+  const d = await get('/api/admin/todo');
+  const tm = (t) => new Date(t).toLocaleString([], { weekday: 'short', hour: 'numeric', minute: '2-digit' });
+  const state = (x) => x.left === 0 && x.total ? '<span class="chip ok">Done</span>'
+    : x.overdue ? '<span class="chip bad">Overdue</span>'
+    : x.left < x.total ? '<span class="chip warn">In progress · ' + (x.total - x.left) + ' of ' + x.total + '</span>'
+    : x.schedule.length && x.active ? '<span class="chip acc">On To do now</span>' : '<span class="chip">Not started</span>';
+  const row = (x, i) => '<div class="tlrow">' +
+    '<div class="tlt"><b>' + esc(x.title) + '</b><span><a href="#/p/' + x.page_id + '?c=' + esc(x.block_id) + '">' + esc(x.page_title) + '</a> · ' + esc(x.space_name) + ' · ' + x.total + ' step' + (x.total === 1 ? '' : 's') + '</span>' +
+    '<span class="note">' + (x.scheduleText.length ? icon('clock') + esc(x.scheduleText.join('; ')) : 'No reset times: on To do while someone has started it') + (x.lastBy ? ' · last ticked by ' + esc(x.lastBy) + ' ' + esc(ago(x.lastAt)) : '') + (x.nextReset ? ' · next reset ' + esc(tm(x.nextReset)) : '') + '</span></div>' +
+    state(x) + '<div class="tla"><button class="btn" data-ed="' + i + '">' + icon('edit') + 'Edit</button><button class="ghost" data-rs="' + i + '" title="Start it over: clears every tick">' + icon('restore') + '</button><button class="ghost danger" data-rm="' + i + '" title="Remove from its page">' + icon('trash') + '</button></div></div>';
+  pane.innerHTML = '<p class="note pnote">Every checklist on every page. A checklist shows on <b>To do</b> while someone has started it and not finished, and a checklist with reset times shows there from each reset until the end of that day (red after its done-by time).</p>' +
+    '<div class="bar" style="margin:0 0 10px"><span class="grow note">' + d.lists.length + ' to do list' + (d.lists.length === 1 ? '' : 's') + '</span><button class="primary btn" id="tlNew">' + icon('plus') + 'New to do list</button></div>' +
+    (d.lists.length ? '<div class="tllist">' + d.lists.map(row).join('') + '</div>' : '<div class="card empty">No checklists yet. Make one here, or add a Checklist block to any page.</div>');
+  $('#tlNew', pane).addEventListener('click', () => todoListDialog(null, () => tabTodoLists(pane)));
+  $$('[data-ed]', pane).forEach((b) => b.addEventListener('click', () => todoListDialog(d.lists[Number(b.dataset.ed)], () => tabTodoLists(pane))));
+  $$('[data-rs]', pane).forEach((b) => b.addEventListener('click', async () => {
+    const x = d.lists[Number(b.dataset.rs)];
+    if (!await confirmBox('Start ' + x.title + ' over?', 'Every tick is cleared for everyone. The run so far stays in the checklist log.', 'Start over')) return;
+    try { await call('POST', '/api/pages/' + x.page_id + '/checklists/' + x.block_id + '/reset'); toast('Started over', 'ok'); loadState().then(paintHeader); tabTodoLists(pane); } catch (e) { toast(e.message, 'bad'); }
+  }));
+  $$('[data-rm]', pane).forEach((b) => b.addEventListener('click', async () => {
+    const x = d.lists[Number(b.dataset.rm)];
+    if (!await confirmBox('Remove ' + x.title + '?', 'It is taken off ' + x.page_title + '. The page keeps its old version in History, so it can come back.', 'Remove', true)) return;
+    try { await call('DELETE', '/api/pages/' + x.page_id + '/checklists/' + x.block_id); toast('Removed', 'ok'); loadState().then(paintHeader); tabTodoLists(pane); } catch (e) { toast(e.message, 'bad'); }
+  }));
+}
+/** New or edit: title, steps (one per line), reset times; a new one goes on a new page or an existing page. */
+async function todoListDialog(x, done) {
+  const spaces = S.spaces && S.spaces.length ? S.spaces : (await get('/api/spaces')).spaces;
+  if (!x && !spaces.length) { toast('Make a space first (Admin › Spaces)', 'bad'); return; }
+  const rows = x ? x.schedule.map((r) => ({ ...r })) : [];
+  const schedHtml = () => rows.map((r, i) => '<div class="tlsr"><select data-sd="' + i + '">' + SCHED_DAYS.map(([v, l]) => '<option value="' + v + '"' + (String(v) === String(r.day) ? ' selected' : '') + '>' + l + '</option>').join('') + '</select>' +
+    '<label>reset<input type="time" data-sr="' + i + '" value="' + esc(r.reset || '06:00') + '"></label><label>done by<input type="time" data-su="' + i + '" value="' + esc(r.due || '') + '"></label><button type="button" class="ghost xs" data-sx="' + i + '">' + icon('x') + '</button></div>').join('') || '<p class="note">No reset times: it shows on To do while someone has started it.</p>';
+  modal('<h3>' + (x ? 'Edit ' + esc(x.title) : 'New to do list') + '</h3><form id="tlf">' +
+    '<label>Title</label><input id="tl_t" value="' + esc(x ? x.title : '') + '" placeholder="Sunday startup" required>' +
+    (x ? '<p class="note">On <a href="#/p/' + x.page_id + '" data-close>' + esc(x.page_title) + '</a></p>' :
+      '<div class="two"><div><label>Space</label><select id="tl_s">' + spaces.map((sp) => '<option value="' + esc(sp.slug) + '">' + esc(sp.name) + '</option>').join('') + '</select></div>' +
+      '<div><label>Page</label><select id="tl_p"><option value="">A new page with this title</option></select></div></div>') +
+    '<label>Steps <span class="note">(one per line)</span></label><textarea id="tl_i" rows="8" placeholder="Power on the rack&#10;Ring out the monitors&#10;Check every wireless mic">' + esc(x ? x.items.join('\n') : '') + '</textarea>' +
+    '<label>Reset times</label><div id="tl_sc" class="tlsc"></div><button type="button" class="btn" id="tl_add">' + icon('plus') + 'Add a reset time</button>' +
+    '<div class="acts"><button type="button" data-close>Cancel</button><button class="primary">' + (x ? 'Save' : 'Make it') + '</button></div></form>', (w, close) => {
+    w.classList.add('mwide');
+    const paintS = () => {
+      $('#tl_sc', w).innerHTML = schedHtml();
+      $$('[data-sd]', w).forEach((e) => e.addEventListener('change', () => { rows[Number(e.dataset.sd)].day = e.value === 'daily' ? 'daily' : Number(e.value); }));
+      $$('[data-sr]', w).forEach((e) => e.addEventListener('change', () => { rows[Number(e.dataset.sr)].reset = e.value; }));
+      $$('[data-su]', w).forEach((e) => e.addEventListener('change', () => { rows[Number(e.dataset.su)].due = e.value; }));
+      $$('[data-sx]', w).forEach((e) => e.addEventListener('click', () => { rows.splice(Number(e.dataset.sx), 1); paintS(); }));
+    };
+    paintS();
+    $('#tl_add', w).addEventListener('click', () => { rows.push({ day: 0, reset: '06:00', due: '' }); paintS(); });
+    const ss = $('#tl_s', w);
+    const loadPages = async () => { const sel = $('#tl_p', w); try { const r = await get('/api/spaces/' + encodeURIComponent(ss.value)); sel.innerHTML = '<option value="">A new page with this title</option>' + r.pages.map((p) => '<option value="' + p.id + '">Add to: ' + esc(p.title) + '</option>').join(''); } catch (e) { /* keep "new page" */ } };
+    if (ss) { ss.addEventListener('change', loadPages); loadPages(); }
+    $('#tlf', w).addEventListener('submit', async (e) => {
+      e.preventDefault();
+      const title = $('#tl_t', w).value.trim(), items = $('#tl_i', w).value.split('\n').map((t) => t.trim()).filter(Boolean);
+      if (!title) return toast('Give it a title', 'bad');
+      if (!items.length) return toast('Add at least one step', 'bad');
+      const schedule = rows.map((r) => ({ day: r.day, reset: r.reset || '06:00', due: r.due || '' }));
+      try {
+        if (x) await call('PUT', '/api/pages/' + x.page_id + '/checklists/' + x.block_id, { title, items, schedule });
+        else {
+          const block = { type: 'checklist', title, items, schedule };
+          const pid = $('#tl_p', w).value;
+          if (pid) { const p = (await get('/api/pages/' + pid)).page; await call('PUT', '/api/pages/' + pid, { title: p.title, space: p.space, blocks: p.blocks.concat(block), tech_only: p.tech_only, pinned: p.pinned, baseVersion: p.version }); }
+          else await call('POST', '/api/pages', { title, space: ss.value, blocks: [block] });
+        }
+        close(); toast(x ? 'Saved' : 'To do list made', 'ok'); loadState().then(paintHeader); done();
+      } catch (err) { toast(err.message, 'bad'); }
+    });
+  });
+}
+
 async function tabChecklog(pane, pick) {
   const q = pick ? '?page=' + encodeURIComponent(pick.split(':')[0]) + '&block=' + encodeURIComponent(pick.split(':')[1]) : '';
   const d = await get('/api/checklog' + q);

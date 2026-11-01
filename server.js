@@ -426,12 +426,18 @@ async function api(req, res, url, user, token) {
       const body = await readJson(req);
       return send(res, 200, { ok: true, now: Date.now(), checklist: store.tick(b, d, String(body.item || ''), !!body.done, user) });
     }
+    if ((m === 'PUT' || m === 'DELETE') && d && !e) {
+      need(user, 'admin');
+      const v = store.changeChecklist(b, d, m === 'PUT' ? await readJson(req) : {}, user, m === 'DELETE');
+      return send(res, 200, { ok: true, version: v });
+    }
     if (m === 'POST' && d && e === 'reset') {
       need(user, 'user');
       return send(res, 200, { ok: true, now: Date.now(), checklist: store.resetChecklist(b, d, user) });
     }
   }
   if (m === 'GET' && a === 'todo') return send(res, 200, { ok: true, now: Date.now(), todo: store.todo(user) });
+  if (m === 'GET' && a === 'admin' && b === 'todo') { need(user, 'admin'); return send(res, 200, { ok: true, now: Date.now(), lists: store.allChecklists(user) }); }
 
   // ----- notifications (admin) -----
   if (a === 'settings' && b === 'notify') {

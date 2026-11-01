@@ -699,6 +699,27 @@ test('highlight boxes on a gear photo: admins draw them, everyone sees them, a n
   assert.strictEqual((await vol.get('/api/devices/' + id)).data.device.marks.length, 0);
 });
 
+test('Admin › To do lists: every checklist in one place; edit steps and reset times, remove', async () => {
+  let r = await admin.post('/api/pages', { title: 'Strike list', space: 'audio', blocks: [{ type: 'text', md: 'After service' }, { type: 'checklist', title: 'Strike', items: ['Coil cables'] }] });
+  const pid = r.data.id;
+  assert.strictEqual((await vol.get('/api/admin/todo')).status, 403, 'admins only');
+  let lists = (await admin.get('/api/admin/todo')).data.lists;
+  const x = lists.find((l) => l.page_id === pid);
+  assert.ok(x && x.title === 'Strike' && x.total === 1 && !x.scheduleText.length);
+  assert.strictEqual((await vol.put('/api/pages/' + pid + '/checklists/' + x.block_id, { title: 'X' })).status, 403);
+  r = await admin.put('/api/pages/' + pid + '/checklists/' + x.block_id, { title: 'Strike the stage', items: ['Coil cables', 'Cover the desk'], schedule: [{ day: 0, reset: '12:30', due: '14:00' }] });
+  assert.strictEqual(r.status, 200);
+  lists = (await admin.get('/api/admin/todo')).data.lists;
+  const y = lists.find((l) => l.page_id === pid);
+  assert.deepStrictEqual([y.title, y.total, y.scheduleText.length], ['Strike the stage', 2, 1]);
+  assert.strictEqual((await admin.put('/api/pages/' + pid + '/checklists/' + x.block_id, { items: [] })).status, 400, 'a checklist needs a step');
+  assert.strictEqual((await admin.put('/api/pages/' + pid + '/checklists/' + x.block_id, { schedule: [{ day: 9, reset: '25:00' }] })).status, 400, 'bad reset times are refused');
+  r = await admin.del('/api/pages/' + pid + '/checklists/' + x.block_id);
+  assert.strictEqual(r.status, 200);
+  const page = (await admin.get('/api/pages/' + pid)).data.page;
+  assert.deepStrictEqual(page.blocks.map((b) => b.type), ['text'], 'the rest of the page stays');
+});
+
 test('Gear Locker buckets: automatic, then the admin renames and orders them; To do shows checklists in progress', async () => {
   let r = await admin.post('/api/devices', { name: 'Spare SM58', category: 'audio', make: 'Shure', model: 'SM58', bucket: 'Spares' });
   const id = r.data.id;

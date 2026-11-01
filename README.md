@@ -4,7 +4,7 @@
 
 The Rolling Hills Community Church AVL knowledge base: one web app where volunteers find how our system works, how to run a service and how to fix what broke. Part of the Live series (LiveMic, LiveCompanion, LivePi, LiveVoice).
 
-Version 0.18.0 · © 2026 Jerod Ulicki
+Version 0.19.0 · © 2026 Jerod Ulicki
 
 ## What it does
 
@@ -40,6 +40,7 @@ Version 0.18.0 · © 2026 Jerod Ulicki
 - **Admins and users.** Everyone signs in; nothing shows before that. **Admins** build LiveGenie: spaces, pages, the stage patch, devices, IP lists, VLANs, manuals, people and backups. **Users** read the help pages, tick checklists, follow signals on the stage patch, open manuals and report problems. **View as user** (sidebar, or More on a phone) shows an admin exactly what users see, with a banner to switch back. Five wrong PINs lock that person for five minutes. Upgrading turns Editors into Admins and Volunteers into Users.
 - **Admin area.** Admin in the sidebar (More on a phone): Spaces, People, Problems, Checklist log, Church, Notifications, Backups, Trash, Activity and Reset. Users never see it.
 - **Manuals and documents.** Upload PDF manuals, quick-start guides, wiring diagrams (PDF, pictures, text, Word, Excel or zip, up to 60 MB) to any device card. Everyone signed in can open them in the browser or download them; they are stored in LiveGenie and included in backups. Gear on the stage patch shows how many manuals its device has.
+- **To do lists (Admin › To do lists).** Every checklist on every page in one place: where it is now (not started, in progress, done, overdue), its reset times, who ticked last and when it next resets. **New to do list** makes one (title, steps one per line, reset times with done-by times) on a new page or an existing one; **Edit** changes its title, steps and reset times in place (a new page version); start it over, open its page, or remove it.
 - **Report a problem.** Users tap **Report a problem** on a page, a device card or a piece of gear on the stage patch ("Pastor lav cuts out when he turns his head"). Admins see an open-problems count beside Admin, work through them in Admin › Problems (resolve with a note, reopen), and the Notifications webhook hears about each new one.
 - **Checklist log.** Every run of every checklist: when it ran, how many steps were done, when it was finished and by whom, how long it took, and what was missed. Filter by checklist in Admin › Checklist log.
 - **Church name and logo.** Set in Admin › Church (or at first-run setup); shown on the sign-in screen, the home page and every PDF.
@@ -117,7 +118,8 @@ Run it on the TrueNAS host and reach it from the AVL and office VLANs through th
 | 0.11.0 | Phone layout (bottom tabs, + button, bottom sheets, To do screen) and desktop layout (sidebar with spaces and pages, On this page outline) |
 | 0.12.0 | Phone sign in: tap your name, PIN pad, and QR code sign in from a signed-in computer |
 | 0.13.0 | Stage patch: one visual signal-flow drawing for the whole system (equipment pane, drag to connect, follow a signal, overview and sockets, cable styles, checks), with the input, output, wireless, in-ear and cable lists and the PDF made from it; old patch lists moved onto it |
-| 0.18.0 | Highlight boxes on a gear photo: drawn, moved, resized, named and coloured by admins; numbered on the card with a list everyone can hover (this release) |
+| 0.19.0 | Admin › To do lists: every checklist in one place; make, edit (steps and reset times), start over and remove (this release) |
+| 0.18.0 | Highlight boxes on a gear photo: drawn, moved, resized, named and coloured by admins; numbered on the card with a list everyone can hover |
 | 0.17.0 | No built-in gear list: makes and models are added as you go (New gear form, guided setup) and remembered on your own model list; channel names and colours for each source, fitted to each console's name length and colours (set when the console is added), with fill-in helpers and a CSV list |
 | 0.16.0 | Stage patch you arrange yourself: free placement with Tidy, snapping, smart guides and align; cards fold to the sockets in use; cables route around cards with hops; right-click menu; card-to-card connect picker; wireless systems (mics on receiver channels, packs on IEM transmitters) and who uses each; stage box channels assigned by hand, SLink channels on the console. Devices is now the **Gear Locker** with buckets. To do shows checklists in progress and glows; new Home page; Admin group in the sidebar; thin View-as-user bar |
 | 0.15.0 | New sign-in screen: full screen with the church name and logo on a branded panel (computers) or a clean single column (phones), bigger name field and Continue button, clearer PIN pad, help for forgotten PINs |

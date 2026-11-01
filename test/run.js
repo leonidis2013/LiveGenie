@@ -746,12 +746,23 @@ test('gear knows what it is: wireless mics pair with a receiver, capsules fit a 
   const odd = (await admin.post('/api/devices', { name: 'Odd', kind: 'bogus' })).data.id;
   const one = async (id) => (await admin.get('/api/devices/' + id)).data.device;
   let t = await one(tx);
-  assert.deepStrictEqual([t.kind, t.pair_id, t.txtype, t.capsule, t.freq], ['txmic', rx, 'Handheld', 'Head A', '518.2']);
+  assert.deepStrictEqual([t.kind, t.pair_id, t.txtype, t.capsule, t.freq], ['txmic', rx, 'Handheld', 'Spare head', '518.2']);
   t = await one(cap); assert.deepStrictEqual([t.kind, t.pair_id, t.freq], ['capsule', tx, ''], 'a capsule has no frequency');
   t = await one(mic); assert.deepStrictEqual([t.pair_id, t.txtype], [null, ''], 'a wired mic pairs with nothing');
   assert.strictEqual((await one(odd)).kind, '');
   const row = (await admin.get('/api/devices')).data.devices.find((x) => x.id === tx);
   assert.deepStrictEqual([row.kind, row.pair_id], ['txmic', rx], 'the list carries the kind and pairing');
+  // a mic holds one capsule card: picking one fits it (and takes it off another mic), and the mic shows its make and model
+  const capA = (await admin.post('/api/devices', { name: 'Cap A', kind: 'capsule', make: 'Brand', model: 'K9' })).data.id;
+  const tx2 = (await admin.post('/api/devices', { name: 'Test HH 2', kind: 'txmic', capsule_id: capA })).data.id;
+  assert.deepStrictEqual([(await one(capA)).pair_id, (await one(tx2)).capsule], [tx2, 'Brand K9']);
+  await admin.put('/api/devices/' + tx, { ...(await one(tx)), capsule_id: capA });
+  assert.deepStrictEqual([(await one(capA)).pair_id, (await one(tx)).capsule, (await one(tx2)).capsule], [tx, 'Brand K9', ''], 'it moved off the other mic');
+  await admin.put('/api/devices/' + tx, { ...(await one(tx)), capsule_id: '' });
+  assert.deepStrictEqual([(await one(capA)).pair_id, (await one(tx)).capsule], [null, ''], 'none takes it out');
+  await admin.put('/api/devices/' + capA, { ...(await one(capA)), pair_id: tx2 });
+  assert.strictEqual((await one(capA)).pair_id, tx2, 'fitting from the capsule card works too');
+  await admin.del('/api/devices/' + capA); await admin.del('/api/devices/' + tx2);
   // an edit that leaves the kind out keeps it
   await admin.put('/api/devices/' + tx, { ...(await one(tx)), kind: undefined, name: 'Test HH 1' });
   assert.strictEqual((await one(tx)).kind, 'txmic');

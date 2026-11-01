@@ -19,7 +19,7 @@ const GEAR_KIND = [['mic', 'Microphone'], ['txmic', 'Wireless mic (handheld or p
 const kindLabel = (k) => (GEAR_KIND.find((x) => x[0] === k) || [0, ''])[1];
 /** What each kind pairs with, and how the card says it. */
 const GEAR_PAIR = { txmic: { with: 'receiver', label: 'Receiver', add: 'Add a wireless mic', list: 'Wireless mics' }, capsule: { with: 'txmic', label: 'Fits on', add: 'Add a capsule', list: 'Capsules' }, bodypack: { with: 'iemtx', label: 'Transmitter', add: 'Add an in-ear pack', list: 'In-ear packs' } };
-const PAIR_CHILD = { receiver: 'txmic', txmic: 'capsule', iemtx: 'bodypack' };
+const PAIR_CHILD = { receiver: 'txmic', iemtx: 'bodypack' };
 const TX_KINDS = ['Handheld', 'Bodypack', 'Headset', 'Lavalier', 'Instrument', 'Other'];
 const BUCKET_OF_KIND = { capsule: 'Mics & wireless', mic: 'Mics & wireless', di: 'Mics & wireless', txmic: 'Mics & wireless', receiver: 'Mics & wireless', source: 'Other', iemtx: 'In-ears', bodypack: 'In-ears', headamp: 'In-ears',
   stagebox: 'Stage I/O', network: 'Network', console: 'Mixing', computer: 'Computers', processor: 'Processing', amp: 'Amps', speaker: 'Speakers', wedge: 'Speakers' };
@@ -288,7 +288,7 @@ async function viewDevice(id) {
   const facts = [
     ['What it is', esc(kindLabel(v.kind) + (v.txtype ? ' · ' + v.txtype : ''))],
     [GEAR_PAIR[v.kind] ? GEAR_PAIR[v.kind].label : '', mate ? dl(mate) : ''],
-    ['Capsule or mic', esc(v.capsule)], ['Frequency', v.freq ? esc(v.freq) + ' MHz' : ''],
+    ['Capsule', (() => { const c = v.kind === 'txmic' && all.find((x) => x.kind === 'capsule' && x.pair_id === v.id); return c ? dl(c) + ([c.make, c.model].filter(Boolean).join(' ') && [c.make, c.model].filter(Boolean).join(' ') !== c.name ? ' <span class="note">' + esc([c.make, c.model].filter(Boolean).join(' ')) + '</span>' : '') : esc(v.capsule); })()], ['Frequency', v.freq ? esc(v.freq) + ' MHz' : ''],
     ['Location', esc(v.location)],
     ['Plugged into', v.networked && L.uplink ? dl(L.uplink) + (L.uplink.port ? ' · port <span class="mono">' + esc(L.uplink.port) + '</span>' : '') : ''],
     ['VLAN', !v.networked ? '' : (L.vlans || []).map((x) => '<a class="chip" href="#/map/vlans"><i class="sw" style="background:' + esc(x.color) + '"></i>' + x.vid + ' ' + esc(x.name) + '</a>').join(' ')],
@@ -479,6 +479,43 @@ async function viewDeviceEdit(id) {
   await GearModels.load();
   const all = DEV.list || [];
   /** The wireless part: what it pairs with, transmitter type, capsule, frequency. Only for the kinds that have them. */
+  // the capsule in a wireless mic: one of the capsule cards in the Gear Locker, a new one, or just typed
+  const fitted = id ? all.find((x) => x.kind === 'capsule' && String(x.pair_id) === String(id)) : null;
+  if (d.capsule_id === undefined) d.capsule_id = fitted ? String(fitted.id) : d.capsule ? '__text' : '';
+  const capField = (models) => {
+    const caps = all.filter((x) => x.kind === 'capsule');
+    const holder = (c) => { const h = c.pair_id && String(c.pair_id) !== String(id) && all.find((x) => x.id === c.pair_id); return h ? ' (now on ' + h.name + ')' : ''; };
+    return '<label class="dfield"><span>Capsule</span><select data-cap>' +
+      '<option value="">None</option>' + caps.map((c) => '<option value="' + c.id + '"' + (String(c.id) === String(d.capsule_id) ? ' selected' : '') + '>' + esc(c.name + ([c.make, c.model].filter(Boolean).join(' ') && [c.make, c.model].filter(Boolean).join(' ') !== c.name ? ' · ' + [c.make, c.model].filter(Boolean).join(' ') : '') + holder(c)) + '</option>').join('') +
+      '<option value="__new">+ New capsule…</option><option value="__text"' + (d.capsule_id === '__text' ? ' selected' : '') + '>Type it (not a Gear Locker card)</option></select>' +
+      '<em>' + (caps.length ? 'The capsule in it now. Pick another when you swap it; it moves off the mic it was on.' : 'Add your capsules here as you go; each gets its own card.') + '</em></label>' +
+      (d.capsule_id === '__text' ? '<label class="dfield"><span>Capsule or mic</span><input data-w="capsule" value="' + esc(d.capsule) + '" placeholder="Capsule model, or the lav or headset" list="dcaps"><datalist id="dcaps">' + models.map((m) => '<option value="' + esc(m.model) + '">' + esc(m.make || '') + '</option>').join('') + '</datalist></label>' : '');
+  };
+  const newCapsule = () => new Promise((done) => {
+    const models = GearModels.all().filter((m) => m.kind === 'capsule');
+    modal('<h3>New capsule</h3><p>It gets its own card in the Gear Locker and goes in this mic.</p><form id="ncf"><label>Make</label><input id="ncm" placeholder="Manufacturer"><label>Model</label><input id="ncd" placeholder="Capsule model" list="ncl"><datalist id="ncl">' + models.map((m) => '<option value="' + esc(m.model) + '">' + esc(m.make || '') + '</option>').join('') + '</datalist>' +
+      '<label>Name</label><input id="ncn" placeholder="What your team calls it"><div class="note">Leave it empty to use the make and model.</div><div class="acts"><button type="button" data-close>Cancel</button><button class="primary">Add capsule</button></div></form>', (w, close) => {
+      $('#ncd', w).addEventListener('change', () => { const m = GearModels.find($('#ncd', w).value, 'capsule'); if (m && m.make && !$('#ncm', w).value) $('#ncm', w).value = m.make; });
+      $('#ncf', w).addEventListener('submit', async (e) => {
+        e.preventDefault();
+        const make = $('#ncm', w).value.trim(), model = $('#ncd', w).value.trim();
+        let name = $('#ncn', w).value.trim() || [make, model].filter(Boolean).join(' ');
+        if (!name) return toast('Give it a model or a name', 'bad');
+        const taken = (n) => all.some((x) => x.name.toLowerCase() === n.toLowerCase());
+        if (!$('#ncn', w).value.trim() && taken(name)) { let i = 2; while (taken(name + ' ' + i)) i++; name += ' ' + i; }
+        try {
+          const r = await call('POST', '/api/devices', { name, kind: 'capsule', category: 'audio', make, model });
+          if (model) GearModels.add([{ kind: 'capsule', make, model }]);
+          all.push({ id: r.id, name, kind: 'capsule', make, model, pair_id: null }); forgetDevices(); close(); done(String(r.id));
+        } catch (err) { toast(err.message, 'bad'); }
+      });
+      // closed without adding: put the picker back
+      $$('[data-close]', w).forEach((b) => b.addEventListener('click', () => done(null)));
+      w.addEventListener('mousedown', (e) => { if (e.target === w) done(null); });
+      const esc1 = (e) => { if (e.key === 'Escape') { document.removeEventListener('keydown', esc1); done(null); } };
+      document.addEventListener('keydown', esc1);
+    });
+  });
   const wireless = () => {
     const P = GEAR_PAIR[d.kind], host = $('#dwl');
     $('#dio').classList.toggle('hide', ['mic', 'txmic', 'capsule', 'di', 'bodypack', 'speaker', 'wedge', 'source'].includes(d.kind));
@@ -490,9 +527,15 @@ async function viewDeviceEdit(id) {
       '<label class="dfield"><span>' + P.label + '</span><select data-w="pair_id"><option value="">Not paired</option>' + mates.map((x) => '<option value="' + x.id + '"' + (String(x.id) === String(d.pair_id || '') ? ' selected' : '') + '>' + esc(x.name) + '</option>').join('') + '</select><em>' +
         (mates.length ? (d.kind === 'capsule' ? 'The wireless mic it goes on (leave empty for a spare)' : 'Its card lists everything paired with it') : 'No ' + kindLabel(P.with).toLowerCase() + ' in the Gear Locker yet') + '</em></label>' +
       (d.kind === 'txmic' ? '<label class="dfield"><span>Type</span><select data-w="txtype"><option value="">—</option>' + TX_KINDS.map((t) => '<option' + (t === d.txtype ? ' selected' : '') + '>' + t + '</option>').join('') + '</select></label>' +
-        '<label class="dfield"><span>Capsule or mic</span><input data-w="capsule" value="' + esc(d.capsule) + '" placeholder="Capsule model, or the lav or headset" list="dcaps"><datalist id="dcaps">' + capsules.map((m) => '<option value="' + esc(m.model) + '">' + esc(m.make || '') + '</option>').join('') + '</datalist><em>What is on it now. Swap it here when it changes.</em></label>' : '') +
+        capField(capsules) : '') +
       (d.kind === 'txmic' || d.kind === 'bodypack' ? '<label class="dfield"><span>Frequency</span><input data-w="freq" value="' + esc(d.freq) + '" placeholder="MHz" inputmode="decimal"></label>' : '') + '</div>';
     $$('[data-w]', host).forEach((x) => x.addEventListener(x.tagName === 'SELECT' ? 'change' : 'input', () => { d[x.dataset.w] = x.value; dirty(); }));
+    const cs = $('[data-cap]', host);
+    if (cs) cs.addEventListener('change', async () => {
+      let v = cs.value;
+      if (v === '__new') { v = await newCapsule(); if (v == null) { cs.value = d.capsule_id; return; } }
+      d.capsule_id = v; dirty(); wireless();
+    });
   };
   wireless();
   $('#dkind').addEventListener('change', () => {
@@ -540,21 +583,28 @@ async function viewDeviceEdit(id) {
     catch (e) { toast(e.message, 'bad'); $('#eMsg').textContent = S.dirty ? 'Unsaved changes' : ''; }
   });
   $('#dCancel').addEventListener('click', () => { location.hash = id ? '#/d/' + id : '#/gear'; });
+  /** What gets saved: a wireless mic sends its capsule card (or none, keeping a typed one). */
+  const body = () => {
+    const b = { ...d };
+    if (d.kind === 'txmic') { b.capsule_id = /^\d+$/.test(String(d.capsule_id)) ? d.capsule_id : ''; if (d.capsule_id === '__text') b.capsule_typed = true; else delete b.capsule; }
+    else delete b.capsule_id;
+    return b;
+  };
   $('#dSave').addEventListener('click', async () => {
     $('#dSave').disabled = true;
     try {
-      if (id) { await call('PUT', '/api/devices/' + id, d); S.dirty = false; forgetDevices(); toast('Saved', 'ok'); location.hash = '#/d/' + id; }
+      if (id) { await call('PUT', '/api/devices/' + id, body()); S.dirty = false; forgetDevices(); toast('Saved', 'ok'); location.hash = '#/d/' + id; }
       else {
         const n = Math.max(1, Math.min(48, Number($('#dqty').value) || 1));
         let x;
-        if (n === 1) x = await call('POST', '/api/devices', d);
-        else for (let i = 1; i <= n; i++) { const one = await call('POST', '/api/devices', { ...d, name: d.name + ' ' + i, aliases: [] }); if (i === 1) x = one; }
+        if (n === 1) x = await call('POST', '/api/devices', body());
+        else for (let i = 1; i <= n; i++) { const one = await call('POST', '/api/devices', { ...body(), name: d.name + ' ' + i, aliases: [], ...(i > 1 && d.kind === 'txmic' && d.capsule_id !== '__text' ? { capsule_id: '' } : {}) }); if (i === 1) x = one; }
         S.dirty = false; forgetDevices(); toast(n === 1 ? 'Added to the Gear Locker' : n + ' added to the Gear Locker', 'ok');
         location.hash = n === 1 ? '#/d/' + x.id : '#/gear';
       }
       // next time this model is one pick away, and knows what it is
       if (d.kind && d.model) GearModels.add([{ kind: d.kind, make: d.make, model: d.model, capsule: d.kind === 'txmic' ? d.txtype : undefined }]);
-      if (d.kind === 'txmic' && d.capsule && !GearModels.find(d.capsule)) GearModels.add([{ kind: 'capsule', model: d.capsule }]);
+      if (d.kind === 'txmic' && d.capsule_id === '__text' && d.capsule && !GearModels.find(d.capsule)) GearModels.add([{ kind: 'capsule', model: d.capsule }]);
     } catch (e) { toast(e.message, 'bad'); }
     finally { const b = $('#dSave'); if (b) b.disabled = false; }
   });

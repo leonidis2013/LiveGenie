@@ -254,7 +254,10 @@ async function viewDevice(id) {
   let d;
   try { d = await get('/api/devices/' + id); }
   catch (e) {
-    if (e.status === 404) { app.innerHTML = '<div class="card empty">' + esc(e.message) + '<div style="margin-top:12px"><a href="#/gear">Gear Locker</a></div></div>'; return; }
+    if (e.status === 404) {
+      if (S.landing) { S.landing = false; toast('That gear is no longer in the Gear Locker'); history.replaceState(null, '', '#/gear'); lastHash = '#/gear'; return viewDevices(new URLSearchParams()); }
+      app.innerHTML = '<div class="card empty"><b>That gear is no longer in the Gear Locker.</b><div style="margin-top:12px"><a class="btn" href="#/gear">Gear Locker</a></div></div>'; return;
+    }
     throw e;
   }
   await loadDevices();

@@ -4,7 +4,7 @@
 
 The Rolling Hills Community Church AVL knowledge base: one web app where volunteers find how our system works, how to run a service and how to fix what broke. Part of the Live series (LiveMic, LiveCompanion, LivePi, LiveVoice).
 
-Version 0.21.0 · © 2026 Jerod Ulicki
+Version 0.21.1 · © 2026 Jerod Ulicki
 
 ## What it does
 
@@ -118,7 +118,8 @@ Run it on the TrueNAS host and reach it from the AVL and office VLANs through th
 | 0.11.0 | Phone layout (bottom tabs, + button, bottom sheets, To do screen) and desktop layout (sidebar with spaces and pages, On this page outline) |
 | 0.12.0 | Phone sign in: tap your name, PIN pad, and QR code sign in from a signed-in computer |
 | 0.13.0 | Stage patch: one visual signal-flow drawing for the whole system (equipment pane, drag to connect, follow a signal, overview and sockets, cable styles, checks), with the input, output, wireless, in-ear and cable lists and the PDF made from it; old patch lists moved onto it |
-| 0.21.0 | Stage patch easier to read and use: bigger cards and text that never overlaps, a taller drawing, the equipment pane only when you need it, **Auto-arrange** (one-time layout by signal flow), **Label cables** (smart labels from a pattern), checks as a list, clearer "Cables in a row"; wireless channels get a transmitter (type, make, model, frequency) and a capsule or mic, added from "+ transmitter" on the receiver; no specific gear names anywhere in the app; Gear Locker: location picked from a list (+ New location), filter and group by location, IP/MAC/plugged-into only when "On the network" is ticked (this release) |
+| 0.21.1 | Opening LiveGenie (or signing in) on an old link to a page or gear that is gone goes to Home instead of "Page not found"; a clearer message with Home and Search when you follow one inside the app (this release) |
+| 0.21.0 | Stage patch easier to read and use: bigger cards and text that never overlaps, a taller drawing, the equipment pane only when you need it, **Auto-arrange** (one-time layout by signal flow), **Label cables** (smart labels from a pattern), checks as a list, clearer "Cables in a row"; wireless channels get a transmitter (type, make, model, frequency) and a capsule or mic, added from "+ transmitter" on the receiver; no specific gear names anywhere in the app; Gear Locker: location picked from a list (+ New location), filter and group by location, IP/MAC/plugged-into only when "On the network" is ticked |
 | 0.20.0 | To do lists live on one page, in groups, not on help pages: tick them on To do; Admin › To do lists makes, edits, moves and orders lists and groups; checklists on pages move there with their ticks and log |
 | 0.19.0 | Admin › To do lists: every checklist in one place; make, edit (steps and reset times), start over and remove |
 | 0.18.0 | Highlight boxes on a gear photo: drawn, moved, resized, named and coloured by admins; numbered on the card with a list everyone can hover |

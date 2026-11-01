@@ -302,6 +302,7 @@ function signInPanel(host, opts = {}) {
       close(); document.removeEventListener('keydown', keys);
       await loadState(); paintHeader();
       toast('Signed in as ' + user.name, 'ok');
+      S.landing = true;
       if (then) then(); else route();
     };
     const submit = async () => {
@@ -683,8 +684,11 @@ async function viewPage(id, focusChecklist) {
   try { [d] = await Promise.all([get('/api/pages/' + id), loadDevices()]); }
   catch (e) {
     if (e.status === 404) {
+      // opened from an old link or a page left open before signing in: just go Home
+      if (S.landing && S.state.user) { S.landing = false; toast('That page is no longer here, so here is Home'); history.replaceState(null, '', '#/'); lastHash = '#/'; return viewHome(); }
       setTitle('Not found');
-      app.innerHTML = '<div class="card empty">' + esc(e.message) + (S.state.user ? '' : '<div style="margin-top:12px"><button class="primary" id="si">Sign in</button></div>') + '</div>';
+      app.innerHTML = '<div class="card empty">' + icon('search') + '<div style="margin-top:8px"><b>This page is no longer here.</b></div><div class="note" style="margin:4px 0 12px">It may have been deleted or moved. Pages in the trash can be brought back from Admin › Trash.</div>' +
+        (S.state.user ? '<a class="btn primary" href="#/">' + icon('home') + 'Home</a> <a class="btn" href="#/search">' + icon('search') + 'Search</a>' : '<button class="primary" id="si">Sign in</button>') + '</div>';
       const b = $('#si'); if (b) b.addEventListener('click', () => signInDialog());
       return;
     }
@@ -1517,6 +1521,7 @@ async function route() {
   document.body.classList.toggle('wideview', p[0] === 'patch');
   if (p[0] !== 'settings') S.lastRoute = h;
   if (p[0] !== 'search') $('#q').value = '';
+  if (S.landing === undefined) S.landing = true;
   try {
     if (S.state.setupNeeded) return await viewSetup();
     if (p[0] === 'link' && p[1]) return await useSignInLink(p[1]);
@@ -1538,7 +1543,9 @@ async function route() {
     else if (p[0] === 'todo') await viewTodo(qs);
     else if (p[0] === 'settings') await viewSettings(p[1]);
     else if (p[0] === 'admin') await viewAdmin(p[1]);
-    else app.innerHTML = '<div class="card empty">Page not found. <a href="#/">Go home</a></div>';
+    else if (S.landing) { history.replaceState(null, '', '#/'); lastHash = '#/'; await viewHome(); }
+    else app.innerHTML = '<div class="card empty">That address is not part of LiveGenie. <a href="#/">Go home</a></div>';
+    if (S.state.user) S.landing = false;
     if (n === routing && !S.noScroll) window.scrollTo(0, 0);
     S.noScroll = false;
     if (n === routing) Shell.update(p);

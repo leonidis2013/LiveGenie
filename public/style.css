@@ -1455,3 +1455,11 @@ header.hhero { background:none; border:0; box-shadow:none; padding:0; position:s
 .plprev { margin:10px 0; max-height:34vh; overflow:auto; }
 .plprev td { font-size:13px; }
 #pcf .note { display:block; margin-top:4px; }
+
+/* gear form: the inputs/outputs pair and the wireless part (0.22.0) */
+.dform .dio { grid-column:1 / -1; display:grid; grid-template-columns:1fr 1fr; gap:10px 14px; }
+.dform .dio.hide { display:none; }
+.dform .dwl:empty { display:none; }
+.dform .dwl > .dform { padding:12px; border-radius:12px; background:var(--card2); border:1px solid var(--line); }
+.dform .dman .note { font-weight:400; }
+.pairs .row .k { color:var(--muted); font-size:13px; margin-left:auto; }

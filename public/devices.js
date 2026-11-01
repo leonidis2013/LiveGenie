@@ -11,9 +11,18 @@ const DEV = { list: null, at: 0, dm: null, loading: null, buckets: [] };
  * Gear Locker buckets. Gear sorts itself by what it is (its kind on the stage patch, else its model and category);
  * an admin can move a piece to another bucket, rename, reorder or add buckets.
  */
-const AUTO_BUCKETS = ['Mics & wireless', 'In-ears', 'Stage I/O', 'Mixing', 'Processing', 'Amps', 'Speakers & monitors', 'Video', 'Lighting', 'Network', 'Computers', 'Power', 'Other'];
-const BUCKET_OF_KIND = { mic: 'Mics & wireless', di: 'Mics & wireless', txmic: 'Mics & wireless', receiver: 'Mics & wireless', source: 'Other', iemtx: 'In-ears', bodypack: 'In-ears', headamp: 'In-ears',
-  stagebox: 'Stage I/O', network: 'Network', console: 'Mixing', computer: 'Computers', processor: 'Processing', amp: 'Amps', speaker: 'Speakers & monitors', wedge: 'Speakers & monitors' };
+const AUTO_BUCKETS = ['Mics & wireless', 'In-ears', 'Stage I/O', 'Mixing', 'Processing', 'Amps', 'Speakers', 'Video', 'Lighting', 'Network', 'Computers', 'Power', 'Other'];
+/** What a piece of gear is, in the order the "What is it?" list shows them. Same words as the stage patch. */
+const GEAR_KIND = [['mic', 'Microphone'], ['txmic', 'Wireless mic (handheld or pack)'], ['capsule', 'Mic capsule or head'], ['receiver', 'Wireless receiver'], ['di', 'DI box'], ['source', 'Instrument or playback'],
+  ['iemtx', 'In-ear transmitter'], ['bodypack', 'In-ear pack'], ['headamp', 'Headphone amp'], ['console', 'Mixer'], ['stagebox', 'Stage box'], ['processor', 'Processor'], ['amp', 'Amplifier'], ['speaker', 'Speaker'], ['wedge', 'Wedge or monitor'],
+  ['network', 'Network'], ['computer', 'Computer'], ['other', 'Something else']];
+const kindLabel = (k) => (GEAR_KIND.find((x) => x[0] === k) || [0, ''])[1];
+/** What each kind pairs with, and how the card says it. */
+const GEAR_PAIR = { txmic: { with: 'receiver', label: 'Receiver', add: 'Add a wireless mic', list: 'Wireless mics' }, capsule: { with: 'txmic', label: 'Fits on', add: 'Add a capsule', list: 'Capsules' }, bodypack: { with: 'iemtx', label: 'Transmitter', add: 'Add an in-ear pack', list: 'In-ear packs' } };
+const PAIR_CHILD = { receiver: 'txmic', txmic: 'capsule', iemtx: 'bodypack' };
+const TX_KINDS = ['Handheld', 'Bodypack', 'Headset', 'Lavalier', 'Instrument', 'Other'];
+const BUCKET_OF_KIND = { capsule: 'Mics & wireless', mic: 'Mics & wireless', di: 'Mics & wireless', txmic: 'Mics & wireless', receiver: 'Mics & wireless', source: 'Other', iemtx: 'In-ears', bodypack: 'In-ears', headamp: 'In-ears',
+  stagebox: 'Stage I/O', network: 'Network', console: 'Mixing', computer: 'Computers', processor: 'Processing', amp: 'Amps', speaker: 'Speakers', wedge: 'Speakers' };
 function autoBucket(d) {
   if (d.kind && BUCKET_OF_KIND[d.kind]) return BUCKET_OF_KIND[d.kind];
   // its type on your model list, else plain words in its name
@@ -26,10 +35,12 @@ function autoBucket(d) {
   if (/console|mixer|desk/.test(t)) return 'Mixing';
   if (/\bdsp\b|processor|crossover/.test(t)) return 'Processing';
   if (/amplifier|\bamp\b/.test(t)) return 'Amps';
-  if (/speaker|\bsub\b|subwoofer|wedge|monitor/.test(t)) return 'Speakers & monitors';
+  if (/speaker|\bsub\b|subwoofer|wedge|monitor|column|line ?array|\bpa\b|cabinet/.test(t)) return 'Speakers';
   return { video: 'Video', lighting: 'Lighting', network: 'Network', computer: 'Computers', power: 'Power', audio: 'Other', other: 'Other' }[d.category] || 'Other';
 }
-const bucketOf = (d) => d.bucket || autoBucket(d);
+/** Older names for a bucket, so gear filed under them lands in the new one. */
+const BUCKET_RENAMED = { 'Speakers & monitors': 'Speakers' };
+const bucketOf = (d) => { const b = d.bucket || autoBucket(d); return BUCKET_RENAMED[b] || b; };
 /** Every location used in the Gear Locker, sorted (plus this one). */
 const gearLocations = (list, extra) => [...new Set(list.map((d) => d.location).concat(extra ? [extra] : []).filter(Boolean))].sort((a, b) => a.localeCompare(b, undefined, { numeric: true }));
 /** Every bucket name in order: the admin's list first, then automatic ones that have gear. */
@@ -44,7 +55,7 @@ async function loadDevices(force) {
   if (!force && DEV.list && Date.now() - DEV.at < 30000) return DEV.list;
   if (DEV.loading) return DEV.loading;
   DEV.loading = get('/api/devices').then((d) => {
-    DEV.list = d.devices; DEV.buckets = d.buckets || []; DEV.at = Date.now();
+    DEV.list = d.devices; DEV.buckets = [...new Set((d.buckets || []).map((b) => BUCKET_RENAMED[b] || b))]; DEV.at = Date.now();
     DEV.dm = DevMatch.build(d.devices);
     return DEV.list;
   }).catch(() => DEV.list || []).finally(() => { DEV.loading = null; });
@@ -150,7 +161,8 @@ function devThumb(d, size) {
 // ---------- the Gear Locker ----------
 async function viewDevices(qs) {
   setTitle('Gear Locker');
-  const list = await loadDevices(true);
+  // your model list says what each model is (a speaker, a mic), so gear sorts into the right bucket
+  const [list] = await Promise.all([loadDevices(true), GearModels.load()]);
   let bk = qs.get('b') || '';
   let q = '';
   let lc = qs.get('loc') || '';
@@ -164,7 +176,7 @@ async function viewDevices(qs) {
   app.innerHTML = `<div class="crumbs"><a href="#/">Home</a><span>/</span></div>
     <div class="bar"><div class="grow"><h1 class="title" style="font-size:22px;letter-spacing:.06em;margin:4px 0 2px">GEAR LOCKER</h1>
       <div class="note">Every piece of gear, sorted into buckets. Its name, nickname or IP typed on a page links to its card here.</div></div>
-      ${can('admin') ? '<a class="btn" href="#/gear-setup">' + icon('spark') + '<span class="hide-sm">Guided setup</span></a>' : ''}
+      ${can('admin') && !(S.state.gearSetup && S.state.gearSetup.done) ? '<a class="btn" href="#/gear-setup">' + icon('spark') + '<span class="hide-sm">Guided setup</span></a>' : ''}
       ${can('admin') ? '<button class="btn" id="gBk">' + icon('list') + '<span class="hide-sm">Buckets</span></button>' : ''}
       ${sug.length ? '<button class="btn" id="imp">' + icon('net') + 'From IP lists (' + sug.length + ')</button>' : ''}
       ${can('admin') ? '<button class="primary btn" id="newDev">' + icon('plus') + 'Add gear</button>' : ''}</div>
@@ -174,7 +186,7 @@ async function viewDevices(qs) {
     <div class="gchips" id="dcat"><button data-b="" class="chipb on">All <em>${list.length}</em></button>${order.filter((b) => list.some((d) => bucketOf(d) === b)).map((b) => '<button class="chipb" data-b="' + esc(b) + '">' + esc(b) + ' <em>' + list.filter((d) => bucketOf(d) === b).length + '</em></button>').join('')}</div>
     <div id="dgrid"></div>`;
   const cardHtml = (d) => '<a class="dcard" href="#/d/' + d.id + '">' + devThumb(d, 46) +
-    '<div class="t"><b>' + esc(d.name) + '</b><span>' + esc([d.make, d.model].filter(Boolean).join(' ') || CAT[d.category]) + '</span>' +
+    '<div class="t"><b>' + esc(d.name) + '</b><span>' + esc([d.make, d.model].filter(Boolean).join(' ') || [d.txtype || kindLabel(d.kind), d.capsule].filter(Boolean).join(' · ') || CAT[d.category]) + (d.pair_id && (DEV.list || []).find((x) => x.id === d.pair_id) ? ' <span class="note">→ ' + esc(DEV.list.find((x) => x.id === d.pair_id).name) + '</span>' : '') + '</span>' +
     '<span class="dmeta">' + [d.location ? icon('pin') + esc(d.location) : '', d.networked && d.ips.length ? '<span class="mono">' + esc(d.ips[0]) + '</span>' + (d.ips.length > 1 ? ' +' + (d.ips.length - 1) : '') : '', users.get(d.id) ? icon('user') + esc(users.get(d.id)) : ''].filter(Boolean).join('<i>·</i>') + '</span></div>' +
     '<div class="dbadges">' + (d.files ? '<span class="badge" title="' + d.files + ' manual' + (d.files === 1 ? '' : 's') + '">' + icon('pdf') + d.files + '</span>' : '') + (d.tech_only ? '<span class="badge tech">Tech only</span>' : '') + '</div></a>';
   const paint = () => {
@@ -270,14 +282,20 @@ async function viewDevice(id) {
   }).join('');
   const L = d.links || {};
   const dl = (x) => '<a href="#/d/' + x.id + '">' + esc(x.name) + '</a>';
+  const all = DEV.list || [];
+  const mate = v.pair_id && all.find((x) => x.id === v.pair_id);
+  const kids = PAIR_CHILD[v.kind] ? all.filter((x) => x.pair_id === v.id && x.kind === PAIR_CHILD[v.kind]) : [];
   const facts = [
+    ['What it is', esc(kindLabel(v.kind) + (v.txtype ? ' · ' + v.txtype : ''))],
+    [GEAR_PAIR[v.kind] ? GEAR_PAIR[v.kind].label : '', mate ? dl(mate) : ''],
+    ['Capsule or mic', esc(v.capsule)], ['Frequency', v.freq ? esc(v.freq) + ' MHz' : ''],
     ['Location', esc(v.location)],
     ['Plugged into', v.networked && L.uplink ? dl(L.uplink) + (L.uplink.port ? ' · port <span class="mono">' + esc(L.uplink.port) + '</span>' : '') : ''],
     ['VLAN', !v.networked ? '' : (L.vlans || []).map((x) => '<a class="chip" href="#/map/vlans"><i class="sw" style="background:' + esc(x.color) + '"></i>' + x.vid + ' ' + esc(x.name) + '</a>').join(' ')],
     ['Connected here', (L.children || []).map((x) => '<div>' + (x.port ? '<span class="mono">' + esc(x.port) + '</span> ' : '') + dl(x) + '</div>').join('')],
     ['Signal from', (L.signalIn || []).map((x) => dl(x) + (x.count > 1 ? ' <span class="note">×' + x.count + '</span>' : '')).join(', ')],
     ['Signal to', (L.signalOut || []).map((x) => dl(x) + (x.count > 1 ? ' <span class="note">×' + x.count + '</span>' : '')).join(', ')], ['IP address' + (v.ips.length > 1 ? 'es' : ''), v.networked ? ipRows : ''], ['Inputs / outputs', v.inputs || v.outputs ? (v.inputs || 0) + ' in · ' + (v.outputs || 0) + ' out' : ''], ['MAC', v.networked && v.mac ? '<span class="mono">' + esc(v.mac) + '</span>' : ''],
-    ['Also called', esc(v.aliases.join(', '))], ['Manual', v.manual_url ? '<a href="' + esc(v.manual_url) + '" target="_blank" rel="noopener">' + esc(v.manual_url.replace(/^https?:\/\//, '').slice(0, 60)) + '</a>' : '']
+    ['Also called', esc(v.aliases.join(', '))]
   ].filter((f) => f[1]);
   const used = d.usedOn;
   app.innerHTML = `<div class="page dev">
@@ -289,6 +307,10 @@ async function viewDevice(id) {
     ${facts.length ? '<div class="card facts">' + facts.map((f) => '<div class="fact"><span>' + f[0] + '</span><div>' + f[1] + '</div></div>').join('') + '</div>' : ''}
     ${v.notes.trim() ? '<div class="doc" id="dnotes">' + md(v.notes) + '</div>' : ''}
     ${v.photo ? '<div class="section" style="margin-top:20px" id="dphoto"><div class="hsh"><h2>Photo</h2>' + (can('admin') ? '<button class="btn" id="dmk">' + icon('edit') + (v.marks.length ? 'Edit highlights' : 'Highlight on the photo') + '</button>' : '') + '</div><div id="dmarks"></div></div>' : ''}
+    ${PAIR_CHILD[v.kind] ? (() => { const P = GEAR_PAIR[PAIR_CHILD[v.kind]];
+      return '<div class="section" style="margin-top:20px"><div class="hsh"><h2>' + P.list + '</h2>' + (can('admin') ? '<a class="btn" href="#/gear/new?kind=' + PAIR_CHILD[v.kind] + '&pair=' + v.id + '">' + icon('plus') + P.add + '</a>' : '') + '</div>' +
+        (kids.length ? '<div class="list pairs">' + kids.map((x) => '<a class="row" href="#/d/' + x.id + '">' + devThumb(x, 36) + '<div class="t"><b>' + esc(x.name) + '</b><span>' + esc([x.txtype, x.capsule, x.freq && x.freq + ' MHz'].filter(Boolean).join(' · ') || [x.make, x.model].filter(Boolean).join(' ')) + '</span></div></a>').join('') + '</div>'
+          : '<div class="card empty" style="padding:16px">None paired yet.' + (can('admin') ? ' Add one here, or pick this ' + kindLabel(v.kind).toLowerCase() + ' on its card.' : '') + '</div>') + '</div>'; })() : ''}
     <div class="section" style="margin-top:20px"><h2>Manuals and documents</h2><div id="dfiles"></div></div>
     <div class="section" style="margin-top:20px"><h2>Used on</h2>${used.length ? '<div class="list used">' + used.map((u) => {
       const first = u.hits.find((h) => h.block);
@@ -387,11 +409,13 @@ function marksEditor(v, done) {
 /** Manuals, quick-start guides, wiring diagrams: stored in LiveGenie (and in its backups), opened in the browser. */
 const fileSize = (n) => (n > 1048576 ? (n / 1048576).toFixed(1) + ' MB' : Math.max(1, Math.round(n / 1024)) + ' KB');
 const fileIcon = (m) => (m === 'application/pdf' ? 'pdf' : /^image\//.test(m) ? 'image' : 'text');
+/** Manuals and documents: files stored in LiveGenie, and the manufacturer's web page if there is one. Same on the card and in Edit. */
 function paintFiles(host, v, files) {
-  host.innerHTML = (files.length ? '<div class="list files">' + files.map((f) => '<div class="row frow">' + icon(fileIcon(f.mime)) + '<a class="t" href="/files/' + esc(f.id) + '" target="_blank" rel="noopener"><b>' + esc(f.name) + '</b><span>' + fileSize(f.bytes) + ' · added ' + esc(ago(f.uploaded_at)) + (f.uploaded_by ? ' by ' + esc(f.uploaded_by) : '') + '</span></a>' +
+  const web = v.manual_url ? '<div class="row frow">' + icon('link') + '<a class="t" href="' + esc(v.manual_url) + '" target="_blank" rel="noopener"><b>Manufacturer\'s page</b><span>' + esc(v.manual_url.replace(/^https?:\/\//, '').slice(0, 70)) + '</span></a></div>' : '';
+  host.innerHTML = (files.length || web ? '<div class="list files">' + web + files.map((f) => '<div class="row frow">' + icon(fileIcon(f.mime)) + '<a class="t" href="/files/' + esc(f.id) + '" target="_blank" rel="noopener"><b>' + esc(f.name) + '</b><span>' + fileSize(f.bytes) + ' · added ' + esc(ago(f.uploaded_at)) + (f.uploaded_by ? ' by ' + esc(f.uploaded_by) : '') + '</span></a>' +
     '<a class="ghost abtn" href="/files/' + esc(f.id) + '?download=1" title="Download">' + icon('download') + '</a>' + (can('admin') ? '<button class="ghost danger" data-fdel="' + esc(f.id) + '" title="Remove">' + icon('trash') + '</button>' : '') + '</div>').join('') + '</div>'
     : '<div class="card empty" style="padding:16px">' + (can('admin') ? 'No manuals yet. Upload the PDF manual, a quick-start guide or a wiring diagram.' : 'No manuals yet.') + '</div>') +
-    (can('admin') ? '<div class="adder" style="margin-top:8px"><input type="file" id="fup" class="hide" multiple accept=".pdf,image/*,.txt,.doc,.docx,.xls,.xlsx,.zip"><button class="btn" id="fupb">' + icon('upload') + 'Upload a manual or document</button><span class="note" id="fmsg"></span></div>' : '');
+    (can('admin') ? '<div class="adder" style="margin-top:8px"><input type="file" id="fup" class="hide" multiple accept=".pdf,image/*,.txt,.doc,.docx,.xls,.xlsx,.zip"><button type="button" class="btn" id="fupb">' + icon('upload') + 'Upload a manual or document</button><span class="note" id="fmsg"></span></div>' : '');
   $$('[data-fdel]', host).forEach((b) => b.addEventListener('click', async () => {
     const f = files.find((x) => x.id === b.dataset.fdel);
     if (!await confirmBox('Remove ' + f.name + '?', 'It is deleted from LiveGenie (older backups still have it).', 'Remove', true)) return;
@@ -413,7 +437,9 @@ function paintFiles(host, v, files) {
 async function viewDeviceEdit(id) {
   if (!can('admin')) { app.innerHTML = '<div class="card empty">Admins can add and change devices.</div>'; if (!S.state.user) signInDialog(() => route()); return; }
   await loadDevices();
-  const d = id ? (await get('/api/devices/' + id)).device : { bucket: new URLSearchParams((location.hash.split('?')[1] || '')).get('b') || '', inputs: '', outputs: '', uplink_id: '', uplink_port: '', name: '', aliases: [], category: 'audio', make: '', model: '', location: '', ip: '', mac: '', photo: '', manual_url: '', notes: '', tech_only: false };
+  const full = id ? await get('/api/devices/' + id) : null;
+  const hq = new URLSearchParams(location.hash.split('?')[1] || '');
+  const d = full ? full.device : { kind: GEAR_KIND.some((x) => x[0] === hq.get('kind')) ? hq.get('kind') : '', pair_id: hq.get('pair') || '', txtype: '', capsule: '', freq: '', bucket: hq.get('b') || '', inputs: '', outputs: '', uplink_id: '', uplink_port: '', name: '', aliases: [], category: 'audio', make: '', model: '', location: '', ip: '', mac: '', photo: '', manual_url: '', notes: '', tech_only: false };
   setTitle(id ? 'Edit ' + d.name : 'Add gear');
   const locations = gearLocations(DEV.list || [], d.location);
   S.dirty = false;
@@ -423,15 +449,19 @@ async function viewDeviceEdit(id) {
     <div class="card" style="margin-top:8px">
       <div class="dphoto"><div id="dph"></div><input type="file" accept="image/*" class="hide" id="dpf"><div><button type="button" id="dpb">${d.photo ? 'Replace photo' : 'Add photo'}</button>${d.photo ? ' <button type="button" class="ghost danger" id="dpx">Remove</button>' : ''}<div class="note">A photo of the device or its rack position helps volunteers find it.</div></div></div>
       <div class="dform">
+        <label class="dfield wide"><span>What is it?</span><select data-k="kind" id="dkind"><option value="">Choose…</option>${GEAR_KIND.map((k) => '<option value="' + k[0] + '"' + (k[0] === d.kind ? ' selected' : '') + '>' + k[1] + '</option>').join('')}</select><em>Sorts it into the right bucket, and lets wireless mics pair with their receiver</em></label>
         ${f('name', 'Name', 'What your team calls it', { wide: true })}
+        ${id ? '' : '<label class="dfield"><span>How many?</span><input id="dqty" type="number" min="1" max="48" value="1" inputmode="numeric"><em>More than one makes a card for each, numbered (SM58 1, SM58 2…)</em></label>'}
         <label class="dfield wide"><span>Also called</span><input data-k="aliases" value="${esc(d.aliases.join(', '))}" placeholder="Nicknames, comma between"><em>Other names people type, separated by commas. Each one links to this card.</em></label>
         <label class="dfield"><span>Category</span><select data-k="category">${Object.keys(CAT).map((k) => '<option value="' + k + '"' + (k === d.category ? ' selected' : '') + '>' + CAT[k] + '</option>').join('')}</select></label>
-        <label class="dfield"><span>Bucket</span><select data-k="bucket"><option value="">Automatic (${esc(autoBucket({ ...d, kind: (DEV.list || []).find((x) => x.id === d.id)?.kind || '' }))})</option>${bucketOrder(DEV.list || []).map((b) => '<option' + (b === d.bucket ? ' selected' : '') + '>' + esc(b) + '</option>').join('')}</select><em>Where it sits in the Gear Locker</em></label>
-        ${f('make', 'Make', 'Manufacturer')}${f('model', 'Model', 'Model number')}
+        <label class="dfield"><span>Bucket</span><select data-k="bucket"><option value="" id="dbauto">Automatic (${esc(autoBucket({ ...d, kind: (DEV.list || []).find((x) => x.id === d.id)?.kind || '' }))})</option>${bucketOrder(DEV.list || []).map((b) => '<option' + (b === d.bucket ? ' selected' : '') + '>' + esc(b) + '</option>').join('')}</select><em>Where it sits in the Gear Locker</em></label>
+        ${f('make', 'Make', 'Manufacturer')}<label class="dfield"><span>Model</span><input data-k="model" value="${esc(d.model)}" placeholder="Model number" list="dmodels"><datalist id="dmodels"></datalist></label>
+        <div class="dwl wide" id="dwl"></div>
         <label class="dfield"><span>Location</span><select data-k="location" id="dloc"><option value="">Not set</option>${locations.map((l) => '<option' + (l === d.location ? ' selected' : '') + '>' + esc(l) + '</option>').join('')}<option value="__new">+ New location…</option></select><em>Where it lives: a rack, a room, a road case</em></label>
-        <label class="dfield"><span>Inputs</span><input data-k="inputs" type="number" min="0" max="512" value="${esc(d.inputs || '')}" placeholder="0"><em>For stage boxes and consoles</em></label>
-        <label class="dfield"><span>Outputs</span><input data-k="outputs" type="number" min="0" max="512" value="${esc(d.outputs || '')}" placeholder="0"></label>
-        ${f('manual_url', 'Manual link', 'https://…', { wide: true, mode: 'url' })}
+        <div class="dio wide" id="dio"><label class="dfield"><span>Inputs</span><input data-k="inputs" type="number" min="0" max="512" value="${esc(d.inputs || '')}" placeholder="0"><em>For stage boxes and consoles</em></label>
+        <label class="dfield"><span>Outputs</span><input data-k="outputs" type="number" min="0" max="512" value="${esc(d.outputs || '')}" placeholder="0"></label></div>
+        <div class="dfield wide dman"><span>Manuals and documents</span>${id ? '<div id="dfiles2"></div>' : '<div class="note">Save it first, then upload manuals here.</div>'}
+          <label class="dfield" style="margin-top:8px"><span>Manufacturer's page <span class="note">(optional web address)</span></span><input data-k="manual_url" value="${esc(d.manual_url)}" placeholder="https://…" inputmode="url"></label></div>
         <label class="tog dfield wide ${d.networked ? 'on' : ''}"><input type="checkbox" data-k="networked" ${d.networked ? 'checked' : ''}>On the network <em>Has an IP address, a MAC or plugs into a switch</em></label>
         <div class="dnet wide${d.networked ? '' : ' hide'}" id="dnet">
         ${f('ip', 'IP address', '0.0.0.0', { mono: true, mode: 'decimal', hint: 'Addresses in IP lists link here too when the name matches.' })}
@@ -446,6 +476,36 @@ async function viewDeviceEdit(id) {
     <div class="edbar"><span class="note" id="eMsg"></span><button id="dCancel">Cancel</button><button class="primary" id="dSave">${id ? 'Save' : 'Add to the Gear Locker'}</button></div>
   </div>`;
   const dirty = () => { S.dirty = true; $('#eMsg').textContent = 'Unsaved changes'; };
+  await GearModels.load();
+  const all = DEV.list || [];
+  /** The wireless part: what it pairs with, transmitter type, capsule, frequency. Only for the kinds that have them. */
+  const wireless = () => {
+    const P = GEAR_PAIR[d.kind], host = $('#dwl');
+    $('#dio').classList.toggle('hide', ['mic', 'txmic', 'capsule', 'di', 'bodypack', 'speaker', 'wedge', 'source'].includes(d.kind));
+    $('#dmodels').innerHTML = GearModels.all().filter((m) => !d.kind || m.kind === d.kind).map((m) => '<option value="' + esc(m.model) + '">' + esc(m.make || '') + '</option>').join('');
+    if (!P && d.kind !== 'txmic') { host.innerHTML = ''; return; }
+    const mates = all.filter((x) => x.kind === P.with && String(x.id) !== String(id));
+    const capsules = GearModels.all().filter((m) => m.kind === 'capsule' || m.kind === 'mic');
+    host.innerHTML = '<div class="dform">' +
+      '<label class="dfield"><span>' + P.label + '</span><select data-w="pair_id"><option value="">Not paired</option>' + mates.map((x) => '<option value="' + x.id + '"' + (String(x.id) === String(d.pair_id || '') ? ' selected' : '') + '>' + esc(x.name) + '</option>').join('') + '</select><em>' +
+        (mates.length ? (d.kind === 'capsule' ? 'The wireless mic it goes on (leave empty for a spare)' : 'Its card lists everything paired with it') : 'No ' + kindLabel(P.with).toLowerCase() + ' in the Gear Locker yet') + '</em></label>' +
+      (d.kind === 'txmic' ? '<label class="dfield"><span>Type</span><select data-w="txtype"><option value="">—</option>' + TX_KINDS.map((t) => '<option' + (t === d.txtype ? ' selected' : '') + '>' + t + '</option>').join('') + '</select></label>' +
+        '<label class="dfield"><span>Capsule or mic</span><input data-w="capsule" value="' + esc(d.capsule) + '" placeholder="Capsule model, or the lav or headset" list="dcaps"><datalist id="dcaps">' + capsules.map((m) => '<option value="' + esc(m.model) + '">' + esc(m.make || '') + '</option>').join('') + '</datalist><em>What is on it now. Swap it here when it changes.</em></label>' : '') +
+      (d.kind === 'txmic' || d.kind === 'bodypack' ? '<label class="dfield"><span>Frequency</span><input data-w="freq" value="' + esc(d.freq) + '" placeholder="MHz" inputmode="decimal"></label>' : '') + '</div>';
+    $$('[data-w]', host).forEach((x) => x.addEventListener(x.tagName === 'SELECT' ? 'change' : 'input', () => { d[x.dataset.w] = x.value; dirty(); }));
+  };
+  wireless();
+  $('#dkind').addEventListener('change', () => {
+    if (['network', 'computer'].includes(d.kind)) { d.category = d.kind; $('[data-k=category]').value = d.kind; } else if (d.kind && d.kind !== 'other') { d.category = 'audio'; $('[data-k=category]').value = 'audio'; }
+    wireless();
+    $('#dbauto').textContent = 'Automatic (' + autoBucket({ ...d }) + ')';
+  });
+  // a model already on your list fills in what it is and who makes it
+  $('[data-k=model]').addEventListener('change', () => {
+    const m = GearModels.find(d.model, d.kind || undefined) || GearModels.find(d.model); if (!m) return;
+    if (!d.kind && m.kind) { d.kind = m.kind; $('#dkind').value = m.kind; $('#dkind').dispatchEvent(new Event('change')); }
+    if (!d.make && m.make) { d.make = m.make; $('[data-k=make]').value = m.make; }
+  });
   $$('[data-k]').forEach((x) => x.addEventListener(x.type === 'checkbox' || x.tagName === 'SELECT' ? 'change' : 'input', () => {
     const k = x.dataset.k;
     d[k] = x.type === 'checkbox' ? x.checked : k === 'aliases' ? x.value.split(',').map((s) => s.trim()).filter(Boolean) : x.value;
@@ -466,6 +526,7 @@ async function viewDeviceEdit(id) {
       });
     });
   });
+  if (id) paintFiles($('#dfiles2'), d, full.files || []);
   const r = Rich.create({ md: d.notes, compact: true, placeholder: 'Settings, quirks, how to reset it, who to call…', onChange: (v) => { d.notes = v; dirty(); } });
   $('#dnotes').appendChild(r.el);
   const photo = () => { $('#dph').innerHTML = d.photo ? '<img src="/uploads/' + esc(d.photo) + '" alt="">' : devThumb({ name: d.name || '?' }, 84); };
@@ -483,7 +544,17 @@ async function viewDeviceEdit(id) {
     $('#dSave').disabled = true;
     try {
       if (id) { await call('PUT', '/api/devices/' + id, d); S.dirty = false; forgetDevices(); toast('Saved', 'ok'); location.hash = '#/d/' + id; }
-      else { const x = await call('POST', '/api/devices', d); S.dirty = false; forgetDevices(); toast('Added to the Gear Locker', 'ok'); location.hash = '#/d/' + x.id; }
+      else {
+        const n = Math.max(1, Math.min(48, Number($('#dqty').value) || 1));
+        let x;
+        if (n === 1) x = await call('POST', '/api/devices', d);
+        else for (let i = 1; i <= n; i++) { const one = await call('POST', '/api/devices', { ...d, name: d.name + ' ' + i, aliases: [] }); if (i === 1) x = one; }
+        S.dirty = false; forgetDevices(); toast(n === 1 ? 'Added to the Gear Locker' : n + ' added to the Gear Locker', 'ok');
+        location.hash = n === 1 ? '#/d/' + x.id : '#/gear';
+      }
+      // next time this model is one pick away, and knows what it is
+      if (d.kind && d.model) GearModels.add([{ kind: d.kind, make: d.make, model: d.model, capsule: d.kind === 'txmic' ? d.txtype : undefined }]);
+      if (d.kind === 'txmic' && d.capsule && !GearModels.find(d.capsule)) GearModels.add([{ kind: 'capsule', model: d.capsule }]);
     } catch (e) { toast(e.message, 'bad'); }
     finally { const b = $('#dSave'); if (b) b.disabled = false; }
   });

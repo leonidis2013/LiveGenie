@@ -738,13 +738,48 @@ test('to do lists live on one page in groups: admins make and arrange them, ever
   assert.strictEqual((await vol.post('/api/pages/0/checklists/' + stage + '/tick', { item: 'Mics out', done: true })).status, 409, 'a removed list cannot be ticked');
 });
 
+test('gear knows what it is: wireless mics pair with a receiver, capsules fit a mic, old gear learns its kind', async () => {
+  const rx = (await admin.post('/api/devices', { name: 'Test RX', kind: 'receiver', category: 'audio', make: 'Brand', model: 'R2' })).data.id;
+  const tx = (await admin.post('/api/devices', { name: 'Test HH 1', kind: 'txmic', pair_id: rx, txtype: 'Handheld', capsule: 'Head A', freq: '518.2' })).data.id;
+  const cap = (await admin.post('/api/devices', { name: 'Spare head', kind: 'capsule', pair_id: tx, freq: '1' })).data.id;
+  const mic = (await admin.post('/api/devices', { name: 'Test mic', kind: 'mic', pair_id: rx, txtype: 'x' })).data.id;
+  const odd = (await admin.post('/api/devices', { name: 'Odd', kind: 'bogus' })).data.id;
+  const one = async (id) => (await admin.get('/api/devices/' + id)).data.device;
+  let t = await one(tx);
+  assert.deepStrictEqual([t.kind, t.pair_id, t.txtype, t.capsule, t.freq], ['txmic', rx, 'Handheld', 'Head A', '518.2']);
+  t = await one(cap); assert.deepStrictEqual([t.kind, t.pair_id, t.freq], ['capsule', tx, ''], 'a capsule has no frequency');
+  t = await one(mic); assert.deepStrictEqual([t.pair_id, t.txtype], [null, ''], 'a wired mic pairs with nothing');
+  assert.strictEqual((await one(odd)).kind, '');
+  const row = (await admin.get('/api/devices')).data.devices.find((x) => x.id === tx);
+  assert.deepStrictEqual([row.kind, row.pair_id], ['txmic', rx], 'the list carries the kind and pairing');
+  // an edit that leaves the kind out keeps it
+  await admin.put('/api/devices/' + tx, { ...(await one(tx)), kind: undefined, name: 'Test HH 1' });
+  assert.strictEqual((await one(tx)).kind, 'txmic');
+  // removing the receiver unpairs its mics
+  await admin.del('/api/devices/' + rx);
+  assert.strictEqual((await one(tx)).pair_id, null);
+  for (const id of [tx, cap, mic, odd]) await admin.del('/api/devices/' + id);
+  // before 0.22: gear takes its kind from the model list
+  const os2 = require('os'), fs2 = require('fs');
+  const dir = fs2.mkdtempSync(path.join(os2.tmpdir(), 'lg-kind-'));
+  const DBm = require(path.join(ROOT, 'lib', 'db'));
+  const db1 = DBm.open(path.join(dir, 'x.db'));
+  db1.exec(['kind', 'pair_id', 'txtype', 'capsule', 'freq'].map((c) => 'ALTER TABLE devices DROP COLUMN ' + c).join('; ')); db1.prepare('UPDATE schema_version SET v = 12').run();
+  db1.prepare("INSERT INTO settings (key, value) VALUES ('gear_models', ?)").run(JSON.stringify([{ kind: 'speaker', make: 'Brand', model: 'Col 70' }]));
+  db1.prepare("INSERT INTO devices (name, aliases, category, make, model, location, ip, mac, photo, manual_url, notes, created_at, updated_at) VALUES ('Brand Col 70', '[]', 'audio', 'Brand', 'COL 70', '', '', '', '', '', '', 1, 1)").run();
+  db1.close();
+  const db = DBm.open(path.join(dir, 'x.db'));
+  assert.strictEqual(db.prepare('SELECT kind FROM devices').get().kind, 'speaker');
+  db.close();
+});
+
 test('checklists that were on pages move to To do, keeping their ticks and log', async () => {
   const os2 = require('os'), fs2 = require('fs');
   const dir = fs2.mkdtempSync(path.join(os2.tmpdir(), 'lg-todo-'));
   const DBm = require(path.join(ROOT, 'lib', 'db'));
   // a database from before 0.20: back to migration 10, then a page with a checklist and a tick
   const db1 = DBm.open(path.join(dir, 'x.db'));
-  db1.exec('DROP TABLE todo_lists; ALTER TABLE devices DROP COLUMN networked'); db1.prepare('UPDATE schema_version SET v = 10').run();
+  db1.exec('DROP TABLE todo_lists; ALTER TABLE devices DROP COLUMN networked; ' + ['kind', 'pair_id', 'txtype', 'capsule', 'freq'].map((c) => 'ALTER TABLE devices DROP COLUMN ' + c).join('; ')); db1.prepare('UPDATE schema_version SET v = 10').run();
   db1.prepare("INSERT INTO spaces (slug, name) VALUES ('audio', 'Audio')").run();
   const blocks = [{ type: 'text', md: 'Before' }, { type: 'checklist', id: 'abc12345', title: 'Desk check', items: ['Faders down', 'Scenes loaded'], schedule: [] }];
   db1.prepare("INSERT INTO pages (space_id, title, blocks, version, created_at, updated_at) VALUES (1, 'Sunday desk', ?, 1, 1, 1)").run(JSON.stringify(blocks));

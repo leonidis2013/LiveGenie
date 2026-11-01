@@ -1495,7 +1495,7 @@ const PatchView = (() => {
         if (ex) device_id = ex.id;
         else {
           try {
-            const r = await call('POST', '/api/devices', { name, category: 'audio', make: it.make || '', model: it.model, inputs: it.kind === 'receiver' ? 0 : it.nin || 0, outputs: it.kind === 'receiver' ? it.nin || 0 : it.nout || 0 });
+            const r = await call('POST', '/api/devices', { name, kind: it.kind, category: 'audio', make: it.make || '', model: it.model, inputs: it.kind === 'receiver' ? 0 : it.nin || 0, outputs: it.kind === 'receiver' ? it.nin || 0 : it.nout || 0 });
             device_id = r.id; if (typeof forgetDevices === 'function') forgetDevices(); await loadDevices(true);
           } catch (e) { /* the drawing still works without a card */ }
         }
@@ -1660,7 +1660,7 @@ const PatchView = (() => {
         try {
           await loadDevices();
           const ex = DEV.list.find((d) => key(d.name) === key(g.name));
-          const id = ex ? ex.id : (await call('POST', '/api/devices', { name: g.name, category: 'audio', make: g.make || '', model: g.model || '', inputs: g.ins.length, outputs: g.outs.length })).id;
+          const id = ex ? ex.id : (await call('POST', '/api/devices', { name: g.name, kind: g.kind, category: 'audio', make: g.make || '', model: g.model || '', inputs: g.ins.length, outputs: g.outs.length })).id;
           if (typeof forgetDevices === 'function') forgetDevices(); await loadDevices(true);
           change(() => { live().device_id = id; }, 'Added to the Gear Locker');
         } catch (e) { toast(e.message, 'bad'); }

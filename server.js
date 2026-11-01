@@ -230,6 +230,8 @@ function state(user) {
     role: Auth.roleOf(user),
     viewAs: !!(user && user.viewAs),
     org: { name: store.getSetting('org_name', ''), logo: store.getSetting('org_logo', '') },
+    // the guided equipment setup runs once (an install that already has gear counts as done); Admin › Equipment setup runs it again
+    gearSetup: (() => { try { const v = JSON.parse(store.getSetting('gear_setup', 'null')); if (v) return { done: true, at: v.at, by: v.by }; } catch (e) { /* not run */ } return { done: !!db.prepare('SELECT 1 FROM devices LIMIT 1').get() }; })(),
     // the rest only for someone signed in
     todo: user ? (() => { const t = store.todo(user); return { open: t.filter((x) => !x.complete).length, overdue: t.filter((x) => x.overdue).length }; })() : { open: 0, overdue: 0 },
     problems: user && user.role === 'admin' ? adm.problemCount() : 0,
@@ -364,7 +366,7 @@ async function api(req, res, url, user, token) {
       for (const g of patch.get().doc.gear) if (g.device_id) { if (!pk.has(g.device_id)) pk.set(g.device_id, g.kind); }
       let buckets = []; try { buckets = JSON.parse(store.getSetting('gear_buckets', '[]')); } catch (e) { /* default */ }
       return send(res, 200, { ok: true, categories: Devices.CATEGORIES, buckets, devices: devices.list(user).map((d) => ({
-        id: d.id, name: d.name, aliases: d.aliases, category: d.category, make: d.make, model: d.model, location: d.location, bucket: d.bucket, kind: pk.get(d.id) || '', networked: d.networked,
+        id: d.id, name: d.name, aliases: d.aliases, category: d.category, make: d.make, model: d.model, location: d.location, bucket: d.bucket, kind: d.kind || pk.get(d.id) || '', pair_id: d.pair_id, txtype: d.txtype, capsule: d.capsule, freq: d.freq, networked: d.networked,
         ips: d.ips, photo: d.photo, tech_only: d.tech_only, inputs: d.inputs, outputs: d.outputs, files: fileCount.get(d.id) || 0 })) });
     }
     if (m === 'GET' && b === 'models') return send(res, 200, { ok: true, models: devices.models(store.getSetting) });
@@ -543,6 +545,12 @@ async function api(req, res, url, user, token) {
   if (a === 'spaces' && b && m === 'PUT') { need(user, 'admin'); return send(res, 200, { ok: true, slug: adm.editSpace(b, await readJson(req), user) }); }
   if (a === 'spaces' && b && m === 'DELETE') { need(user, 'admin'); const body = await readJson(req).catch(() => ({})); adm.removeSpace(b, body.move_to, user); return send(res, 200, { ok: true }); }
   if (a === 'spaces-order' && m === 'PUT') { need(user, 'admin'); adm.orderSpaces((await readJson(req)).slugs, user); return send(res, 200, { ok: true }); }
+  if (a === 'admin' && b === 'gear-setup' && m === 'POST') {
+    need(user, 'admin');
+    store.setSetting('gear_setup', JSON.stringify({ at: Date.now(), by: user.name }));
+    store.audit(user, 'gear.setup', 'Guided equipment setup', '');
+    return send(res, 200, { ok: true });
+  }
   if (a === 'admin' && b === 'starter' && m === 'POST') {
     need(user, 'admin');
     const have = store.spaces(user).map((s) => s.name.toLowerCase());

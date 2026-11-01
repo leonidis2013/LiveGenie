@@ -522,7 +522,7 @@ async function viewHome() {
     <form class="hsearch" id="hsF" role="search">${icon('search')}<input id="hsQ" type="search" placeholder="Search pages, gear, people, IP addresses…" autocomplete="off"></form>
     ${fresh ? '<section class="card welcome"><h2>Get started</h2><p>LiveGenie starts empty so it fits the way your team works. A few good first steps:</p><div class="wsteps">' +
       '<a class="wstep" href="#/admin/spaces">' + icon('list') + '<b>Make your spaces</b><span>Audio, Video, Training… or add a starter set</span></a>' +
-      '<a class="wstep" href="#/gear-setup">' + icon('spark') + '<b>Guided equipment setup</b><span>Console, stage boxes, wireless, in-ears, PA onto the stage patch</span></a>' +
+      (st.gearSetup && st.gearSetup.done ? '' : '<a class="wstep" href="#/gear-setup">' + icon('spark') + '<b>Guided equipment setup</b><span>Console, stage boxes, wireless, in-ears, PA onto the stage patch</span></a>') +
       '<a class="wstep" href="#/admin/people">' + icon('users') + '<b>Add people</b><span>Admins build; users read and tick checklists</span></a>' +
       '<a class="wstep" href="#/admin/church">' + icon('image') + '<b>Church name and logo</b><span>Shown on sign in and on every PDF</span></a></div></section>' : ''}
     ${todoHtml(t.todo)}
@@ -991,7 +991,7 @@ async function viewSearch(q) {
 // ----- settings -----
 const TABS = [['display', 'Display', 'sun', 'user'], ['account', 'Account', 'user', 'user'], ['about', 'About', 'spark', 'user']];
 const ADMIN_TABS = [
-  ['spaces', 'Spaces', 'list'], ['people', 'People', 'users'], ['problems', 'Problems', 'alert'], ['todo', 'To do lists', 'check'], ['checklog', 'Checklist log', 'clock'],
+  ['spaces', 'Spaces', 'list'], ['people', 'People', 'users'], ['problems', 'Problems', 'alert'], ['todo', 'To do lists', 'check'], ['checklog', 'Checklist log', 'clock'], ['setup', 'Equipment setup', 'spark'],
   ['church', 'Church', 'image'], ['notify', 'Notifications', 'bell'], ['backups', 'Backups', 'box'], ['trash', 'Trash', 'trash'], ['activity', 'Activity', 'clock'], ['reset', 'Reset', 'restore']
 ];
 
@@ -1005,7 +1005,7 @@ async function viewAdmin(tab) {
     <div class="setup adminv"><div class="side">${ADMIN_TABS.map((t) => '<button data-tab="' + t[0] + '" class="' + (t[0] === tab ? 'on' : '') + '">' + icon(t[2]) + t[1] + (t[0] === 'problems' && n ? '<em class="cnt bad">' + n + '</em>' : '') + '</button>').join('')}</div><div class="pane" id="pane"></div></div>`;
   $$('[data-tab]').forEach((b) => b.addEventListener('click', () => { location.hash = '#/admin/' + b.dataset.tab; }));
   const pane = $('#pane');
-  await ({ spaces: tabSpaces, people: tabUsers, problems: tabProblems, todo: tabTodoLists, checklog: tabChecklog, church: tabChurch, notify: tabNotify, backups: tabBackups, trash: tabTrash, activity: tabActivity, reset: tabReset }[tab])(pane);
+  await ({ spaces: tabSpaces, people: tabUsers, problems: tabProblems, todo: tabTodoLists, checklog: tabChecklog, setup: tabGearSetup, church: tabChurch, notify: tabNotify, backups: tabBackups, trash: tabTrash, activity: tabActivity, reset: tabReset }[tab])(pane);
 }
 
 async function viewSettings(tab) {
@@ -1205,6 +1205,14 @@ function reportProblem(where, ctx = {}) {
 }
 
 // ----- admin: the checklist log -----
+/** Admin › Equipment setup: the guided setup runs once; here is where it runs again. */
+function tabGearSetup(pane) {
+  const g = (S.state && S.state.gearSetup) || {};
+  pane.innerHTML = '<p class="note pnote">The guided equipment setup walks through the console, stage boxes, wireless, in-ears and PA, makes their Gear Locker cards and puts them on the stage patch. It runs once when LiveGenie is new; run it again here to add more gear (what is already there is kept).</p>' +
+    '<div class="card"><h2>Guided equipment setup</h2>' + setRow('Status', g.done ? (g.at ? 'Run ' + esc(new Date(g.at).toLocaleString()) + (g.by ? ' by ' + esc(g.by) : '') : 'Done: the Gear Locker already has gear') : 'Not run yet', '') +
+    setRow('Run it again', 'Adds to the Gear Locker and the stage patch; nothing there is removed.', '<a class="btn primary" href="#/gear-setup?again=1">' + icon('spark') + (g.done ? 'Run again' : 'Start') + '</a>', true) + '</div>';
+}
+
 /**
  * Admin › To do lists: the groups and the lists in them, all on the To do page. Make, edit (steps, reset times,
  * group), reorder, start over and remove lists; add, rename, reorder and remove groups.
@@ -1534,7 +1542,7 @@ async function route() {
     else if (p[0] === 'new') await viewEdit(null, qs.get('space'));
     else if (p[0] === 'map') await viewMap(p[1]);
     else if (p[0] === 'patch') await PatchView.view(qs);
-    else if (p[0] === 'gear-setup') await viewGearSetup();
+    else if (p[0] === 'gear-setup') await viewGearSetup(qs);
     else if ((p[0] === 'devices' || p[0] === 'gear') && p[1] === 'new') await viewDeviceEdit(null);
     else if (p[0] === 'devices' || p[0] === 'gear') await viewDevices(qs);
     else if (p[0] === 'd' && p[1] && p[2] === 'edit') await viewDeviceEdit(p[1]);

@@ -18,9 +18,16 @@ const SETUP_GROUPS = [
 const unitNames = (o) => Array.from({ length: Math.max(1, Number(o.qty) || 1) }, (_, i) => (i ? o.name + ' #' + (i + 1) : o.name));
 const nameFor = (m) => (['processor', 'amp', 'speaker'].includes(m.kind) && m.make && !m.model.toLowerCase().startsWith(m.make.toLowerCase()) ? m.make + ' ' + m.model : m.model);
 
-async function viewGearSetup() {
+async function viewGearSetup(qs) {
   if (!can('admin')) { app.innerHTML = '<div class="card empty">Admins can run the guided setup.</div>'; if (!S.state.user) signInDialog(() => route()); return; }
   setTitle('Guided setup');
+  // it runs once; after that it runs again only from Admin › Equipment setup
+  const gs = S.state.gearSetup || {};
+  if (gs.done && !(qs && qs.get('again'))) {
+    app.innerHTML = '<div class="card empty">' + icon('spark') + '<div style="margin-top:8px"><b>The guided setup has already been run' + (gs.at ? ' (' + esc(new Date(gs.at).toLocaleDateString()) + (gs.by ? ' by ' + esc(gs.by) : '') + ')' : '') + '.</b></div>' +
+      '<div class="note" style="margin:4px 0 12px">Add gear in the Gear Locker or on the stage patch, or run it again from Admin › Equipment setup.</div><a class="btn" href="#/gear">' + icon('box') + 'Gear Locker</a> <a class="btn" href="#/admin/setup">' + icon('spark') + 'Equipment setup</a></div>';
+    return;
+  }
   const [have, models] = await Promise.all([loadDevices(true), GearModels.load(true)]);
   const ofKind = (k) => models.filter((m) => m.kind === k);
   const consoles = ofKind('console'), boxModels = ofKind('stagebox');
@@ -104,7 +111,7 @@ async function viewGearSetup() {
         <label class="tog ${st.page ? 'on' : ''} gopt"><input type="checkbox" data-opt="page"${st.page ? ' checked' : ''}><span><b>Put it on the stage patch</b><br><span class="note">${lists.length ? lists.join(' · ') + '. Then add your mics and draw the cables.' : 'Draws the console and the rest of your gear on the stage patch.'}</span></span></label>
         <label class="tog ${st.cables ? 'on' : ''} gopt"><input type="checkbox" data-opt="cables"${st.cables ? ' checked' : ''}${proc.length || amps.length ? '' : ' disabled'}><span><b>Wire up the PA</b><br><span class="note">${proc.length || amps.length ? 'A starting point: ' + esc([st.console.name, ...proc.map((x) => x.name), ...amps.map((x) => x.name), ...spk.map((x) => x.name)].join(' → ')) + '. Check it against your rack.' : 'Add a speaker processor or amplifier to get this'}</span></span></label>`;
     }
-    app.innerHTML = `<div class="ed gsetup"><div class="crumbs"><a href="#/">Home</a><span>/</span><a href="#/gear">Gear Locker</a><span>/</span><span>Guided setup</span></div>
+    app.innerHTML = `<div class="ed gsetup"><div class="crumbs"><a href="#/">Home</a><span>/</span><a href="#/admin/setup">Equipment setup</a><span>/</span><span>Guided setup</span></div>
       <h1 class="title" style="font-size:22px;margin:6px 0 10px">Guided equipment setup</h1>
       <div class="gsteps">${STEPS.map((t, i) => '<button type="button" data-step="' + i + '" class="' + (i === st.step ? 'on' : i < st.step ? 'done' : '') + '"><i>' + (i + 1) + '</i>' + t + '</button>').join('')}</div>
       <div class="card">${body}</div>
@@ -173,9 +180,9 @@ async function viewGearSetup() {
   async function upsert(d) {
     const ex = known(d.name);
     if (!ex) return (await call('POST', '/api/devices', d)).id;
-    if ((!ex.inputs && d.inputs) || (!ex.outputs && d.outputs)) {
+    if ((!ex.inputs && d.inputs) || (!ex.outputs && d.outputs) || (d.kind && !ex.kind)) {
       const full = (await get('/api/devices/' + ex.id)).device;
-      await call('PUT', '/api/devices/' + ex.id, { ...full, inputs: full.inputs || d.inputs, outputs: full.outputs || d.outputs });
+      await call('PUT', '/api/devices/' + ex.id, { ...full, kind: full.kind || d.kind || '', inputs: full.inputs || d.inputs, outputs: full.outputs || d.outputs });
     }
     return ex.id;
   }
@@ -195,14 +202,15 @@ async function viewGearSetup() {
         ...st.other.filter((o) => o.custom).map((o) => ({ kind: ROLE_KIND[o.role], make: o.make, model: o.model, nin: o.nin, nout: o.nout }))
       ]);
       const ids = {};
-      ids[c.name.trim()] = await upsert({ name: c.name.trim(), category: 'audio', make: c.make, model: c.model || c.name, location: c.location, ip: c.ip.trim(), inputs: Number(c.inputs) || 0, outputs: Number(c.outputs) || 0 });
-      for (const b of st.boxes) ids[b.name.trim()] = await upsert({ name: b.name.trim(), category: 'audio', make: b.make, model: b.model || b.name, location: b.location, inputs: Number(b.inputs) || 0, outputs: Number(b.outputs) || 0, notes: 'Connected to the ' + c.name + ' over ' + b.link + '.' });
+      ids[c.name.trim()] = await upsert({ name: c.name.trim(), kind: 'console', category: 'audio', make: c.make, model: c.model || c.name, location: c.location, ip: c.ip.trim(), inputs: Number(c.inputs) || 0, outputs: Number(c.outputs) || 0 });
+      for (const b of st.boxes) ids[b.name.trim()] = await upsert({ name: b.name.trim(), kind: 'stagebox', category: 'audio', make: b.make, model: b.model || b.name, location: b.location, inputs: Number(b.inputs) || 0, outputs: Number(b.outputs) || 0, notes: 'Connected to the ' + c.name + ' over ' + b.link + '.' });
       for (const o of st.other) {
-        if (o.role === 'wireless') for (const n of unitNames(o)) ids[n] = await upsert({ name: n, category: 'audio', make: o.make, model: o.model, outputs: o.ch || 0, notes: o.ch ? o.ch + '-channel wireless receiver.' : '' });
-        else if (o.role === 'iem') for (const n of unitNames(o)) ids[n] = await upsert({ name: n, category: 'audio', make: o.make, model: o.model, inputs: 2, notes: 'In-ear transmitter.' });
-        else ids[o.name] = await upsert({ name: o.name, category: 'audio', make: o.make, model: o.model });
+        if (o.role === 'wireless') for (const n of unitNames(o)) ids[n] = await upsert({ name: n, kind: 'receiver', category: 'audio', make: o.make, model: o.model, outputs: o.ch || 0, notes: o.ch ? o.ch + '-channel wireless receiver.' : '' });
+        else if (o.role === 'iem') for (const n of unitNames(o)) ids[n] = await upsert({ name: n, kind: 'iemtx', category: 'audio', make: o.make, model: o.model, inputs: 2, notes: 'In-ear transmitter.' });
+        else ids[o.name] = await upsert({ name: o.name, kind: (SETUP_GROUPS.find((y) => y.role === o.role) || {}).kind || '', category: 'audio', make: o.make, model: o.model });
       }
       forgetDevices();
+      try { await call('POST', '/api/admin/gear-setup'); await loadState(); } catch (e) { /* the gear is made either way */ }
       if (!st.page) { toast('Gear Locker cards ready', 'ok'); location.hash = '#/gear'; return; }
       // put it all on the stage patch drawing (adding to what is there; gear already on it is kept)
       const cur = await get('/api/patch');

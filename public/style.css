@@ -1418,3 +1418,40 @@ header.hhero { background:none; border:0; box-shadow:none; padding:0; position:s
 .tdl.done .ring { background:conic-gradient(var(--ok) calc(var(--p) * 1%), var(--inset) 0); }
 .tdg .gbh b.cnt { flex:none !important; width:auto !important; display:inline-flex; align-items:center; padding:1px 8px; border-radius:99px; font-size:11px; font-weight:800; line-height:1.5; letter-spacing:0; text-transform:none; }
 .tdf .ghost { display:inline-flex; align-items:center; gap:6px; }
+
+/* ---------- gear form: network section, toggles (0.21) ---------- */
+.dform .dnet { grid-column:1 / -1; display:grid; grid-template-columns:1fr 1fr; gap:10px 14px; padding:12px; border-radius:12px; background:var(--card2); border:1px solid var(--line); }
+.dform .dnet.hide { display:none; }
+.dform .wide { grid-column:1 / -1; }
+.dfield.tog > input { width:36px !important; height:20px; flex:none; }
+.dfield.tog { flex-direction:row !important; align-items:center; gap:10px; }
+.dfield.tog em { margin:0 0 0 4px; }
+#dlf { width:auto; min-width:150px; }
+@media (max-width:700px) { .dform .dnet { grid-template-columns:1fr; } }
+.pmain.nopane .ppane { display:none !important; }
+
+/* ---------- stage patch 0.21: list of checks, bigger text ---------- */
+.pchecks { display:block; margin:12px 0 0; }
+.pchecks:empty { display:none; }
+.pchkh { display:flex; align-items:center; gap:7px; font-size:12px; font-weight:800; letter-spacing:.08em; text-transform:uppercase; color:var(--dim); margin:0 0 6px; }
+.pchkh .icon { width:15px; height:15px; color:var(--warn); }
+.pchkl { list-style:none; margin:0; padding:0; display:flex; flex-direction:column; gap:4px; background:var(--card); border:1px solid var(--line); border-radius:12px; padding:6px; }
+.pchkl .pchk { display:flex; width:100%; font-size:13.5px; padding:8px 10px; }
+.pchkl .pchk span { flex:1; }
+.pchkl .pchk em { font-style:normal; font-size:12px; font-weight:700; opacity:.8; }
+#psvg .sk text, #psvg .crow text { font-size:11.5px; }
+#psvg .pcard .ct { font-size:15px; }
+#psvg .pcard .cs { font-size:12.5px; }
+#psvg .cmore text { font-size:11.5px; }
+#psvg .pl { font-size:11.5px; }
+#psvg .cadd { cursor:pointer; }
+#psvg .cadd rect { fill:transparent; stroke:color-mix(in srgb, #e46cd9 55%, transparent); stroke-dasharray:3 3; }
+#psvg .cadd text { font-size:11px; font-weight:700; fill:#e46cd9; }
+#psvg .cadd:hover rect { fill:color-mix(in srgb, #e46cd9 14%, transparent); }
+.pmset { border:1px solid var(--line); border-radius:10px; padding:4px 12px 10px; margin:10px 0; }
+.pmset legend { font-size:12px; font-weight:800; letter-spacing:.06em; text-transform:uppercase; color:var(--dim); padding:0 6px; }
+.pcanvas { height:calc(100vh - 190px); }
+.plk { display:flex; flex-wrap:wrap; gap:6px 14px; margin:4px 0 8px; }
+.plprev { margin:10px 0; max-height:34vh; overflow:auto; }
+.plprev td { font-size:13px; }
+#pcf .note { display:block; margin-top:4px; }

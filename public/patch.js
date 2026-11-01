@@ -1,6 +1,6 @@
 /*
  * The stage patch: one drawing for the whole system.
- *   Cards sit wherever you put them (Tidy lines them up left to right, in signal-flow order).
+ *   Cards sit wherever you put them (Auto-arrange lays everything out once, by signal flow).
  *   A card shows the sockets in use and folds the rest into "+ 22 free"; open it to see every socket.
  *   A wireless system is one card: a receiver with the mics on its channels, a transmitter with its packs.
  *   Cables run at right angles around the cards, with a small hop where two cross.
@@ -14,10 +14,11 @@
 const PatchView = (() => {
   const P = PatchCore;
   // every measure is a multiple of the 10 px grid, so sockets sit on grid lines and cables run straight into them
-  const GRID = 10, CW = 240, HEAD = 50, ROW = 20, FOOT = 10, COLGAP = 100, VGAP = 30, LINKY = 30;
+  const GRID = 10, CW = 300, HEAD = 50, ROW = 20, FOOT = 10, COLGAP = 100, VGAP = 30, LINKY = 30;
   const KIND_STYLE = { xlr: 'Analog · XLR', link: 'Digital snake', dante: 'Dante · Cat6', aes: 'AES3', speaker: 'Speaker · NL4', wiem: 'Wired IEM', rf: 'Wireless · RF' };
-  const SHORT_MAKE = { 'allen & heath': 'A&H', 'phenyx pro': 'Phenyx', sennheiser: 'Sennheiser' };
-  const makeTag = (m) => SHORT_MAKE[String(m || '').toLowerCase()] || m;
+  /** A short tag for a make: initials for "X & Y" names, the first word of a long one. */
+  const makeTag = (m) => { m = String(m || '').trim(); if (/ & /.test(m)) return m.split(/\s*&\s*/).map((w) => w[0] || '').join('&'); return m.length > 10 ? m.split(/\s+/)[0] : m; };
+  const CHW = 7;   // average width of a letter on a card (11.5 px text), for shortening names so they never run into each other
   const cut = (s, n) => { s = String(s || ''); return n < 2 ? '' : s.length > n ? s.slice(0, Math.max(1, n - 1)) + '…' : s; };
   const key = (v) => String(v || '').trim().toLowerCase();
   const snap = (v) => Math.round(v / GRID) * GRID;
@@ -104,6 +105,73 @@ const PatchView = (() => {
       x += CW + COLGAP;
     }
     return pos;
+  }
+  /**
+   * Auto-arrange: a one-time layout of the whole drawing by signal flow. Each card goes one column right of the
+   * furthest card that feeds it (sources first, speakers last); within a column, cards line up with what feeds them,
+   * with a few passes to untangle the cables. Gear with no cables goes by its type.
+   */
+  function autoArrange(doc) {
+    const ix = P.index(doc);
+    const models = new Map(cardGear(doc).map((g) => [g.id, cardModel(doc, ix, g)]));
+    const ids = [...models.keys()];
+    const succ = new Map(ids.map((id) => [id, new Set()])), pred = new Map(ids.map((id) => [id, new Set()]));
+    const edge = (a, b) => { if (a === b || !succ.has(a) || !succ.has(b)) return; succ.get(a).add(b); pred.get(b).add(a); };
+    for (const c of doc.cables) {
+      const ha = P.hostOf(doc, ix.G.get(c.a) || {}), hb = P.hostOf(doc, ix.G.get(c.b) || {});
+      const a = ha ? ha.id : c.a, b = hb ? hb.id : c.b;
+      if (c.ap === 'link' || c.bp === 'link') {
+        // links run toward the console: stage box → (network) → console
+        const ga = ix.G.get(a), gb = ix.G.get(b);
+        if (!ga || !gb) continue;
+        const rank = (g) => ({ stagebox: 0, network: 1, computer: 2, console: 3 }[g.kind] != null ? { stagebox: 0, network: 1, computer: 2, console: 3 }[g.kind] : 1);
+        if (rank(ga) <= rank(gb)) edge(a, b); else edge(b, a);
+      } else edge(a, b);
+    }
+    // columns: longest path from the start (cycles are cut where they close)
+    const layer = new Map(), state = new Map();
+    const visit = (id) => {
+      if (state.get(id) === 2) return layer.get(id);
+      if (state.get(id) === 1) return -1;              // a loop: ignore that cable
+      state.set(id, 1);
+      let l = 0;
+      pred.get(id).forEach((p) => { const pl = visit(p); if (pl >= 0) l = Math.max(l, pl + 1); });
+      state.set(id, 2); layer.set(id, l);
+      return l;
+    };
+    ids.forEach(visit);
+    const maxL = Math.max(0, ...layer.values());
+    // gear with no cables at all: placed by type across the same columns
+    ids.forEach((id) => { if (!pred.get(id).size && !succ.get(id).size) layer.set(id, Math.round(P.colOf(models.get(id).g) / 7 * Math.max(maxL, 3))); });
+    // a source column pulled right next to what it feeds (a mic feeding the stage box sits just left of it)
+    for (let pass = 0; pass < 3; pass++) ids.forEach((id) => { const s2 = [...succ.get(id)]; if (s2.length && pred.get(id).size === 0) layer.set(id, Math.max(layer.get(id), Math.min(...s2.map((x) => layer.get(x))) - 1)); });
+    const cols = new Map();
+    ids.forEach((id) => { const l = layer.get(id); if (!cols.has(l)) cols.set(l, []); cols.get(l).push(id); });
+    const keys = [...cols.keys()].sort((a, b) => a - b);
+    // order within columns: barycentre sweeps, left to right then back
+    const pos = new Map();
+    keys.forEach((k) => cols.get(k).sort((a, b) => (P.colOf(models.get(a).g) - P.colOf(models.get(b).g)) || ((models.get(a).g.order || 0) - (models.get(b).g.order || 0))).forEach((id, i) => pos.set(id, i)));
+    const bary = (id, nb) => { const l = [...nb.get(id)].map((x) => pos.get(x)).filter((v) => v != null); return l.length ? l.reduce((s1, v) => s1 + v, 0) / l.length : pos.get(id); };
+    for (let sweep = 0; sweep < 6; sweep++) {
+      const seq = sweep % 2 ? keys.slice().reverse() : keys;
+      seq.forEach((k) => { const col = cols.get(k); const nb = sweep % 2 ? succ : pred; col.sort((a, b) => bary(a, nb) - bary(b, nb)); col.forEach((id, i) => pos.set(id, i)); });
+    }
+    // places: columns left to right; each card as close to the height of what feeds it as the column allows
+    const out = new Map();
+    let x = 0;
+    keys.forEach((k) => {
+      let y = 0;
+      cols.get(k).forEach((id) => {
+        const m = models.get(id);
+        const ps = [...pred.get(id)].filter((p) => out.has(p)).map((p) => out.get(p).y);
+        const want = ps.length ? ps.reduce((s1, v) => s1 + v, 0) / ps.length : 0;
+        const yy = snap(Math.max(y, want));
+        out.set(id, { x, y: yy });
+        y = snap(yy + m.h + VGAP);
+      });
+      x += CW + COLGAP + 20;
+    });
+    return out;
   }
   const overlaps = (a, b, m) => a.x < b.x + b.w + m && b.x < a.x + a.w + m && a.y < b.y + b.h + m && b.y < a.y + a.h + m;
   /** A free spot near (x, y): slide down until the card does not sit on another. */
@@ -346,7 +414,7 @@ const PatchView = (() => {
     const g = m.g, cat = (P.KINDS[g.kind] || P.KINDS.other).cat;
     const x = p.x, y = p.y, w = m.w, h = m.h;
     const sub = cardSub(doc, ix, m);
-    const chars = Math.floor(w / 7.4);
+    const chars = Math.floor(w / 8.6);
     const mk = g.make ? cut(makeTag(g.make).toUpperCase(), 10) : '';
     let s = '<g class="pcard cat-' + cat + '" data-g="' + g.id + '"' + (m.mem.length ? ' data-m="' + m.mem.map((x) => x.g.id).join(',') + '"' : '') + '>' +
       '<rect class="cbg" x="' + x + '" y="' + y + '" width="' + w + '" height="' + h + '" rx="10"/>' +
@@ -371,30 +439,32 @@ const PatchView = (() => {
         const sl = r.slink, u = P.upstream(doc, ix, sl.sb.id, sl.i);
         const nm = u.src && u.src.chname ? u.src.chname : '';
         const t = (nm ? nm + ' ← ' : '← ') + sl.sb.name + ' ' + sl.sb.ins[sl.i] + (!nm && u.source ? ' · ' + u.source : !nm && u.mic ? ' · ' + u.mic : '');
-        s += '<g class="crow slk' + (sl.used ? ' used' : '') + '" data-g="' + sl.sb.id + '">' + (u.src && u.src.chcolor ? '<rect class="chc" x="' + (x + 6) + '" y="' + (ry - 6) + '" width="3" height="12" rx="1.5" fill="' + colorCss(u.src.chcolor) + '"/>' : '') + '<text x="' + (x + 12) + '" y="' + (ry + 4) + '"><tspan class="pn">Ch ' + sl.ch + '</tspan> ' + esc(cut(t, Math.floor((w - 60) / 6.1))) + '</text></g>';
+        s += '<g class="crow slk' + (sl.used ? ' used' : '') + '" data-g="' + sl.sb.id + '">' + (u.src && u.src.chcolor ? '<rect class="chc" x="' + (x + 6) + '" y="' + (ry - 6) + '" width="3" height="12" rx="1.5" fill="' + colorCss(u.src.chcolor) + '"/>' : '') + '<text x="' + (x + 12) + '" y="' + (ry + 4) + '"><tspan class="pn">Ch ' + sl.ch + '</tspan> ' + esc(cut(t, Math.floor((w - 60) / CHW))) + '</text></g>';
         return;
       }
       if (r.pack) {
         const pg = r.pack.g;
-        s += '<g class="crow mem" data-mem="' + pg.id + '"><rect class="mbg" x="' + (x + 6) + '" y="' + (ry - 9) + '" width="' + (w - 12) + '" height="18" rx="5"/><text x="' + (x + 14) + '" y="' + (ry + 4) + '"><tspan class="pn">Pack</tspan> ' + esc(cut([pg.person || pg.use || pg.name, pg.person && pg.use ? pg.use : '', pg.phones].filter(Boolean).join(' · '), Math.floor((w - 50) / 6.1))) + '</text><title>' + esc(pg.name) + '</title></g>';
+        s += '<g class="crow mem" data-mem="' + pg.id + '"><rect class="mbg" x="' + (x + 6) + '" y="' + (ry - 9) + '" width="' + (w - 12) + '" height="18" rx="5"/><text x="' + (x + 14) + '" y="' + (ry + 4) + '"><tspan class="pn">Pack</tspan> ' + esc(cut([pg.person || pg.use || pg.name, pg.person && pg.use ? pg.use : '', pg.phones].filter(Boolean).join(' · '), Math.floor((w - 50) / CHW))) + '</text><title>' + esc(pg.name) + '</title></g>';
         return;
       }
       if (r.member) {
         // a receiver channel with its mic
         const tg = r.member.g;
-        const t = [tg.person || tg.use || tg.name, tg.capsule || tg.model, tg.freq].filter(Boolean).join(' · ');
-        s += '<g class="crow mem" data-mem="' + tg.id + '"><rect class="mbg" x="' + (x + 6) + '" y="' + (ry - 9) + '" width="' + (half + 30) + '" height="18" rx="5"/><text x="' + (x + 12) + '" y="' + (ry + 4) + '"><tspan class="pn">' + esc(g.ins[r.in]) + '</tspan> ' + esc(cut(t, Math.floor((half + 6) / 6.1) - g.ins[r.in].length)) + '</text><title>' + esc(tg.name + (t ? ': ' + t : '')) + '</title></g>';
+        const t = [tg.person || tg.use || tg.name, tg.txtype, tg.capsule || tg.model, tg.freq].filter(Boolean).join(' · ');
+        s += '<g class="crow mem" data-mem="' + tg.id + '"><rect class="mbg" x="' + (x + 6) + '" y="' + (ry - 9) + '" width="' + (half + 30) + '" height="18" rx="5"/><text x="' + (x + 12) + '" y="' + (ry + 4) + '"><tspan class="pn">' + esc(g.ins[r.in]) + '</tspan> ' + esc(cut(t, Math.floor((half + 6) / CHW) - g.ins[r.in].length)) + '</text><title>' + esc(tg.name + (t ? ': ' + t : '')) + '</title></g>';
       } else if (r.in != null) {
         const t = socketText(doc, ix, g, 'in', r.in);
         const used = !!ix.into.get(g.id + ':' + r.in);
-        const room = r.out != null ? half - 18 : w - 30;
-        s += '<g class="sk in' + (used ? ' used' : '') + '" data-g="' + g.id + '" data-p="' + r.in + '"><circle class="hitc" cx="' + x + '" cy="' + ry + '" r="9"/><circle class="dot" cx="' + x + '" cy="' + ry + '" r="4.5"/><text x="' + (x + 10) + '" y="' + (ry + 4) + '"><tspan class="pn">' + esc(g.ins[r.in]) + '</tspan>' + (t ? ' ' + esc(cut(t, Math.floor(room / 6.1) - g.ins[r.in].length)) : '') + '</text><title>' + esc(g.name + ' ' + g.ins[r.in] + (t ? ': ' + t : ' (free)')) + '</title></g>';
+        const room = r.out != null ? half - 24 : w - 34;
+        s += '<g class="sk in' + (used ? ' used' : '') + '" data-g="' + g.id + '" data-p="' + r.in + '"><circle class="hitc" cx="' + x + '" cy="' + ry + '" r="9"/><circle class="dot" cx="' + x + '" cy="' + ry + '" r="4.5"/><text x="' + (x + 10) + '" y="' + (ry + 4) + '"><tspan class="pn">' + esc(g.ins[r.in]) + '</tspan>' + (t ? ' ' + esc(cut(t, Math.floor(room / CHW) - g.ins[r.in].length)) : '') + '</text><title>' + esc(g.name + ' ' + g.ins[r.in] + (t ? ': ' + t : ' (free)')) + '</title></g>';
+        // an empty receiver channel: a clear way to put a transmitter on it
+        if (g.kind === 'receiver' && opts.edit && !used) s += '<g class="cadd" data-addtx="' + g.id + ':' + r.in + '"><rect x="' + (x + 50) + '" y="' + (ry - 9) + '" width="' + (half - 30) + '" height="18" rx="5"/><text x="' + (x + 58) + '" y="' + (ry + 4) + '">+ transmitter</text><title>Put a transmitter (and its capsule) on ' + esc(g.ins[r.in]) + '</title></g>';
       }
       if (r.out != null) {
         const t = socketText(doc, ix, g, 'out', r.out);
         const used = !!((ix.from.get(g.id + ':' + r.out) || []).length);
-        const room = r.in != null ? (r.member ? half - 50 : half - 18) : w - 30;
-        s += '<g class="sk out' + (used || (g.feeds || {})[r.out] ? ' used' : '') + '" data-g="' + g.id + '" data-p="' + r.out + '"><circle class="hitc" cx="' + (x + w) + '" cy="' + ry + '" r="9"/><circle class="dot" cx="' + (x + w) + '" cy="' + ry + '" r="4.5"/><text x="' + (x + w - 10) + '" y="' + (ry + 4) + '" text-anchor="end">' + (t && room > 30 ? esc(cut(t, Math.floor(room / 6.1) - g.outs[r.out].length)) + ' ' : '') + '<tspan class="pn">' + esc(g.outs[r.out]) + '</tspan></text><title>' + esc(g.name + ' ' + g.outs[r.out] + (t ? ': ' + t : ' (free)')) + '</title></g>';
+        const room = r.in != null ? (r.member ? half - 54 : half - 24) : w - 34;
+        s += '<g class="sk out' + (used || (g.feeds || {})[r.out] ? ' used' : '') + '" data-g="' + g.id + '" data-p="' + r.out + '"><circle class="hitc" cx="' + (x + w) + '" cy="' + ry + '" r="9"/><circle class="dot" cx="' + (x + w) + '" cy="' + ry + '" r="4.5"/><text x="' + (x + w - 10) + '" y="' + (ry + 4) + '" text-anchor="end">' + (t && room > 30 ? esc(cut(t, Math.floor(room / CHW) - g.outs[r.out].length)) + ' ' : '') + '<tspan class="pn">' + esc(g.outs[r.out]) + '</tspan></text><title>' + esc(g.name + ' ' + g.outs[r.out] + (t ? ': ' + t : ' (free)')) + '</title></g>';
       }
     });
     if (m.link) {
@@ -430,8 +500,11 @@ const PatchView = (() => {
         // on the longest straight run
         let best = null;
         for (let i = 1; i < pts.length; i++) { const a = pts[i - 1], b = pts[i]; const len = Math.abs(b.x - a.x) + Math.abs(b.y - a.y); if (a.y === b.y && (!best || len > best.len)) best = { a, b, len }; }
-        if (best && (best.len > 50 || e.link)) {
-          const t = e.link ? e.label : cut(e.label, Math.max(4, Math.floor((best.len - 16) / 6.4)));
+        if (best && best.len > 40) {
+          // a label never runs past its line: a link shows its full count, its name, or nothing
+          const fit = Math.floor((best.len - 16) / CHW);
+          const t = e.link ? (e.label.length <= fit ? e.label : e.label.split(' · ')[0].length <= fit ? e.label.split(' · ')[0] : '') : cut(e.label, Math.max(4, fit));
+          if (!t) return;
           const mx = e.link ? (best.a.x + best.b.x) / 2 : Math.min(best.a.x, best.b.x) + 14;
           labels += '<text class="pl pl-' + e.kind + '" x="' + mx + '" y="' + (best.a.y - 5) + '"' + (e.link ? ' text-anchor="middle"' : '') + '>' + esc(t) + '</text>';
         }
@@ -541,7 +614,7 @@ const PatchView = (() => {
       return T([['Transmitter'], ['Mode'], ['Frequency'], ['Mix'], ['Fed from'], ['Packs']], rows.map((r) => tr([r.tx.id, ...r.packs.map((p) => p.id)], ['<b>' + esc(r.tx.name) + '</b>', esc(r.tx.mode || ''), esc(r.tx.freq ? r.tx.freq + ' MHz' : ''), esc(r.mix || '—'), esc(r.feeds.filter(Boolean).map((x) => x.from.name + ' ' + x.socket).join(', ')), esc(r.packs.map((p) => [p.person, p.use].filter(Boolean).join(' · ') || p.name).join(', '))])), 'No in-ear transmitters yet.');
     }
     if (report === 'cables') {
-      // with several names (SQ-5, DriveRack PA2, Crown XLi 2500) a cable is listed when both ends are among them
+      // with several names a cable is listed when both ends are among them
       const rows = P.cableList(doc).filter((r) => !terms.length || (terms.length > 1 ? hit(r.a.name) && hit(r.b.name) : match(r.a.name, r.b.name, r.c.label)));
       return T([['Label'], ['From'], ['To'], ['Type'], ['Length']], rows.map((r) => tr([r.a.id, r.b.id], [esc(r.c.label || ''), esc(r.from), esc(r.to), esc(KIND_STYLE[r.c.kind] || r.c.kind), esc(r.c.length || '')])), 'No cables yet.');
     }
@@ -573,7 +646,9 @@ const PatchView = (() => {
       <div class="ptools hide" id="ptools">
         <button class="ghost" id="pun" title="Undo (Ctrl+Z)">↶ Undo</button><button class="ghost" id="pre" title="Redo">↷ Redo</button>
         <span class="tsep"></span>
-        <button class="ghost" id="ptidy" title="Line everything up left to right">${icon('list')}Tidy</button>
+        <button class="ghost" id="paddb" title="Show the equipment list">${icon('plus')}Add equipment</button>
+        <button class="ghost" id="plabels" title="Name cables from a pattern: where they go, the channel, a number">${icon('edit')}Label cables</button>
+        <button class="ghost" id="ptidy" title="Lay the whole drawing out once by signal flow (undo puts it back)">${icon('list')}Auto-arrange</button>
         <label class="tog sm" title="Cards snap to the grid and line up with each other. Hold Alt to place freely."><input type="checkbox" id="psnap"${st.snap ? ' checked' : ''}> Snap</label>
         <span class="palign hide" id="palign"><span class="tsep"></span>
           <button class="ghost" data-al="left" title="Line up left edges">⇤ Left</button><button class="ghost" data-al="top" title="Line up top edges">⤒ Top</button>
@@ -613,7 +688,10 @@ const PatchView = (() => {
     }
     function paintChecks() {
       const list = P.checks(st.doc);
-      $('#pchk').innerHTML = list.length ? list.map((c, i) => '<button class="pchk ' + c.level + '" data-i="' + i + '">' + icon(c.level === 'note' ? 'info' : 'warn') + '<span>' + esc(c.text) + '</span></button>').join('') : '';
+      // a list, worst first: tap one to see it on the drawing
+      const rank = { bad: 0, warn: 1, note: 2 };
+      const order = list.map((c, i) => ({ c, i })).sort((p, q) => rank[p.c.level] - rank[q.c.level]);
+      $('#pchk').innerHTML = list.length ? '<div class="pchkh">' + icon('warn') + list.length + ' thing' + (list.length === 1 ? '' : 's') + ' to check</div><ul class="pchkl">' + order.map(({ c, i }) => '<li><button class="pchk ' + c.level + '" data-i="' + i + '">' + icon(c.level === 'note' ? 'info' : 'warn') + '<span>' + esc(c.text) + '</span><em>Show</em></button></li>').join('') + '</ul>' : '';
       $$('#pchk [data-i]').forEach((b) => b.addEventListener('click', () => { const c = list[Number(b.dataset.i)]; select({ gear: c.gear }); focusGear(c.gear[0]); }));
     }
     function paintReport() {
@@ -656,9 +734,10 @@ const PatchView = (() => {
       const b = D.bbox, W = b.x1 - b.x0, H = b.y1 - b.y0;
       const r0 = cv.getBoundingClientRect();
       // readable first: shrink to fit the width, but not so far the text gets too small (pan for the rest)
-      const k = Math.max(wide() ? 0.6 : 0.4, Math.min(1.1, (r0.width - 20) / W));
-      const maxH = window.innerHeight - (wide() ? 150 : 210);
-      cv.style.height = Math.round(Math.max(380, Math.min(maxH, H * k + 24))) + 'px';
+      // big enough to read: never smaller than this (pan or zoom out for the rest); a small drawing grows a little
+      const k = Math.max(wide() ? 0.9 : 0.7, Math.min(1.15, (r0.width - 20) / W));
+      cv.style.height = Math.round(Math.max(460, window.innerHeight - (wide() ? 190 : 230))) + 'px';
+      void H;
       const r = cv.getBoundingClientRect();
       st.tf = { k, x: Math.max(10, (r.width - W * k) / 2) - b.x0 * k, y: 10 - b.y0 * k };
       apply();
@@ -833,6 +912,8 @@ const PatchView = (() => {
     function markPending() { $$('.pending', vp).forEach((x) => x.classList.remove('pending')); if (st.pending) $$('.pcard[data-g="' + st.pending.gid + '"]', vp).forEach((x) => x.classList.add('pending')); }
     function tap(t, shift) {
       if (st.pending && st.edit) { const p = st.pending; st.pending = null; markPending(); dropOn(t, p.gid, p.port); return; }
+      const addtx = t.closest('.cadd');
+      if (addtx && st.edit) { const [hid, ch] = addtx.dataset.addtx.split(':'); memberDialog(gearOf(hid), null, Number(ch)); return; }
       const more = t.closest('.cmore');
       if (more) { const g = gearOf(more.dataset.open); if (st.edit) change(() => { g.open = !g.open; if (!g.open) delete g.open; }, null, true); else { g.open = !g.open; if (!g.open) delete g.open; st.cache = null; paintDrawing(); } return; }
       const sk = t.closest('.sk'), card = t.closest('.pcard'), edge = t.closest('.pe'), mem = t.closest('.crow.mem'), slk = t.closest('.crow.slk');
@@ -896,8 +977,8 @@ const PatchView = (() => {
         }
       } else {
         if (st.edit) {
-          it('Add equipment here', () => { st.placeAt = { x: snap(w.x), y: snap(w.y) }; select(null); if (!wide()) sheet(true); else { const f = $('#pfind'); if (f) f.focus(); } toast('Pick the gear from the list'); });
-          it('Tidy up', tidy);
+          it('Add equipment here', () => { st.placeAt = { x: snap(w.x), y: snap(w.y) }; st.adding = true; select(null); if (!wide()) sheet(true); else { const f = $('#pfind'); if (f) f.focus(); } toast('Pick the gear from the list'); });
+          it('Auto-arrange everything', tidy);
           it('Select all', () => select({ gear: [...D.models.keys()] }, { noSheet: true }));
           it('Snap to grid', () => { st.snap = !st.snap; $('#psnap').checked = st.snap; saveSnap(); }, { check: st.snap });
           sep();
@@ -985,9 +1066,9 @@ const PatchView = (() => {
       if (wire) {
         html += '<div class="two"><div><label>From</label><select id="pcf_a">' + opt(a.outs, freeOut, (j) => (ix.from.get(a.id + ':' + j) || []).length) + '</select></div>' +
           '<div><label>To</label><select id="pcf_b">' + opt(b.ins, firstFree, (i) => ix.into.get(b.id + ':' + i)) + '</select></div></div>' +
-          '<div class="two"><div><label>How many in a row</label><input id="pcf_n" type="number" min="1" max="' + Math.min(a.outs.length, b.ins.length) + '" value="' + stereo + '"></div>' +
+          '<div class="two"><div><label>Cables in a row</label><input id="pcf_n" type="number" min="1" max="' + Math.min(a.outs.length, b.ins.length) + '" value="' + stereo + '"><span class="note">1 = just this cable. 8 connects the next 8 outputs to the next 8 inputs in order (a snake, both sides of a stereo feed).</span></div>' +
           '<div><label>Cable</label><select id="pcf_k">' + Object.entries(KIND_STYLE).filter(([k]) => k !== 'link').map(([k, v]) => '<option value="' + k + '"' + (k === P.guessCable(a, 0, b, 0) ? ' selected' : '') + '>' + v + '</option>').join('') + '</select></div></div>' +
-          '<label>Cable label <span class="note">(optional, e.g. C12)</span></label><input id="pcf_l"><p class="note">• already in use: connecting replaces what is there.</p>';
+          '<label>Cable label <span class="note">(optional; Label cables in the toolbar can name them all at once)</span></label><input id="pcf_l"><p class="note">• already in use: connecting replaces what is there.</p>';
       }
       html += '<div class="acts"><button type="button" data-close>Cancel</button><button class="primary">Connect</button></div></form>';
       modal(html, (w, close) => {
@@ -1011,29 +1092,50 @@ const PatchView = (() => {
       });
     }
     /** Put a mic on a receiver channel (a new one, or one that stands on its own), or add a pack to an IEM transmitter. */
-    function memberDialog(host, existing) {
+    /**
+     * A wireless channel: the transmitter on it (handheld, bodypack…, its model) and the capsule or mic it carries,
+     * who uses it, its frequency. Or an IEM pack on an in-ear transmitter. New models go on your list.
+     */
+    const TX_TYPES = ['Handheld', 'Bodypack', 'Headset', 'Lavalier', 'Instrument', 'Other'];
+    function memberDialog(host, existing, chPick) {
       const rx = host.kind === 'receiver';
       const used = new Set(P.members(st.doc, host).map((m) => m.port));
       const free = host.ins.map((p, i) => i).filter((i) => !used.has(i));
-      if (rx && !free.length) return toast('Every channel on ' + host.name + ' has a mic. Take one out first.', 'bad');
+      if (rx && !free.length) return toast('Every channel on ' + host.name + ' has a transmitter. Take one out first.', 'bad');
       const people = peopleList();
-      modal('<h3>' + (existing ? 'Put ' + esc(existing.name) + ' on ' + esc(host.name) : rx ? 'Add a mic to ' + esc(host.name) : 'Add an IEM pack to ' + esc(host.name)) + '</h3><form id="pmf">' +
-        (rx ? '<label>Channel</label><select id="pm_ch">' + free.map((i) => '<option value="' + i + '">' + esc(host.ins[i]) + '</option>').join('') + '</select>' : '') +
-        (existing ? '' : '<div class="two"><div><label>Who uses it</label><input id="pm_p" list="pmppl" placeholder="Sarah"></div><div><label>Used for</label><input id="pm_u" placeholder="' + (rx ? 'Lead vocal' : 'Drums') + '"></div></div>' +
-          '<datalist id="pmppl">' + people.map((p) => '<option value="' + esc(p) + '">').join('') + '</datalist>' +
-          (rx ? '<div class="two"><div><label>Type</label><select id="pm_m"><option>Handheld</option><option>Bodypack</option><option>Headset</option><option>Lav</option></select></div><div><label>Capsule</label><input id="pm_c" placeholder="Beta 58A"></div></div><label>Frequency (MHz)</label><input id="pm_f" inputmode="decimal" placeholder="524.125">'
-            : '<div class="two"><div><label>Pack model</label><input id="pm_m" placeholder="P3R"></div><div><label>Earphones</label><input id="pm_e" placeholder="SE215"></div></div>')) +
+      const dl = (id, kinds) => '<datalist id="' + id + '">' + GearModels.all().filter((m) => kinds.includes(m.kind)).map((m) => '<option value="' + esc(m.model) + '">' + esc(m.make || '') + '</option>').join('') + '</datalist>';
+      modal('<h3>' + (existing ? 'Put ' + esc(existing.name) + ' on ' + esc(host.name) : rx ? 'Add a transmitter to ' + esc(host.name) : 'Add an IEM pack to ' + esc(host.name)) + '</h3><form id="pmf">' +
+        (rx ? '<label>Receiver channel</label><select id="pm_ch">' + free.map((i) => '<option value="' + i + '"' + (i === chPick ? ' selected' : '') + '>' + esc(host.ins[i]) + '</option>').join('') + '</select>' : '') +
+        (existing ? '' : (rx
+          ? '<fieldset class="pmset"><legend>Transmitter</legend><div class="three"><div><label>Type</label><select id="pm_t">' + TX_TYPES.map((t) => '<option>' + t + '</option>').join('') + '</select></div>' +
+              '<div><label>Make</label><input id="pm_mk" list="pm_mks" value="' + esc(host.make || '') + '"></div><div><label>Model</label><input id="pm_m" list="pm_tx" placeholder="Transmitter model"></div></div>' +
+              '<label>Frequency (MHz)</label><input id="pm_f" inputmode="decimal" placeholder="000.000"></fieldset>' +
+            '<fieldset class="pmset"><legend>Capsule or mic</legend><div class="two"><div><label>Make</label><input id="pm_cmk" list="pm_mks"></div><div><label>Model</label><input id="pm_c" list="pm_cap" placeholder="Capsule, lav or headset mic"></div></div></fieldset>'
+          : '<div class="two"><div><label>Pack model</label><input id="pm_m" list="pm_pk" placeholder="Pack model"></div><div><label>Earphones</label><input id="pm_e" placeholder="Earphones"></div></div>') +
+          '<div class="two"><div><label>Who uses it</label><input id="pm_p" list="pmppl" placeholder="Name"></div><div><label>Used for</label><input id="pm_u" placeholder="What it picks up"></div></div>' +
+          '<datalist id="pmppl">' + people.map((p) => '<option value="' + esc(p) + '">').join('') + '</datalist>' + dl('pm_tx', ['txmic']) + dl('pm_cap', ['capsule', 'mic']) + dl('pm_pk', ['bodypack']) +
+          '<datalist id="pm_mks">' + GearModels.makes().map((m) => '<option value="' + esc(m) + '">').join('') + '</datalist>') +
         '<div class="acts"><button type="button" data-close>Cancel</button><button class="primary">' + (existing ? 'Put it on' : 'Add') + '</button></div></form>', (w, close) => {
-        const pi = $('#pm_p', w); if (pi) setTimeout(() => pi.focus(), 40);
+        w.classList.add('mwide');
+        const pm = $('#pm_m', w);
+        // picking a transmitter model you added before fills in its type
+        if (pm && rx) pm.addEventListener('change', () => { const m = GearModels.find(pm.value, 'txmic'); if (m) { if (m.make) $('#pm_mk', w).value = m.make; if (m.capsule && TX_TYPES.includes(m.capsule)) $('#pm_t', w).value = m.capsule; } });
+        const pc = $('#pm_c', w); if (pc) pc.addEventListener('change', () => { const m = GearModels.find(pc.value, 'capsule') || GearModels.find(pc.value, 'mic'); if (m && m.make) $('#pm_cmk', w).value = m.make; });
+        setTimeout(() => { const f = $('#pm_m', w) || $('#pm_ch', w); if (f) f.focus(); }, 40);
         $('#pmf', w).addEventListener('submit', (e) => {
           e.preventDefault();
           const ch = rx ? Number($('#pm_ch', w).value) : null;
           const v = (id) => { const x = $(id, w); return x ? x.value.trim() : ''; };
           close();
           if (existing) { change(() => { P.connect(st.doc, gearOf(existing.id), 0, gearOf(host.id), ch, { kind: 'rf' }); delete gearOf(existing.id).x; }, existing.name + ' is on ' + host.name + ' ' + host.ins[ch]); return; }
-          const item = rx ? { person: v('#pm_p'), use: v('#pm_u'), model: v('#pm_m'), capsule: v('#pm_c'), freq: v('#pm_f') } : { person: v('#pm_p'), use: v('#pm_u'), model: v('#pm_m') || 'IEM pack', phones: v('#pm_e') };
+          const item = rx ? { person: v('#pm_p'), use: v('#pm_u'), txtype: v('#pm_t'), make: v('#pm_mk'), model: v('#pm_m'), capsule: v('#pm_c'), capmake: v('#pm_cmk'), freq: v('#pm_f') }
+            : { person: v('#pm_p'), use: v('#pm_u'), model: v('#pm_m') || 'IEM pack', phones: v('#pm_e') };
           Object.keys(item).forEach((k) => { if (!item[k]) delete item[k]; });
-          const g = change(() => P.addMember(st.doc, gearOf(host.id), item, ch), rx ? 'Mic added to ' + host.name : 'Pack added to ' + host.name);
+          if (rx) {
+            if (!item.model) item.model = item.txtype || 'Transmitter';
+            GearModels.add([v('#pm_m') ? { kind: 'txmic', make: item.make, model: item.model, capsule: item.txtype } : null, item.capsule ? { kind: 'capsule', make: item.capmake, model: item.capsule } : null].filter(Boolean));
+          } else if (v('#pm_m')) GearModels.add([{ kind: 'bodypack', model: item.model }]);
+          const g = change(() => P.addMember(st.doc, gearOf(host.id), item, ch), rx ? 'Transmitter added to ' + host.name + ' ' + host.ins[ch] : 'Pack added to ' + host.name);
           if (g) select({ gear: [g.id] }, { noSheet: true });
         });
       });
@@ -1116,6 +1218,65 @@ const PatchView = (() => {
         });
       });
     }
+    /**
+     * Smart cable labels: one pattern names every cable (or only the ones without a label), from what each cable
+     * connects: {to} {toNum} → "Stage box 23", {ch} {name} → "23 WMIC-1", C{n} → C01, C02…
+     */
+    function cableTokens(c, ix) {
+      const a = gearOf(c.a), b = gearOf(c.b);
+      const fromPort = c.ap === 'link' ? '' : a.outs[c.ap], toPort = c.bp === 'link' ? '' : b.ins[c.bp];
+      let ch = '';
+      if (c.bp !== 'link' && b.kind === 'stagebox') ch = P.chanOf(b, c.bp) == null ? '' : P.chanOf(b, c.bp);
+      else if (c.bp !== 'link' && b.kind === 'console') ch = (b.localstart || 1) + c.bp;
+      const u = c.ap === 'link' ? {} : P.upstream(st.doc, ix, c.b, c.bp);
+      const src = u.src || (SRC_KINDS.includes(a.kind) ? a : null);
+      if (!ch && src) { const l = P.landing(st.doc, src)[0]; if (l && l.ch != null) ch = l.ch; }
+      const num = (p) => (String(p || '').match(/\d+/) || [''])[0];
+      return { from: a.name, fromPort, fromNum: num(fromPort), to: b.name, toPort, toNum: num(toPort), ch, name: src && src.chname || '', person: src && src.person || '', use: src && src.use || '', type: (KIND_STYLE[c.kind] || '').split(' · ')[0] };
+    }
+    const LABEL_PRESETS = [['{to} {toNum}', 'Where it plugs in (Stage box 23)'], ['{ch} {name}', 'Console channel and name (23 WMIC-1)'], ['{name}', 'Channel name (WMIC-1)'], ['{from} → {to}', 'From and to'], ['C{n}', 'Numbered (C01, C02…)'], ['', 'My own pattern…']];
+    function labelsDialog() {
+      const kinds = [...new Set(st.doc.cables.filter((c) => c.kind !== 'rf').map((c) => c.kind))];
+      modal('<h3>Label cables</h3><p class="note">One pattern names your cables from what they connect, ready to print on the cable ends. Undo puts the old labels back.</p><form id="plf">' +
+        '<label>Pattern</label><select id="pl_p">' + LABEL_PRESETS.map(([v, l]) => '<option value="' + esc(v) + '">' + esc(l) + '</option>').join('') + '</select>' +
+        '<input id="pl_c" class="mono" value="{to} {toNum}" style="margin-top:6px"><p class="note">You can use {from} {fromPort} {fromNum} {to} {toPort} {toNum} {ch} {name} {person} {use} {type} and {n} (a running number).</p>' +
+        '<div class="two"><div><label>{n} starts at</label><input id="pl_s" type="number" min="0" value="1"></div><div><label>Digits in {n}</label><select id="pl_d"><option value="1">1, 2, 3</option><option value="2" selected>01, 02, 03</option><option value="3">001, 002</option></select></div></div>' +
+        '<label>Which cables</label><div class="plk">' + kinds.map((k) => '<label class="tog sm"><input type="checkbox" data-k="' + k + '"' + (k === 'link' || k === 'dante' ? '' : ' checked') + '> ' + esc(KIND_STYLE[k]) + '</label>').join('') + '</div>' +
+        '<label class="tog sm"><input type="checkbox" id="pl_all"> Replace labels already there</label>' +
+        '<div class="plprev" id="pl_v"></div>' +
+        '<div class="acts"><button type="button" class="ghost" id="pl_clear">Clear labels</button><span class="grow"></span><button type="button" data-close>Cancel</button><button class="primary">Label them</button></div></form>', (w, close) => {
+        w.classList.add('mwide');
+        const ix = P.index(st.doc);
+        const pick = () => {
+          const on = new Set($$('[data-k]', w).filter((x) => x.checked).map((x) => x.dataset.k)), all = $('#pl_all', w).checked;
+          return st.doc.cables.filter((c) => on.has(c.kind) && (all || !c.label)).sort((p, q) => {
+            const A = gearOf(p.a), B = gearOf(q.a);
+            return A.name.localeCompare(B.name) || String(p.ap).localeCompare(String(q.ap), undefined, { numeric: true }) || gearOf(p.b).name.localeCompare(gearOf(q.b).name) || String(p.bp).localeCompare(String(q.bp), undefined, { numeric: true });
+          });
+        };
+        const make = (list) => {
+          const pat = $('#pl_c', w).value, start = Number($('#pl_s', w).value) || 0, dig = Number($('#pl_d', w).value);
+          return list.map((c, i) => {
+            const t = cableTokens(c, ix); t.n = String(start + i).padStart(dig, '0');
+            return { c, label: pat.replace(/\{(\w+)\}/g, (m, k) => (t[k] != null ? String(t[k]) : m)).replace(/\s+/g, ' ').trim().slice(0, 60) };
+          });
+        };
+        const prev = () => {
+          const r = make(pick());
+          $('#pl_v', w).innerHTML = r.length ? '<div class="note">' + r.length + ' cable' + (r.length === 1 ? '' : 's') + '</div><table class="grid prep"><tbody>' + r.slice(0, 8).map((x) => '<tr><td>' + esc(gearOf(x.c.a).name + (x.c.ap === 'link' ? '' : ' ' + gearOf(x.c.a).outs[x.c.ap])) + ' → ' + esc(gearOf(x.c.b).name + (x.c.bp === 'link' ? '' : ' ' + gearOf(x.c.b).ins[x.c.bp])) + '</td><td><b class="mono">' + esc(x.label) + '</b></td></tr>').join('') + '</tbody></table>' + (r.length > 8 ? '<div class="note">and ' + (r.length - 8) + ' more</div>' : '') : '<p class="note">No cables to label' + ($('#pl_all', w).checked ? '.' : ' (every one has a label: tick Replace to change them).') + '</p>';
+        };
+        $('#pl_p', w).addEventListener('change', (e) => { if (e.target.value) $('#pl_c', w).value = e.target.value; else $('#pl_c', w).focus(); prev(); });
+        $$('input, select', w).forEach((x) => x.addEventListener('input', prev));
+        $$('input[type=checkbox]', w).forEach((x) => x.addEventListener('change', prev));
+        prev();
+        $('#pl_clear', w).addEventListener('click', () => { const list = pick(); close(); change(() => list.forEach((c) => { delete st.doc.cables.find((x) => x.id === c.id).label; }), list.length + ' labels cleared'); });
+        $('#plf', w).addEventListener('submit', (e) => {
+          e.preventDefault();
+          const r = make(pick()); close();
+          change(() => r.forEach((x) => { const c = st.doc.cables.find((y) => y.id === x.c.id); if (x.label) c.label = x.label; else delete c.label; }), r.length + ' cable' + (r.length === 1 ? '' : 's') + ' labelled');
+        });
+      });
+    }
     function duplicate(g) {
       const copy = change(() => {
         const c = P.addGear(st.doc, { ...g, id: undefined, name: g.name, nin: g.ins.length, nout: g.outs.length, ins: g.ins.slice(), outs: g.outs.slice(), device_id: undefined, x: g.x + 30, y: g.y + 30 });
@@ -1124,8 +1285,9 @@ const PatchView = (() => {
       }, 'Duplicated ' + g.name);
       select({ gear: [copy.id] }, { noSheet: true });
     }
+    /** Auto-arrange: one time, the whole drawing laid out by signal flow. Undo puts it back. */
     function tidy() {
-      change(() => { st.doc.gear.forEach((g) => { delete g.x; delete g.y; }); }, 'Tidied up');
+      change(() => { const pos = autoArrange(st.doc); st.doc.gear.forEach((g) => { const p = pos.get(g.id); if (p) { g.x = p.x; g.y = p.y; } }); }, 'Arranged by signal flow. Undo puts it back.');
       fit();
     }
     function align(how) {
@@ -1201,9 +1363,11 @@ const PatchView = (() => {
     function paintPane(host) {
       if (!host) { [$('#ppane'), $('#psh')].filter(Boolean).forEach((h) => paintPane(h)); return; }
       host.classList.remove('empty');
+      // on a computer the pane shows only when something is picked, or while adding equipment
+      if (host.id === 'ppane') $('.pmain').classList.toggle('nopane', st.edit && !st.sel.length && !st.selCable && !st.adding);
       const g = st.sel.length === 1 ? gearOf(st.sel[0]) : null;
       const cab = st.selCable ? st.doc.cables.find((c) => c.id === st.selCable) : null;
-      const addBtn = () => { if (!st.edit || host.id === 'psh') return; const bt = document.createElement('button'); bt.className = 'btn paddbtn'; bt.innerHTML = icon('plus') + 'Add equipment'; bt.addEventListener('click', () => select(null)); host.prepend(bt); };
+      const addBtn = () => { if (!st.edit || host.id === 'psh') return; const bt = document.createElement('button'); bt.className = 'btn paddbtn'; bt.innerHTML = icon('plus') + 'Add equipment'; bt.addEventListener('click', () => { st.adding = true; select(null); }); host.prepend(bt); };
       if (cab) { cablePane(host, cab); return addBtn(); }
       if (g) { gearPane(host, g); return addBtn(); }
       if (st.sel.length > 1) {
@@ -1247,10 +1411,10 @@ const PatchView = (() => {
         const num = ['nin', 'nout', 'namelen'].includes(f);
         return '<label>' + label + '<input data-nf="' + f + '"' + (num ? ' type="number" min="0" max="128"' : '') + ' value="' + esc(Array.isArray(v) ? v.join(', ') : v) + '"' + (f === 'colors' ? ' placeholder="Red, Green, Yellow, Blue, Purple, Cyan, White"' : f === 'namelen' ? ' placeholder="no limit"' : '') + '></label>';
       }).join('');
-      host.innerHTML = '<div class="pph"><b>Add equipment</b></div>' + (st.placeAt ? '<p class="note">It goes where you right-clicked.</p>' : '') +
+      host.innerHTML = '<div class="pph"><b>Add equipment</b>' + (host.id === 'ppane' ? '<button class="ghost pback" id="pclose" title="Close" style="margin-left:auto">' + icon('x') + '</button>' : '') + '</div>' + (st.placeAt ? '<p class="note">It goes where you right-clicked.</p>' : '') +
         '<form class="pnew" id="pnew"><div class="pch">New gear' + (pre.device_id ? ' · from the Gear Locker' : '') + '</div>' +
         '<label>Type<select id="pn_k">' + P.KIND_ORDER.map((k) => '<option value="' + k + '"' + (k === kind ? ' selected' : '') + '>' + esc(P.KINDS[k].label) + '</option>').join('') + '</select></label>' +
-        '<div class="two"><label>Make<input id="pn_mk" list="pn_mks" value="' + esc(pre.make || '') + '" placeholder="Allen &amp; Heath"></label><label>Model<input id="pn_md" value="' + esc(pre.model || '') + '" placeholder="SQ-5" required></label></div>' +
+        '<div class="two"><label>Make<input id="pn_mk" list="pn_mks" value="' + esc(pre.make || '') + '" placeholder="Manufacturer"></label><label>Model<input id="pn_md" value="' + esc(pre.model || '') + '" placeholder="Model number" required></label></div>' +
         '<datalist id="pn_mks">' + GearModels.makes().map((m) => '<option value="' + esc(m) + '">').join('') + '</datalist>' +
         (fields ? '<div class="two pnf">' + fields + '</div>' : '') +
         '<div class="acts"><span class="note grow">Saved to your list for next time</span>' + (pre.device_id ? '<button type="button" class="ghost" id="pn_x">Cancel</button>' : '') + '<button class="primary">' + icon('plus') + 'Add</button></div></form>' +
@@ -1258,6 +1422,7 @@ const PatchView = (() => {
         (devs.length ? '<div class="pcat"><div class="pch">From your Gear Locker</div><div class="pitems">' + devs.map((d) => '<button class="pitem" data-dev="' + d.id + '"><b>' + esc(d.name) + '</b><span>' + esc([d.make, d.model].filter(Boolean).join(' ')) + '</span></button>').join('') + '</div></div>' : '') +
         (byKind.length ? byKind.map(([k, l]) => '<div class="pcat"><div class="pch">' + esc(P.KINDS[k].label) + '</div><div class="pitems">' + l.map((m) => '<div class="pitemw"><button class="pitem cat-' + P.KINDS[k].cat + '" data-mod="' + esc(GearModels.keyOf(m)) + '"><b>' + esc(m.model) + '</b><span>' + esc([m.make, m.nin != null && k !== 'receiver' && k !== 'amp' ? m.nin + ' in' : '', m.nout ? m.nout + ' out' : '', (k === 'receiver' || k === 'amp') && m.nin ? m.nin + ' ch' : '', m.link].filter(Boolean).join(' · ')) + '</span></button><button type="button" class="pforget2" data-forget="' + esc(GearModels.keyOf(m)) + '" title="Take off your list">' + icon('x') + '</button></div>').join('') + '</div></div>').join('')
           : '<p class="note pempty2">Your list is empty. Each make and model you add above is kept here, so next time it is one tap.</p>');
+      const pcl = $('#pclose', host); if (pcl) pcl.addEventListener('click', () => { st.adding = false; st.prefill = null; paintPane(); });
       const find = $('#pfind', host);
       find.addEventListener('input', () => {
         const q = key(find.value);
@@ -1361,9 +1526,10 @@ const PatchView = (() => {
         (ro ? '<h3 class="pname">' + esc(g.name) + '</h3><div class="pfacts">' + facts.map((f) => '<div><span>' + f[0] + '</span><b>' + esc(f[1]) + '</b></div>').join('') + '</div>' : '<div class="pform">' + fld('name', 'Name', g.name) +
         (k.fields.includes('person') ? fld('person', 'Who uses it', g.person, ' list="pppl" placeholder="Name"') + '<datalist id="pppl">' + peopleList().map((p) => '<option value="' + esc(p) + '">').join('') + '</datalist>' : '') +
         (k.fields.includes('use') ? fld('use', 'Used for', g.use, ' placeholder="Kick, Pastor, Keys L"') : '') +
-        fld('make', 'Make', g.make) + (k.fields.includes('model') ? fld('model', 'Model', g.model) : '') +
-        (k.fields.includes('capsule') ? fld('capsule', 'Capsule', g.capsule, ' placeholder="Beta 58A, TL47"') : '') +
-        (k.fields.includes('freq') ? fld('freq', 'Frequency (MHz)', g.freq, ' inputmode="decimal" placeholder="524.125"') : '') +
+        (k.fields.includes('txtype') ? '<label>Transmitter type<select data-f="txtype"><option value="">—</option>' + TX_TYPES.map((t) => '<option' + (t === g.txtype ? ' selected' : '') + '>' + t + '</option>').join('') + '</select></label>' : '') +
+        fld('make', g.kind === 'txmic' ? 'Transmitter make' : 'Make', g.make) + (k.fields.includes('model') ? fld('model', g.kind === 'txmic' ? 'Transmitter model' : 'Model', g.model) : '') +
+        (k.fields.includes('capsule') ? fld('capmake', 'Capsule make', g.capmake) + fld('capsule', 'Capsule or mic', g.capsule, ' placeholder="Capsule model"') : '') +
+        (k.fields.includes('freq') ? fld('freq', 'Frequency (MHz)', g.freq, ' inputmode="decimal" placeholder="000.000"') : '') +
         (k.fields.includes('mode') ? '<label>Mode<select data-f="mode"' + (ro ? ' disabled' : '') + '><option' + (g.mode !== 'Mono' ? ' selected' : '') + '>Stereo</option><option' + (g.mode === 'Mono' ? ' selected' : '') + '>Mono</option></select></label>' : '') +
         (k.fields.includes('phones') ? fld('phones', 'Earphones', g.phones) : '') +
         (k.fields.includes('localstart') ? fld('localstart', 'Channel for local In 1', g.localstart || 1, ' type="number" min="1"') : '') +
@@ -1552,6 +1718,8 @@ const PatchView = (() => {
     const saveSnap = () => { try { localStorage.setItem('lg-psnap', st.snap ? '1' : '0'); } catch (e) { /* private mode */ } };
     $('#psnap').addEventListener('change', (e) => { st.snap = e.target.checked; saveSnap(); });
     $('#ptidy').addEventListener('click', tidy);
+    $('#plabels').addEventListener('click', labelsDialog);
+    $('#paddb').addEventListener('click', () => { if (!wide()) return sheet(true); st.adding = !st.adding || !!st.sel.length; select(null); });
     $$('[data-al]').forEach((b) => b.addEventListener('click', () => align(b.dataset.al)));
     const pe = $('#pedit');
     const setEdit = (on) => {

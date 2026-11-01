@@ -213,7 +213,7 @@ const Blk = (() => {
    *   double patch  rows agree on everything upstream (one source sent to several places): fine
    *   clash         rows disagree upstream (two different things land on one name, port or channel)
    *   ok            a clash someone marked as intended
-   * Shared gear (stage box, console) is never flagged; its ports are: input 3 of the AR2412 can only take one source.
+   * Shared gear (stage box, console) is never flagged; its ports are: input 3 of the stage box can only take one source.
    * Cable runs only check the cable Label column: devices naturally appear on many cables.
    * Returns cells: Map "row:col" -> { kind, rows }, plus counts and the clash groups.
    */
@@ -387,7 +387,7 @@ const Blk = (() => {
   }
 
   /**
-   * How a patch table is laid out: gear or labels that are the same on every row (AR2412, SLink, SQ-5)
+   * How a patch table is laid out: gear or labels that are the same on every row (the stage box, its link, the console)
    * fold into one "Every row" line, and number columns (Input, Box input) are narrow.
    */
   function tableLayout(b) {
@@ -639,7 +639,7 @@ const Blk = (() => {
     }
     function pasteRows() {
       modal('<h3>Paste rows</h3><p>Copy rows from Excel, Numbers or Google Sheets and paste them here. Columns are matched left to right: ' + esc(b.columns.join(', ')) + '.</p>' +
-        '<textarea id="pr" rows="8" style="font:13px ui-monospace,monospace" placeholder="1\tPastor lav\tSLX-D\t\tSB1-1"></textarea><label class="tog" style="margin-top:10px"><input type="checkbox" id="ph"> The first row is column names</label>' +
+        '<textarea id="pr" rows="8" style="font:13px ui-monospace,monospace" placeholder="1\tSource\tMic\t\tLabel"></textarea><label class="tog" style="margin-top:10px"><input type="checkbox" id="ph"> The first row is column names</label>' +
         '<div class="acts"><button type="button" data-close>Cancel</button><button class="primary" id="pok">Add rows</button></div>', (w, close) => {
         w.querySelector('#pok').addEventListener('click', () => {
           const lines = w.querySelector('#pr').value.replace(/\r/g, '').split('\n').filter((l) => l.trim());
@@ -770,10 +770,10 @@ const Blk = (() => {
         ? 'Makes one row per output on the stage box, fed from the console over the link. Then fill in the mix and where each output goes.'
         : 'Makes one row per input on the stage box, sent to the console over the link. Then fill in the source and mic for each input; empty ones stay as spares.') + ' Rows you already have are kept.</p>' +
         '<form id="sbf"><datalist id="sbdl">' + devs.map((d) => '<option value="' + esc(d.name) + '">').join('') + '</datalist>' +
-        '<div class="two"><div><label for="sb_box">Stage box</label><input id="sb_box" list="sbdl" value="' + esc(first[C.box] || '') + '" placeholder="AR2412"></div>' +
+        '<div class="two"><div><label for="sb_box">Stage box</label><input id="sb_box" list="sbdl" value="' + esc(first[C.box] || '') + '" placeholder="Stage box"></div>' +
         '<div><label for="sb_n">' + (out ? 'Outputs' : 'Inputs') + '</label><input id="sb_n" type="number" min="1" max="128" value="' + guess + '"></div></div>' +
         '<div class="two"><div><label for="sb_link">Link</label><input id="sb_link" value="' + esc(first[C.link] || 'SLink') + '" placeholder="SLink, Cat5e, Dante"></div>' +
-        '<div><label for="sb_con">Console</label><input id="sb_con" list="sbdl" value="' + esc(first[C.console] || '') + '" placeholder="SQ-5"></div></div>' +
+        '<div><label for="sb_con">Console</label><input id="sb_con" list="sbdl" value="' + esc(first[C.console] || '') + '" placeholder="Console"></div></div>' +
         (out ? '' : '<div class="two"><div><label for="sb_start">Console input for box input 1</label><input id="sb_start" type="number" min="1" max="256" value="1"></div><div></div></div>') +
         '<div class="err" id="sbe"></div><div class="acts"><button type="button" data-close>Cancel</button><button class="primary">Make rows</button></div></form>', (w, close) => {
         const boxIn = w.querySelector('#sb_box');
@@ -823,11 +823,11 @@ const Blk = (() => {
       const last = b.rows.slice().reverse().find((r) => String(r[C.rx] || '').trim()) || [];
       modal('<h3>Add a wireless receiver</h3><p>Makes one row per receiver channel, wired on to the stage box and console. Then fill in who uses each one, the capsule, the transmitter and its frequency. Empty channels stay as spares. Rows you already have are kept.</p>' +
         '<form id="wf">' + optList('wfdl', RF_GEAR.receivers.map((g) => g.name)) +
-        '<div class="two"><div><label for="w_rx">Receiver</label><input id="w_rx" list="wfdl" placeholder="SLX-D4D"></div>' +
+        '<div class="two"><div><label for="w_rx">Receiver</label><input id="w_rx" list="wfdl" placeholder="Receiver"></div>' +
         '<div><label for="w_n">Channels</label><input id="w_n" type="number" min="1" max="16" value="2"></div></div>' +
-        '<div class="two"><div><label for="w_box">Plugs into stage box <span class="note">(optional)</span></label><input id="w_box" list="wfdl" value="' + esc(last[C.box] || '') + '" placeholder="AR2412"></div>' +
+        '<div class="two"><div><label for="w_box">Plugs into stage box <span class="note">(optional)</span></label><input id="w_box" list="wfdl" value="' + esc(last[C.box] || '') + '" placeholder="Stage box"></div>' +
         '<div><label for="w_port">Box input for channel 1</label><input id="w_port" type="number" min="1" max="128" placeholder="optional"></div></div>' +
-        '<div class="two"><div><label for="w_con">Console</label><input id="w_con" list="wfdl" value="' + esc(last[C.console] || '') + '" placeholder="SQ-5"></div>' +
+        '<div class="two"><div><label for="w_con">Console</label><input id="w_con" list="wfdl" value="' + esc(last[C.console] || '') + '" placeholder="Console"></div>' +
         '<div><label for="w_in">Console input for channel 1</label><input id="w_in" type="number" min="1" max="256" placeholder="optional"></div></div>' +
         '<div class="err" id="we"></div><div class="acts"><button type="button" data-close>Cancel</button><button class="primary">Make rows</button></div></form>', (w, close) => {
         const rxIn = w.querySelector('#w_rx');
@@ -841,7 +841,7 @@ const Blk = (() => {
           e.preventDefault();
           const rx = rxIn.value.trim(), n = Number(w.querySelector('#w_n').value), box = w.querySelector('#w_box').value.trim(), con = w.querySelector('#w_con').value.trim();
           const port = numOr(w.querySelector('#w_port').value), input = numOr(w.querySelector('#w_in').value);
-          if (!rx) { w.querySelector('#we').textContent = 'Enter the receiver, for example SLX-D4D'; return; }
+          if (!rx) { w.querySelector('#we').textContent = 'Enter the receiver'; return; }
           if (!Number.isInteger(n) || n < 1 || n > 16) { w.querySelector('#we').textContent = 'Enter how many channels it has (1 to 16)'; return; }
           b.rows = b.rows.filter((r) => r.some((v) => String(v || '').trim()));
           let added = 0;
@@ -865,10 +865,10 @@ const Blk = (() => {
       const last = b.rows.slice().reverse().find((r) => String(r[C.tx] || '').trim()) || [];
       modal('<h3>Add in-ear transmitters</h3><p>Makes one row per transmitter, fed from the console. <b>Stereo</b> takes two outputs (5/6); <b>mono</b> takes one. Then fill in the mix, bodypack and who wears it. For a second person on the same mix, use ⋯ › Duplicate on the row. Rows you already have are kept.</p>' +
         '<form id="if">' + optList('ifdl', RF_GEAR.iem.map((g) => g.name)) +
-        '<div class="two"><div><label for="i_tx">Transmitter</label><input id="i_tx" list="ifdl" placeholder="PSM300"></div>' +
+        '<div class="two"><div><label for="i_tx">Transmitter</label><input id="i_tx" list="ifdl" placeholder="Transmitter"></div>' +
         '<div><label for="i_n">How many</label><input id="i_n" type="number" min="1" max="16" value="1"></div></div>' +
         '<div class="two"><div><label for="i_mode">Mode</label><select id="i_mode"><option>Stereo</option><option>Mono</option></select></div>' +
-        '<div><label for="i_con">Console</label><input id="i_con" list="ifdl" value="' + esc(last[C.console] || '') + '" placeholder="SQ-5"></div></div>' +
+        '<div><label for="i_con">Console</label><input id="i_con" list="ifdl" value="' + esc(last[C.console] || '') + '" placeholder="Console"></div></div>' +
         '<div class="two"><div><label for="i_box">Through stage box <span class="note">(optional)</span></label><input id="i_box" list="ifdl" value="' + esc(last[C.box] || '') + '" placeholder="blank = console outputs"></div>' +
         '<div><label for="i_first">First output</label><input id="i_first" type="number" min="1" max="128" placeholder="optional"></div></div>' +
         '<p class="note" id="i_hint"></p>' +
@@ -889,7 +889,7 @@ const Blk = (() => {
         w.querySelector('#if').addEventListener('submit', (e) => {
           e.preventDefault();
           const tx = txIn.value.trim(), n = Number(nIn.value), con = w.querySelector('#i_con').value.trim(), box = boxIn.value.trim(), st = numOr(first.value), stereo = mode.value === 'Stereo';
-          if (!tx) { w.querySelector('#ie').textContent = 'Enter the transmitter, for example PSM300'; return; }
+          if (!tx) { w.querySelector('#ie').textContent = 'Enter the transmitter'; return; }
           if (!Number.isInteger(n) || n < 1 || n > 16) { w.querySelector('#ie').textContent = 'Enter how many transmitters (1 to 16)'; return; }
           const outs = st ? pairs(n, st, stereo) : [];
           b.rows = b.rows.filter((r) => r.some((v) => String(v || '').trim()));
@@ -1001,7 +1001,7 @@ const Blk = (() => {
       const between = (r) => cols.slice(a.k + 1, z.k).every((ci) => !String(r[ci] || '').trim());
       let ri = b.rows.findIndex((r) => key(r[ca]) === a.key && key(r[cz]) === z.key);
       if (ri >= 0) { toast('Those are already connected'); sel = { type: 'wire', r: ri, a, z }; return draw(); }
-      // a spare stage box input or output comes first: connecting a source to the AR2412 takes its next free input
+      // a spare stage box input or output comes first: connecting a source to the stage box takes its next free input
       ri = b.rows.findIndex((r) => isSpare(b, r) && between(r) && ((key(r[cz]) === z.key && !String(r[ca] || '').trim()) || (key(r[ca]) === a.key && !String(r[cz] || '').trim())));
       if (ri < 0) ri = b.rows.findIndex((r) => key(r[ca]) === a.key && !String(r[cz] || '').trim() && between(r) && cols.slice(z.k + 1).every((ci) => !String(r[ci] || '').trim()));
       if (ri < 0) ri = b.rows.findIndex((r) => key(r[cz]) === z.key && !String(r[ca] || '').trim() && between(r) && cols.slice(0, a.k).every((ci) => !String(r[ci] || '').trim()));

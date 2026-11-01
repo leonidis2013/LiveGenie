@@ -105,7 +105,7 @@ function drawMap(host, data, view) {
   const editable = can('admin');
   if (!ids.length) {
     host.innerHTML = '<div class="card empty" style="text-align:left;max-width:720px">' + (view === 'signal'
-      ? '<b>Nothing to draw yet.</b><p>The signal map draws an arrow for every cable on the <a href="#/patch">stage patch</a> between two pieces of gear that have device cards (the SQ-5, the AR2412, the DriveRack PA2). Big gear added to the stage patch from its catalog gets a device card by itself; for other gear, open it on the stage patch and choose <b>Make a device card</b>.</p>'
+      ? '<b>Nothing to draw yet.</b><p>The signal map draws an arrow for every cable on the <a href="#/patch">stage patch</a> between two pieces of gear that have device cards (the console, the stage box, the speaker processor PA2). Big gear added to the stage patch from its catalog gets a device card by itself; for other gear, open it on the stage patch and choose <b>Make a device card</b>.</p>'
       : '<b>No network links yet.</b><p>Open a device card, choose Edit, and set <b>Plugged into</b> (the switch or router it connects to) and the port. Start with the switches: USW-16-PoE into the UDM Pro, the FOH switch into the USW-16-PoE, and so on.</p>') +
       '<p><a href="#/patch">Open the stage patch</a> · <a href="#/gear">Open the Gear Locker</a></p></div>' + trayHtml(tray);
     return;
@@ -348,7 +348,7 @@ async function viewVlans(host) {
     modal('<h3>' + (v ? 'Edit VLAN ' + v.vid : 'New VLAN') + '</h3><form id="vf"><div class="two">' + f('vid', 'VLAN ID', '20', 'mono') + '<div>' + f('name', 'Name', 'AVL') + '</div></div>' +
       f('cidr', 'Subnet', '10.10.20.0/24', 'mono') + '<div class="two"><div>' + f('gateway', 'Gateway', '10.10.20.1', 'mono') + '</div><div><label>Colour</label><div class="swatches">' + all.colors.map((c) => '<button type="button" class="sw' + (c === x.color ? ' on' : '') + '" data-c="' + c + '" style="background:' + c + '" aria-label="' + c + '"></button>').join('') + '</div></div></div>' +
       '<div class="two"><div>' + f('dhcp_start', 'DHCP from', '10.10.20.100', 'mono') + '</div><div>' + f('dhcp_end', 'DHCP to', '10.10.20.199', 'mono') + '</div></div>' +
-      f('purpose', 'What it is for', 'NDI, SQ-5, Companion, lighting control') +
+      f('purpose', 'What it is for', 'Audio, video, lighting control') +
       '<div class="err" id="ve"></div><div class="acts">' + (v ? '<button type="button" class="danger" id="vdel" style="margin-right:auto">Delete</button>' : '') + '<button type="button" data-close>Cancel</button><button class="primary">' + (v ? 'Save' : 'Add VLAN') + '</button></div></form>', (w, close) => {
       let colorPick = x.color;
       w.querySelectorAll('.sw').forEach((s) => s.addEventListener('click', () => { colorPick = s.dataset.c; w.querySelectorAll('.sw').forEach((o) => o.classList.toggle('on', o === s)); }));

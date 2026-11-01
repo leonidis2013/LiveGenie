@@ -14,7 +14,7 @@ const SETUP_GROUPS = [
   { role: 'amp', kind: 'amp', title: 'Amplifiers', count: ['nin', 'Channels', 2] },
   { role: 'speaker', kind: 'speaker', title: 'Speakers' }
 ];
-/** Device names for several of the same unit: SLX-D4D, SLX-D4D #2, SLX-D4D #3. */
+/** Device names for several of the same unit: Receiver, Receiver #2, Receiver #3. */
 const unitNames = (o) => Array.from({ length: Math.max(1, Number(o.qty) || 1) }, (_, i) => (i ? o.name + ' #' + (i + 1) : o.name));
 const nameFor = (m) => (['processor', 'amp', 'speaker'].includes(m.kind) && m.make && !m.model.toLowerCase().startsWith(m.make.toLowerCase()) ? m.make + ' ' + m.model : m.model);
 
@@ -46,8 +46,8 @@ async function viewGearSetup() {
       body = `<p class="note">Start with the mixing console. ${consoles.length ? 'Pick one you added before, or type a new make and model.' : 'Type its make and model: LiveGenie remembers it for next time.'}</p>
         ${consoles.length ? '<label class="gpick">From your list<select data-pick><option value="">New console…</option>' + consoles.map((c, i) => '<option value="' + i + '"' + (c.model === st.console.model && c.make === st.console.make ? ' selected' : '') + '>' + esc([c.make, c.model].filter(Boolean).join(' ')) + '</option>').join('') + '</select></label>' : ''}
         <div class="gform">
-          <label>Make<input data-c="make" value="${sv(st.console, 'make')}" placeholder="Allen &amp; Heath" list="gmakes"></label>
-          <label>Model<input data-c="model" value="${sv(st.console, 'model')}" placeholder="SQ-5"></label>
+          <label>Make<input data-c="make" value="${sv(st.console, 'make')}" placeholder="Manufacturer" list="gmakes"></label>
+          <label>Model<input data-c="model" value="${sv(st.console, 'model')}" placeholder="Model number"></label>
           <label>Name<input data-c="name" value="${sv(st.console, 'name')}" placeholder="${esc(st.console.model || 'FOH console')}"></label>
           <label>Location<input data-c="location" value="${sv(st.console, 'location')}" placeholder="FOH"></label>
           <label>Local inputs<input data-c="inputs" type="number" min="0" value="${sv(st.console, 'inputs')}"></label>
@@ -61,8 +61,8 @@ async function viewGearSetup() {
     } else if (st.step === 1) {
       body = `<p class="note">Add each stage box. LiveGenie adds it to the stage patch, linked to the ${esc(st.console.name || st.console.model || 'console')}. Which console channel each box input lands on is up to you: assign them in the stage patch.</p>
         ${st.boxes.map((b, i) => `<div class="gbox" data-i="${i}"><div class="gbh"><b>Stage box ${i + 1}</b><button type="button" class="ghost danger" data-rm="${i}">${icon('x')}</button></div><div class="gform">
-          <label>Make<input data-b="make" value="${sv(b, 'make')}" placeholder="Allen &amp; Heath" list="gmakes"></label>
-          <label>Model<input data-b="model" value="${sv(b, 'model')}" placeholder="AR2412"></label>
+          <label>Make<input data-b="make" value="${sv(b, 'make')}" placeholder="Manufacturer" list="gmakes"></label>
+          <label>Model<input data-b="model" value="${sv(b, 'model')}" placeholder="Model number"></label>
           <label>Name<input data-b="name" value="${sv(b, 'name')}" placeholder="${esc(b.model || 'Stage box')}"></label>
           <label>Location<input data-b="location" value="${sv(b, 'location')}"></label>
           <label>Link to console<input data-b="link" value="${sv(b, 'link')}"></label>

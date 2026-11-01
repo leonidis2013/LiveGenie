@@ -2,7 +2,7 @@
  * Finds device names, aliases and IP addresses in text, so LiveGenie can link
  * them to device cards. Shared by the server (Used on lists) and the web page
  * (links on pages), so both agree on what counts as a mention.
- *   "SQ-5" matches "the SQ-5's scene" but not "SQ-50"; "10.10.20.1" does not match "10.10.20.11".
+ *   "Desk 2" matches "the Desk 2 scene" but not "Desk 20"; "10.10.20.1" does not match "10.10.20.11".
  */
 (function (root, factory) {
   if (typeof module === 'object' && module.exports) module.exports = factory();

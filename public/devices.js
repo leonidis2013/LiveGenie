@@ -16,17 +16,22 @@ const BUCKET_OF_KIND = { mic: 'Mics & wireless', di: 'Mics & wireless', txmic: '
   stagebox: 'Stage I/O', network: 'Network', console: 'Mixing', computer: 'Computers', processor: 'Processing', amp: 'Amps', speaker: 'Speakers & monitors', wedge: 'Speakers & monitors' };
 function autoBucket(d) {
   if (d.kind && BUCKET_OF_KIND[d.kind]) return BUCKET_OF_KIND[d.kind];
+  // its type on your model list, else plain words in its name
+  const m = typeof GearModels !== 'undefined' ? GearModels.find(d.model) || GearModels.find(d.name) : null;
+  if (m && BUCKET_OF_KIND[m.kind]) return BUCKET_OF_KIND[m.kind];
   const t = (d.make + ' ' + d.model + ' ' + d.name).toLowerCase();
-  if (/slx|ulx|qlx|axient|\bad4|ew-?dx|wireless|sm58|beta ?5|sm57|beta ?91|ksm|\bmic\b|\bdi\b/.test(t)) return 'Mics & wireless';
-  if (/psm|iem|ptm-|in-?ear|p3r|p9ra/.test(t)) return 'In-ears';
-  if (/ar2412|ar84|ab168|dx168|\bs16\b|\bs32\b|dl16|dl32|rio|tio|stage ?box|snake/.test(t)) return 'Stage I/O';
-  if (/\bsq-?\d|x32|m32|tf\d|dm7|console|mixer|qu-|dlive|avantis/.test(t)) return 'Mixing';
-  if (/driverack|venu|dsp|processor|crossover/.test(t)) return 'Processing';
-  if (/crown|xli|xls|amplifier|\bamp\b|powersoft|qsc gx|qsc plx/.test(t)) return 'Amps';
-  if (/cbt|dxs|dxr|speaker|sub|wedge|monitor|k12|k10|elx|ekx/.test(t)) return 'Speakers & monitors';
+  if (/wireless|receiver|\bmic|microphone|\bdi\b/.test(t)) return 'Mics & wireless';
+  if (/\biem\b|in-?ear/.test(t)) return 'In-ears';
+  if (/stage ?box|snake|\bi\/o\b/.test(t)) return 'Stage I/O';
+  if (/console|mixer|desk/.test(t)) return 'Mixing';
+  if (/\bdsp\b|processor|crossover/.test(t)) return 'Processing';
+  if (/amplifier|\bamp\b/.test(t)) return 'Amps';
+  if (/speaker|\bsub\b|subwoofer|wedge|monitor/.test(t)) return 'Speakers & monitors';
   return { video: 'Video', lighting: 'Lighting', network: 'Network', computer: 'Computers', power: 'Power', audio: 'Other', other: 'Other' }[d.category] || 'Other';
 }
 const bucketOf = (d) => d.bucket || autoBucket(d);
+/** Every location used in the Gear Locker, sorted (plus this one). */
+const gearLocations = (list, extra) => [...new Set(list.map((d) => d.location).concat(extra ? [extra] : []).filter(Boolean))].sort((a, b) => a.localeCompare(b, undefined, { numeric: true }));
 /** Every bucket name in order: the admin's list first, then automatic ones that have gear. */
 function bucketOrder(list) {
   const out = (DEV.buckets || []).slice();
@@ -49,7 +54,7 @@ const forgetDevices = () => { DEV.at = 0; };
 
 /**
  * The team's own list of makes and models. It starts empty and grows as gear is added (stage patch, guided setup),
- * so next time an SQ-5 or an SLX-D4D is one click, with its inputs, outputs and link already filled in.
+ * so next time the same model is one click, with its inputs, outputs and link already filled in.
  */
 const GearModels = (() => {
   let list = null, at = 0;
@@ -121,7 +126,7 @@ function linkDevices(root) {
       pop = document.createElement('div');
       pop.className = 'devpop';
       pop.innerHTML = devThumb(d, 44) + '<div><b>' + esc(d.name) + '</b><span>' + esc([d.make, d.model].filter(Boolean).join(' ')) + '</span>' +
-        (d.location ? '<span>' + esc(d.location) + '</span>' : '') + (d.ips.length ? '<span class="mono">' + esc(d.ips.join(', ')) + '</span>' : '') + '</div>';
+        (d.location ? '<span>' + esc(d.location) + '</span>' : '') + (d.networked && d.ips.length ? '<span class="mono">' + esc(d.ips.join(', ')) + '</span>' : '') + '</div>';
       document.body.appendChild(pop);
       const r = a.getBoundingClientRect();
       const left = Math.min(window.innerWidth - pop.offsetWidth - 10, Math.max(10, r.left));
@@ -148,6 +153,8 @@ async function viewDevices(qs) {
   const list = await loadDevices(true);
   let bk = qs.get('b') || '';
   let q = '';
+  let lc = qs.get('loc') || '';
+  let by = 'bucket'; try { by = localStorage.getItem('lg-gl-by') || 'bucket'; } catch (e) { /* private mode */ }
   let shut = {}; try { shut = JSON.parse(localStorage.getItem('lg-gl-shut') || '{}'); } catch (e) { /* private mode */ }
   const sug = can('admin') ? (await get('/api/devices/suggestions')).suggestions : [];
   // who uses a piece of gear, from the stage patch (a mic, a pack)
@@ -161,22 +168,26 @@ async function viewDevices(qs) {
       ${can('admin') ? '<button class="btn" id="gBk">' + icon('list') + '<span class="hide-sm">Buckets</span></button>' : ''}
       ${sug.length ? '<button class="btn" id="imp">' + icon('net') + 'From IP lists (' + sug.length + ')</button>' : ''}
       ${can('admin') ? '<button class="primary btn" id="newDev">' + icon('plus') + 'Add gear</button>' : ''}</div>
-    <div class="bar"><input type="search" id="dq" placeholder="Find gear: name, model, location, IP or who uses it" style="flex:1;min-width:200px"></div>
+    <div class="bar"><input type="search" id="dq" placeholder="Find gear: name, model, location, IP or who uses it" style="flex:1;min-width:200px">
+      <select id="dlf" title="Only gear in one location"><option value="">Every location</option>${gearLocations(list).map((l) => '<option' + (l === lc ? ' selected' : '') + '>' + esc(l) + '</option>').join('')}${list.some((d) => !d.location) ? '<option value="__none">No location set</option>' : ''}</select>
+      <div class="seg" id="dgb"><button data-gb="bucket" class="${by === 'bucket' ? 'on' : ''}">By bucket</button><button data-gb="location" class="${by === 'location' ? 'on' : ''}">By location</button></div></div>
     <div class="gchips" id="dcat"><button data-b="" class="chipb on">All <em>${list.length}</em></button>${order.filter((b) => list.some((d) => bucketOf(d) === b)).map((b) => '<button class="chipb" data-b="' + esc(b) + '">' + esc(b) + ' <em>' + list.filter((d) => bucketOf(d) === b).length + '</em></button>').join('')}</div>
     <div id="dgrid"></div>`;
   const cardHtml = (d) => '<a class="dcard" href="#/d/' + d.id + '">' + devThumb(d, 46) +
     '<div class="t"><b>' + esc(d.name) + '</b><span>' + esc([d.make, d.model].filter(Boolean).join(' ') || CAT[d.category]) + '</span>' +
-    '<span class="dmeta">' + [d.location ? icon('pin') + esc(d.location) : '', d.ips.length ? '<span class="mono">' + esc(d.ips[0]) + '</span>' + (d.ips.length > 1 ? ' +' + (d.ips.length - 1) : '') : '', users.get(d.id) ? icon('user') + esc(users.get(d.id)) : ''].filter(Boolean).join('<i>·</i>') + '</span></div>' +
+    '<span class="dmeta">' + [d.location ? icon('pin') + esc(d.location) : '', d.networked && d.ips.length ? '<span class="mono">' + esc(d.ips[0]) + '</span>' + (d.ips.length > 1 ? ' +' + (d.ips.length - 1) : '') : '', users.get(d.id) ? icon('user') + esc(users.get(d.id)) : ''].filter(Boolean).join('<i>·</i>') + '</span></div>' +
     '<div class="dbadges">' + (d.files ? '<span class="badge" title="' + d.files + ' manual' + (d.files === 1 ? '' : 's') + '">' + icon('pdf') + d.files + '</span>' : '') + (d.tech_only ? '<span class="badge tech">Tech only</span>' : '') + '</div></a>';
   const paint = () => {
     const words = q.toLowerCase().split(/\s+/).filter(Boolean);
-    const shown = list.filter((d) => (!bk || bucketOf(d) === bk) && words.every((w) => [d.name, ...d.aliases, d.make, d.model, d.location, ...d.ips, users.get(d.id) || '', bucketOf(d)].join(' ').toLowerCase().includes(w)));
+    const shown = list.filter((d) => (!bk || bucketOf(d) === bk) && (!lc || (lc === '__none' ? !d.location : d.location === lc)) && words.every((w) => [d.name, ...d.aliases, d.make, d.model, d.location, ...d.ips, users.get(d.id) || '', bucketOf(d)].join(' ').toLowerCase().includes(w)));
     if (!shown.length) {
-      $('#dgrid').innerHTML = '<div class="card empty">' + (list.length ? 'No gear matches.' : 'The Gear Locker is empty.' + (can('admin') ? ' Try the <a href="#/gear-setup">guided setup</a>, or add the SQ-5, the DriveRack PA2 or a stage box' + (sug.length ? ', or make cards from the names already in your IP lists' : '') + '.' : '')) + '</div>';
+      $('#dgrid').innerHTML = '<div class="card empty">' + (list.length ? 'No gear matches.' : 'The Gear Locker is empty.' + (can('admin') ? ' Try the <a href="#/gear-setup">guided setup</a> or add your first piece of gear' + (sug.length ? ', or make cards from the names already in your IP lists' : '') + '.' : '')) + '</div>';
       return;
     }
-    $('#dgrid').innerHTML = order.map((b) => {
-      const inB = shown.filter((d) => bucketOf(d) === b);
+    const secOf = by === 'location' ? (d) => d.location || 'No location set' : bucketOf;
+    const secs = by === 'location' ? gearLocations(shown).concat(shown.some((d) => !d.location) ? ['No location set'] : []) : order;
+    $('#dgrid').innerHTML = secs.map((b) => {
+      const inB = shown.filter((d) => secOf(d) === b);
       if (!inB.length) return '';
       const closed = !bk && !words.length && shut[b];
       return '<section class="gbucket' + (closed ? ' shut' : '') + '"><button type="button" class="gbh" data-shut="' + esc(b) + '"><span>' + esc(b) + '</span><em>' + inB.length + '</em><i>' + (closed ? '▸' : '▾') + '</i></button>' +
@@ -187,6 +198,8 @@ async function viewDevices(qs) {
   if (bk && !$('#dcat [data-b="' + CSS.escape(bk) + '"]')) bk = '';
   $$('#dcat button').forEach((b) => { b.classList.toggle('on', b.dataset.b === bk); b.addEventListener('click', () => { bk = b.dataset.b; $$('#dcat button').forEach((x) => x.classList.toggle('on', x === b)); paint(); }); });
   $('#dq').addEventListener('input', (e) => { q = e.target.value; paint(); });
+  $('#dlf').addEventListener('change', (e) => { lc = e.target.value; paint(); });
+  $$('#dgb [data-gb]').forEach((b) => b.addEventListener('click', () => { by = b.dataset.gb; try { localStorage.setItem('lg-gl-by', by); } catch (e) { /* private mode */ } $$('#dgb button').forEach((x) => x.classList.toggle('on', x === b)); paint(); }));
   const nb = $('#newDev'); if (nb) nb.addEventListener('click', () => { location.hash = '#/gear/new' + (bk ? '?b=' + encodeURIComponent(bk) : ''); });
   const ib = $('#imp'); if (ib) ib.addEventListener('click', () => importDialog(sug));
   const gb = $('#gBk'); if (gb) gb.addEventListener('click', () => bucketsDialog(list));
@@ -256,11 +269,11 @@ async function viewDevice(id) {
   const dl = (x) => '<a href="#/d/' + x.id + '">' + esc(x.name) + '</a>';
   const facts = [
     ['Location', esc(v.location)],
-    ['Plugged into', L.uplink ? dl(L.uplink) + (L.uplink.port ? ' · port <span class="mono">' + esc(L.uplink.port) + '</span>' : '') : ''],
-    ['VLAN', (L.vlans || []).map((x) => '<a class="chip" href="#/map/vlans"><i class="sw" style="background:' + esc(x.color) + '"></i>' + x.vid + ' ' + esc(x.name) + '</a>').join(' ')],
+    ['Plugged into', v.networked && L.uplink ? dl(L.uplink) + (L.uplink.port ? ' · port <span class="mono">' + esc(L.uplink.port) + '</span>' : '') : ''],
+    ['VLAN', !v.networked ? '' : (L.vlans || []).map((x) => '<a class="chip" href="#/map/vlans"><i class="sw" style="background:' + esc(x.color) + '"></i>' + x.vid + ' ' + esc(x.name) + '</a>').join(' ')],
     ['Connected here', (L.children || []).map((x) => '<div>' + (x.port ? '<span class="mono">' + esc(x.port) + '</span> ' : '') + dl(x) + '</div>').join('')],
     ['Signal from', (L.signalIn || []).map((x) => dl(x) + (x.count > 1 ? ' <span class="note">×' + x.count + '</span>' : '')).join(', ')],
-    ['Signal to', (L.signalOut || []).map((x) => dl(x) + (x.count > 1 ? ' <span class="note">×' + x.count + '</span>' : '')).join(', ')], ['IP address' + (v.ips.length > 1 ? 'es' : ''), ipRows], ['Inputs / outputs', v.inputs || v.outputs ? (v.inputs || 0) + ' in · ' + (v.outputs || 0) + ' out' : ''], ['MAC', v.mac ? '<span class="mono">' + esc(v.mac) + '</span>' : ''],
+    ['Signal to', (L.signalOut || []).map((x) => dl(x) + (x.count > 1 ? ' <span class="note">×' + x.count + '</span>' : '')).join(', ')], ['IP address' + (v.ips.length > 1 ? 'es' : ''), v.networked ? ipRows : ''], ['Inputs / outputs', v.inputs || v.outputs ? (v.inputs || 0) + ' in · ' + (v.outputs || 0) + ' out' : ''], ['MAC', v.networked && v.mac ? '<span class="mono">' + esc(v.mac) + '</span>' : ''],
     ['Also called', esc(v.aliases.join(', '))], ['Manual', v.manual_url ? '<a href="' + esc(v.manual_url) + '" target="_blank" rel="noopener">' + esc(v.manual_url.replace(/^https?:\/\//, '').slice(0, 60)) + '</a>' : '']
   ].filter((f) => f[1]);
   const used = d.usedOn;
@@ -399,6 +412,7 @@ async function viewDeviceEdit(id) {
   await loadDevices();
   const d = id ? (await get('/api/devices/' + id)).device : { bucket: new URLSearchParams((location.hash.split('?')[1] || '')).get('b') || '', inputs: '', outputs: '', uplink_id: '', uplink_port: '', name: '', aliases: [], category: 'audio', make: '', model: '', location: '', ip: '', mac: '', photo: '', manual_url: '', notes: '', tech_only: false };
   setTitle(id ? 'Edit ' + d.name : 'Add gear');
+  const locations = gearLocations(DEV.list || [], d.location);
   S.dirty = false;
   const f = (k, label, ph, extra) => '<label class="dfield' + (extra && extra.wide ? ' wide' : '') + '"><span>' + label + '</span><input data-k="' + k + '" value="' + esc(d[k]) + '" placeholder="' + esc(ph || '') + '"' + (extra && extra.mono ? ' class="mono" autocapitalize="off" spellcheck="false"' : '') + (extra && extra.mode ? ' inputmode="' + extra.mode + '"' : '') + '>' + (extra && extra.hint ? '<em>' + extra.hint + '</em>' : '') + '</label>';
   app.innerHTML = `<div class="ed">
@@ -406,20 +420,23 @@ async function viewDeviceEdit(id) {
     <div class="card" style="margin-top:8px">
       <div class="dphoto"><div id="dph"></div><input type="file" accept="image/*" class="hide" id="dpf"><div><button type="button" id="dpb">${d.photo ? 'Replace photo' : 'Add photo'}</button>${d.photo ? ' <button type="button" class="ghost danger" id="dpx">Remove</button>' : ''}<div class="note">A photo of the device or its rack position helps volunteers find it.</div></div></div>
       <div class="dform">
-        ${f('name', 'Name', 'SQ-5', { wide: true })}
-        <label class="dfield wide"><span>Also called</span><input data-k="aliases" value="${esc(d.aliases.join(', '))}" placeholder="FOH desk, A&amp;H"><em>Other names people type, separated by commas. Each one links to this card.</em></label>
+        ${f('name', 'Name', 'What your team calls it', { wide: true })}
+        <label class="dfield wide"><span>Also called</span><input data-k="aliases" value="${esc(d.aliases.join(', '))}" placeholder="Nicknames, comma between"><em>Other names people type, separated by commas. Each one links to this card.</em></label>
         <label class="dfield"><span>Category</span><select data-k="category">${Object.keys(CAT).map((k) => '<option value="' + k + '"' + (k === d.category ? ' selected' : '') + '>' + CAT[k] + '</option>').join('')}</select></label>
         <label class="dfield"><span>Bucket</span><select data-k="bucket"><option value="">Automatic (${esc(autoBucket({ ...d, kind: (DEV.list || []).find((x) => x.id === d.id)?.kind || '' }))})</option>${bucketOrder(DEV.list || []).map((b) => '<option' + (b === d.bucket ? ' selected' : '') + '>' + esc(b) + '</option>').join('')}</select><em>Where it sits in the Gear Locker</em></label>
-        ${f('make', 'Make', 'Allen & Heath')}${f('model', 'Model', 'SQ-5')}
-        ${f('location', 'Location', 'FOH, front AV rack U4…')}
-        ${f('ip', 'IP address', '10.10.20.11', { mono: true, mode: 'decimal', hint: 'Optional. Addresses in IP lists link here too when the device name matches.' })}
-        ${f('mac', 'MAC', '', { mono: true })}
-        <label class="dfield"><span>Inputs</span><input data-k="inputs" type="number" min="0" max="512" value="${esc(d.inputs || '')}" placeholder="24"><em>For stage boxes and consoles</em></label>
-        <label class="dfield"><span>Outputs</span><input data-k="outputs" type="number" min="0" max="512" value="${esc(d.outputs || '')}" placeholder="12"></label>
+        ${f('make', 'Make', 'Manufacturer')}${f('model', 'Model', 'Model number')}
+        <label class="dfield"><span>Location</span><select data-k="location" id="dloc"><option value="">Not set</option>${locations.map((l) => '<option' + (l === d.location ? ' selected' : '') + '>' + esc(l) + '</option>').join('')}<option value="__new">+ New location…</option></select><em>Where it lives: a rack, a room, a road case</em></label>
+        <label class="dfield"><span>Inputs</span><input data-k="inputs" type="number" min="0" max="512" value="${esc(d.inputs || '')}" placeholder="0"><em>For stage boxes and consoles</em></label>
+        <label class="dfield"><span>Outputs</span><input data-k="outputs" type="number" min="0" max="512" value="${esc(d.outputs || '')}" placeholder="0"></label>
         ${f('manual_url', 'Manual link', 'https://…', { wide: true, mode: 'url' })}
+        <label class="tog dfield wide ${d.networked ? 'on' : ''}"><input type="checkbox" data-k="networked" ${d.networked ? 'checked' : ''}>On the network <em>Has an IP address, a MAC or plugs into a switch</em></label>
+        <div class="dnet wide${d.networked ? '' : ' hide'}" id="dnet">
+        ${f('ip', 'IP address', '0.0.0.0', { mono: true, mode: 'decimal', hint: 'Addresses in IP lists link here too when the name matches.' })}
+        ${f('mac', 'MAC', '', { mono: true })}
         <label class="dfield"><span>Plugged into</span><select data-k="uplink_id"><option value="">Nothing / not set</option>${(await loadDevices(true)).filter((x) => String(x.id) !== String(id)).map((x) => '<option value="' + x.id + '"' + (String(x.id) === String(d.uplink_id || '') ? ' selected' : '') + '>' + esc(x.name) + '</option>').join('')}</select><em>The switch, router or access point it connects to. Draws the network map.</em></label>
-        ${f('uplink_port', 'Port', '5', { mode: 'text', hint: 'Port on that switch (optional)' })}
-        <label class="tog dfield ${d.tech_only ? 'on' : ''}"><input type="checkbox" data-k="tech_only" ${d.tech_only ? 'checked' : ''}>Tech only <em>Hidden from volunteers</em></label>
+        ${f('uplink_port', 'Port', 'Port number', { mode: 'text', hint: 'Port on that switch (optional)' })}
+        </div>
+        <label class="tog dfield wide ${d.tech_only ? 'on' : ''}"><input type="checkbox" data-k="tech_only" ${d.tech_only ? 'checked' : ''}>Admins only <em>Hidden from users</em></label>
       </div>
       <div class="dfield wide" style="margin-top:12px"><span>Notes</span><div id="dnotes"></div></div>
     </div>
@@ -430,8 +447,22 @@ async function viewDeviceEdit(id) {
     const k = x.dataset.k;
     d[k] = x.type === 'checkbox' ? x.checked : k === 'aliases' ? x.value.split(',').map((s) => s.trim()).filter(Boolean) : x.value;
     if (x.type === 'checkbox') x.closest('.tog').classList.toggle('on', x.checked);
+    if (k === 'networked') $('#dnet').classList.toggle('hide', !x.checked);
     dirty();
   }));
+  // a new location: type it once, then it is on the list for every piece of gear
+  const loc = $('#dloc');
+  loc.addEventListener('change', () => {
+    if (loc.value !== '__new') return;
+    loc.value = d.location || '';
+    modal('<h3>New location</h3><form id="nlf"><label>Name</label><input id="nl" placeholder="Rack, room or case"><div class="acts"><button type="button" data-close>Cancel</button><button class="primary">Add</button></div></form>', (w, close) => {
+      $('#nlf', w).addEventListener('submit', (e) => {
+        e.preventDefault(); const v = $('#nl', w).value.trim(); if (!v) return; close();
+        if (![...loc.options].some((o) => o.value === v)) loc.insertBefore(new Option(v, v), loc.querySelector('[value="__new"]'));
+        loc.value = v; d.location = v; dirty();
+      });
+    });
+  });
   const r = Rich.create({ md: d.notes, compact: true, placeholder: 'Settings, quirks, how to reset it, who to call…', onChange: (v) => { d.notes = v; dirty(); } });
   $('#dnotes').appendChild(r.el);
   const photo = () => { $('#dph').innerHTML = d.photo ? '<img src="/uploads/' + esc(d.photo) + '" alt="">' : devThumb({ name: d.name || '?' }, 84); };

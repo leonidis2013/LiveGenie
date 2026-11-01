@@ -744,7 +744,7 @@ test('checklists that were on pages move to To do, keeping their ticks and log',
   const DBm = require(path.join(ROOT, 'lib', 'db'));
   // a database from before 0.20: back to migration 10, then a page with a checklist and a tick
   const db1 = DBm.open(path.join(dir, 'x.db'));
-  db1.exec('DROP TABLE todo_lists'); db1.prepare('UPDATE schema_version SET v = 10').run();
+  db1.exec('DROP TABLE todo_lists; ALTER TABLE devices DROP COLUMN networked'); db1.prepare('UPDATE schema_version SET v = 10').run();
   db1.prepare("INSERT INTO spaces (slug, name) VALUES ('audio', 'Audio')").run();
   const blocks = [{ type: 'text', md: 'Before' }, { type: 'checklist', id: 'abc12345', title: 'Desk check', items: ['Faders down', 'Scenes loaded'], schedule: [] }];
   db1.prepare("INSERT INTO pages (space_id, title, blocks, version, created_at, updated_at) VALUES (1, 'Sunday desk', ?, 1, 1, 1)").run(JSON.stringify(blocks));
@@ -771,6 +771,12 @@ test('Gear Locker buckets: automatic, then the admin renames and orders them; To
   r = await vol.get('/api/devices');
   assert.strictEqual(r.data.devices.find((x) => x.id === id).bucket, 'Closet spares', 'renaming a bucket moves its gear');
   assert.deepStrictEqual(r.data.buckets, ['Mics & wireless', 'Closet spares']);
+  // on the network: ticked by hand, or by having an address
+  const n1 = (await admin.post('/api/devices', { name: 'Net thing', ip: '10.1.1.9' })).data.id;
+  const n2 = (await admin.post('/api/devices', { name: 'Plain thing', networked: false })).data.id;
+  const listN = (await vol.get('/api/devices')).data.devices;
+  assert.strictEqual(listN.find((x) => x.id === n1).networked, true, 'an IP means it is on the network');
+  assert.strictEqual(listN.find((x) => x.id === n2).networked, false);
   // editing the card without a bucket keeps it
   const dev = (await admin.get('/api/devices/' + id)).data.device; delete dev.bucket;
   await admin.put('/api/devices/' + id, { ...dev, location: 'Closet' });

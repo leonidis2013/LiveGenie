@@ -43,7 +43,7 @@
     mic: { label: 'Mic', col: 0, cat: 'source', ports: () => ({ ins: [], outs: ['Out'] }), fields: ['use', 'person', 'model'], counts: false },
     di: { label: 'DI', col: 0, cat: 'source', ports: (g) => ({ ins: [], outs: g.nout === 2 ? ['L', 'R'] : ['Out'] }), fields: ['use', 'person', 'model'], counts: 'outs' },
     source: { label: 'Line source', col: 0, cat: 'source', ports: (g) => ({ ins: [], outs: g.nout === 1 ? ['Out'] : ['L', 'R'].concat(nums('Out ', (g.nout || 2) - 2).map((x, i) => 'Out ' + (i + 3))) }), fields: ['use', 'person', 'model'], counts: 'outs' },
-    txmic: { label: 'Wireless mic', col: 0, cat: 'source', ports: () => ({ ins: [], outs: ['RF'] }), fields: ['use', 'person', 'model', 'capsule', 'freq'], counts: false, member: 'receiver' },
+    txmic: { label: 'Wireless mic', col: 0, cat: 'source', ports: () => ({ ins: [], outs: ['RF'] }), fields: ['use', 'person', 'txtype', 'model', 'capsule', 'freq'], counts: false, member: 'receiver' },
     receiver: { label: 'Wireless receiver', col: 1, cat: 'io', ports: (g) => ({ ins: nums('Ch ', g.nin || 2), outs: nums('Out ', g.nin || 2) }), fields: ['model'], counts: 'ch', pass: 'same', card: true },
     stagebox: { label: 'Stage box', col: 2, cat: 'io', ports: (g) => ({ ins: nums('In ', g.nin || 16), outs: nums('Out ', g.nout || 8) }), fields: ['model'], counts: 'both', link: true, card: true },
     network: { label: 'Dante network', col: 3, cat: 'net', ports: () => ({ ins: [], outs: [] }), fields: ['model'], counts: false, link: true },
@@ -58,7 +58,7 @@
     bodypack: { label: 'IEM pack', col: 7, cat: 'iem', ports: () => ({ ins: ['RF'], outs: [] }), fields: ['use', 'person', 'model', 'phones'], counts: false, member: 'iemtx' },
     other: { label: 'Other', col: 4, cat: 'computer', ports: (g) => ({ ins: nums('In ', g.nin == null ? 1 : g.nin), outs: nums('Out ', g.nout == null ? 1 : g.nout) }), fields: ['model', 'use'], counts: 'both', pass: 'all' }
   };
-  const FIELD_LABELS = { use: 'Used for', person: 'Who uses it', model: 'Model', capsule: 'Capsule', freq: 'Frequency', mode: 'Mode', phones: 'Earphones', start: 'Console input for In 1', localstart: 'Channel for local In 1', mixes: 'Mixes' };
+  const FIELD_LABELS = { use: 'Used for', person: 'Who uses it', txtype: 'Transmitter type', capmake: 'Capsule make', model: 'Model', capsule: 'Capsule', freq: 'Frequency', mode: 'Mode', phones: 'Earphones', start: 'Console input for In 1', localstart: 'Channel for local In 1', mixes: 'Mixes' };
 
   /** Kinds in the order the "New gear" form offers them. Makes and models come from the team's own list (it starts empty). */
   const KIND_ORDER = ['console', 'stagebox', 'receiver', 'txmic', 'mic', 'di', 'source', 'iemtx', 'bodypack', 'headamp', 'processor', 'amp', 'speaker', 'wedge', 'network', 'computer', 'other'];
@@ -83,7 +83,7 @@
       if (!id || ids.has(id)) id = 'g' + Math.random().toString(36).slice(2, 9);
       ids.add(id);
       const g = { id, kind: g0.kind, name: str(g0.name, 80).trim() || KINDS[g0.kind].label };
-      for (const f of ['make', 'model', 'group', 'use', 'person', 'capsule', 'freq', 'mode', 'phones', 'notes']) if (g0[f] != null && String(g0[f]).trim()) g[f] = str(g0[f], f === 'notes' ? 1000 : 80).trim();
+      for (const f of ['make', 'model', 'group', 'use', 'person', 'txtype', 'capsule', 'capmake', 'freq', 'mode', 'phones', 'notes']) if (g0[f] != null && String(g0[f]).trim()) g[f] = str(g0[f], f === 'notes' ? 1000 : 80).trim();
       if (Number.isInteger(Number(g0.device_id)) && Number(g0.device_id) > 0) g.device_id = Number(g0.device_id);
       if (Number(g0.localstart) >= 1) g.localstart = Math.min(512, Math.floor(Number(g0.localstart)));
       if (g0.kind === 'stagebox' && Number(g0.start) >= 1 && !(g0.chmap && Object.keys(g0.chmap).length)) g._start = Math.min(512, Math.floor(Number(g0.start)));   // older drawings: becomes a channel map below
@@ -155,7 +155,7 @@
   function addGear(doc, item) {
     const kind = KINDS[item.kind] ? item.kind : 'other';
     const g = { id: uid('g'), kind, name: uniqueName(doc, String(item.name || item.model || KINDS[kind].label).trim()) };
-    for (const f of ['make', 'model', 'group', 'use', 'person', 'capsule', 'freq', 'mode', 'phones', 'notes', 'localstart', 'device_id', 'x', 'y', 'chname', 'chcolor', 'namelen']) if (item[f] != null && item[f] !== '') g[f] = item[f];
+    for (const f of ['make', 'model', 'group', 'use', 'person', 'txtype', 'capsule', 'capmake', 'freq', 'mode', 'phones', 'notes', 'localstart', 'device_id', 'x', 'y', 'chname', 'chcolor', 'namelen']) if (item[f] != null && item[f] !== '') g[f] = item[f];
     if (Array.isArray(item.colors) && item.colors.length) g.colors = item.colors.slice();
     if (kind === 'console') g.mixes = (item.mixes || DEFAULT_MIXES).slice();
     if (kind === 'iemtx' && !g.mode) g.mode = 'Stereo';

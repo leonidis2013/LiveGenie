@@ -747,7 +747,7 @@ const newBlock = (t, preset) => ({
 function pickPreset() {
   return new Promise((resolve) => {
     const P = Blk.PRESETS;
-    const desc = { snake: 'Set up a stage box (like an AR2412 over SLink), then assign a source to each input', snakeout: 'Stage box outputs fed from the console: assign a mix and destination to each', wireless: 'Add a receiver, then each channel: who uses it, capsule, transmitter and frequency', iem: 'In-ear transmitters (mono or stereo) fed from the console, with bodypacks and who wears them', input: 'Mics and DIs straight into the desk', output: 'Desk outputs to speakers, IEMs, stream', cable: 'Cable labels, from, to, length and route', custom: 'Your own columns' };
+    const desc = { snake: 'Set up a stage box over its link, then assign a source to each input', snakeout: 'Stage box outputs fed from the console: assign a mix and destination to each', wireless: 'Add a receiver, then each channel: who uses it, capsule, transmitter and frequency', iem: 'In-ear transmitters (mono or stereo) fed from the console, with bodypacks and who wears them', input: 'Mics and DIs straight into the desk', output: 'Desk outputs to speakers, IEMs, stream', cable: 'Cable labels, from, to, length and route', custom: 'Your own columns' };
     let picked = null;
     modal('<h3>Add a patch list</h3><p>Pick a starting layout. You can rename or add columns later.</p><div class="plist">' +
       Object.keys(P).map((k) => '<button type="button" class="pchoice" data-k="' + k + '"><b>' + P[k].title + '</b><span>' + desc[k] + '</span><em>' + esc(P[k].columns.join(' · ')) + '</em></button>').join('') +
@@ -826,7 +826,7 @@ async function viewEdit(id, spaceSlug, drawBlock) {
       if (b.type === 'divider') body = '<hr style="border:0;border-top:1px solid var(--line);margin:4px 0">';
       if (b.type === 'patchview') body = '<p class="note" style="margin:0 0 8px">Shows a list made from the <a href="#/patch">stage patch</a> drawing. Change the patch there; this list follows it.</p>' +
         '<div class="two"><label>List<select data-f="report">' + PatchView.REPORTS.map((r) => '<option value="' + r[0] + '"' + (b.report === r[0] ? ' selected' : '') + '>' + r[1] + '</option>').join('') + '</select></label>' +
-        '<label>Only gear matching <span class="note">(optional)</span><input data-f="filter" value="' + esc(b.filter || '') + '" placeholder="AR2412, SQ-5, Drums"></label></div>' +
+        '<label>Only gear matching <span class="note">(optional)</span><input data-f="filter" value="' + esc(b.filter || '') + '" placeholder="A piece of gear or a section"></label></div>' +
         '<label>Title <span class="note">(optional)</span><input class="full" data-f="title" value="' + esc(b.title || '') + '" placeholder="Sunday inputs"></label>';
       return '<div class="blk" data-i="' + i + '"><div class="bh"><b>' + label + '</b>' +
         '<button data-mv="-1" title="Move up"' + (i === 0 ? ' disabled' : '') + '>' + icon('up') + '</button>' +

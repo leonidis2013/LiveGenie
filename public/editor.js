@@ -285,7 +285,7 @@ const Rich = (() => {
       const collapsed = !range || range.collapsed;
       const needText = !a && collapsed;
       modal(`<h3>${a ? 'Edit link' : 'Add a link'}</h3><p>A web address, a device page like 10.10.20.11, or another LiveGenie page (copy its address from the browser).</p>
-        <form id="lf">${needText ? '<label for="lt">Text to show</label><input id="lt" placeholder="SQ-5 manual">' : ''}
+        <form id="lf">${needText ? '<label for="lt">Text to show</label><input id="lt" placeholder="Console manual">' : ''}
         <label for="lu">Address</label><input id="lu" inputmode="url" autocapitalize="off" autocorrect="off" placeholder="https://… or 10.10.20.11" value="${esc(a ? a.getAttribute('href') : '')}">
         <div class="err" id="le"></div>
         <div class="acts">${a ? '<button type="button" class="danger" id="lr" style="margin-right:auto">Remove link</button>' : ''}<button type="button" data-close>Cancel</button><button class="primary">${a ? 'Save' : 'Add link'}</button></div></form>`, (w, close) => {

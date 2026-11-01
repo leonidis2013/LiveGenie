@@ -235,6 +235,7 @@ function state(user) {
     // the rest only for someone signed in
     todo: user ? (() => { const t = store.todo(user); return { open: t.filter((x) => !x.complete).length, overdue: t.filter((x) => x.overdue).length }; })() : { open: 0, overdue: 0 },
     problems: user && user.role === 'admin' ? adm.problemCount() : 0,
+    people: user && user.role === 'admin' ? db.prepare('SELECT COUNT(*) AS n FROM users').get().n : 0,
     update: user && user.role === 'admin' ? update.info() : { available: false }
   };
 }

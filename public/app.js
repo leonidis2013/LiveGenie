@@ -491,11 +491,20 @@ function viewSignIn() {
 
 async function viewHome() {
   setTitle('');
-  const [d, t, devs, pd] = await Promise.all([get('/api/home'), get('/api/todo'), loadDevices(true), get('/api/patch').catch(() => null)]);
+  const [d, t, devs, pd] = await Promise.all([get('/api/home'), get('/api/todo'), loadDevices(true), get('/api/patch').catch(() => null), loadState().catch(() => null)]);
   S.spaces = d.spaces;
   const st = S.state, org = st.org || {}, u = st.user;
   const admin = can('admin');
-  const fresh = admin && !d.spaces.length;
+  // Get started: each step drops off once it is done; the card goes when they all are (or an admin hides it)
+  let hideWelcome = false; try { hideWelcome = localStorage.getItem('lg-welcome-hidden') === '1'; } catch (e) { /* private mode */ }
+  const wsteps = [
+    [d.spaces.length > 0, '#/admin/spaces', 'list', 'Make your spaces', 'Audio, Video, Training… or add a starter set'],
+    [!!(st.gearSetup && st.gearSetup.done), '#/gear-setup', 'spark', 'Guided equipment setup', 'Console, stage boxes, wireless, in-ears, PA onto the stage patch'],
+    [(st.people || 0) > 1, '#/admin/people', 'users', 'Add people', 'Admins build; users read and tick checklists'],
+    [!!(org.name && org.logo), '#/admin/church', 'image', 'Church name and logo', 'Shown on sign in and on every PDF']
+  ];
+  const left = wsteps.filter((w) => !w[0]);
+  const fresh = admin && !hideWelcome && left.length > 0;
   const now = new Date(), hr = now.getHours();
   const hello = (hr < 12 ? 'Good morning' : hr < 18 ? 'Good afternoon' : 'Good evening') + (u ? ', ' + u.name.split(' ')[0] : '');
   const doc = pd && pd.doc;
@@ -520,11 +529,8 @@ async function viewHome() {
       ${admin ? '<button class="primary btn" id="newPage">' + icon('plus') + 'New page</button>' : ''}
     </header>
     <form class="hsearch" id="hsF" role="search">${icon('search')}<input id="hsQ" type="search" placeholder="Search pages, gear, people, IP addresses…" autocomplete="off"></form>
-    ${fresh ? '<section class="card welcome"><h2>Get started</h2><p>LiveGenie starts empty so it fits the way your team works. A few good first steps:</p><div class="wsteps">' +
-      '<a class="wstep" href="#/admin/spaces">' + icon('list') + '<b>Make your spaces</b><span>Audio, Video, Training… or add a starter set</span></a>' +
-      (st.gearSetup && st.gearSetup.done ? '' : '<a class="wstep" href="#/gear-setup">' + icon('spark') + '<b>Guided equipment setup</b><span>Console, stage boxes, wireless, in-ears, PA onto the stage patch</span></a>') +
-      '<a class="wstep" href="#/admin/people">' + icon('users') + '<b>Add people</b><span>Admins build; users read and tick checklists</span></a>' +
-      '<a class="wstep" href="#/admin/church">' + icon('image') + '<b>Church name and logo</b><span>Shown on sign in and on every PDF</span></a></div></section>' : ''}
+    ${fresh ? '<section class="card welcome"><div class="hsh"><h2>Get started</h2><span class="note">' + (wsteps.length - left.length) + ' of ' + wsteps.length + ' done · <button class="linkbtn" id="wHide">Hide</button></span></div><p>LiveGenie starts empty so it fits the way your team works. A few good first steps:</p><div class="wsteps">' +
+      left.map((w) => '<a class="wstep" href="' + w[1] + '">' + icon(w[2]) + '<b>' + w[3] + '</b><span>' + w[4] + '</span></a>').join('') + '</div></section>' : ''}
     ${todoHtml(t.todo)}
     <section class="htiles">
       ${tile('#/patch', 'grid', 'Stage patch', doc ? doc.gear.length + ' pieces · ' + doc.cables.length + ' cables' : 'Mic to speaker', 'tpatch')}
@@ -541,6 +547,7 @@ async function viewHome() {
   const nb = $('#newPage');
   if (nb) nb.addEventListener('click', () => { location.hash = '#/new'; });
   $('#hsF').addEventListener('submit', (e) => { e.preventDefault(); const q = $('#hsQ').value.trim(); if (q) location.hash = '#/search?q=' + encodeURIComponent(q); });
+  const wh = $('#wHide'); if (wh) wh.addEventListener('click', () => { try { localStorage.setItem('lg-welcome-hidden', '1'); } catch (e) { /* private mode */ } wh.closest('.welcome').remove(); });
   // refresh the To do strip while the home page is open
   const mine = app.firstElementChild;
   const timer = setInterval(async () => {

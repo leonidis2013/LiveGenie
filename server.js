@@ -208,7 +208,7 @@ async function notifyOverdue() {
       const r = await postJson(url, {
         event: 'checklist_overdue', source: 'LiveGenie', title: 'Checklist overdue: ' + n.title, message,
         page: n.page_title, checklist: n.title, left: n.left, total: n.total, items_left: n.items_left,
-        due_at: new Date(n.dueAt).toISOString(), url: base ? base + '/#/p/' + n.page_id : ''
+        due_at: new Date(n.dueAt).toISOString(), url: base ? base + (n.page_id ? '/#/p/' + n.page_id : '/#/todo?l=' + n.block_id) : ''
       });
       store.markNoticed(n, r.ok ? 'sent' : 'failed: ' + r.error);
       store.audit(null, 'notify.overdue', n.page_id, n.title + ': ' + (r.ok ? 'sent' : 'failed (' + r.error + ')'));
@@ -426,18 +426,21 @@ async function api(req, res, url, user, token) {
       const body = await readJson(req);
       return send(res, 200, { ok: true, now: Date.now(), checklist: store.tick(b, d, String(body.item || ''), !!body.done, user) });
     }
-    if ((m === 'PUT' || m === 'DELETE') && d && !e) {
-      need(user, 'admin');
-      const v = store.changeChecklist(b, d, m === 'PUT' ? await readJson(req) : {}, user, m === 'DELETE');
-      return send(res, 200, { ok: true, version: v });
-    }
     if (m === 'POST' && d && e === 'reset') {
       need(user, 'user');
       return send(res, 200, { ok: true, now: Date.now(), checklist: store.resetChecklist(b, d, user) });
     }
   }
-  if (m === 'GET' && a === 'todo') return send(res, 200, { ok: true, now: Date.now(), todo: store.todo(user) });
-  if (m === 'GET' && a === 'admin' && b === 'todo') { need(user, 'admin'); return send(res, 200, { ok: true, now: Date.now(), lists: store.allChecklists(user) }); }
+  if (m === 'GET' && a === 'todo' && !b) return send(res, 200, { ok: true, now: Date.now(), todo: store.todo(user) });
+  // to do lists: one place, in groups (ticks go to /api/pages/0/checklists/<id>/tick)
+  if (a === 'todo' && b === 'lists') {
+    if (m === 'GET' && !c) return send(res, 200, { ok: true, now: Date.now(), groups: store.todoLists() });
+    need(user, 'admin');
+    if (m === 'POST' && !c) return send(res, 200, { ok: true, id: store.addList(await readJson(req), user) });
+    if (m === 'PUT' && c) { store.editList(c, await readJson(req), user); return send(res, 200, { ok: true }); }
+    if (m === 'DELETE' && c) { store.removeList(c, user); return send(res, 200, { ok: true }); }
+  }
+  if (a === 'todo' && b === 'arrange' && m === 'PUT') { need(user, 'admin'); return send(res, 200, { ok: true, groups: store.arrangeTodo(await readJson(req), user) }); }
 
   // ----- notifications (admin) -----
   if (a === 'settings' && b === 'notify') {

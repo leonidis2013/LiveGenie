@@ -699,25 +699,65 @@ test('highlight boxes on a gear photo: admins draw them, everyone sees them, a n
   assert.strictEqual((await vol.get('/api/devices/' + id)).data.device.marks.length, 0);
 });
 
-test('Admin › To do lists: every checklist in one place; edit steps and reset times, remove', async () => {
-  let r = await admin.post('/api/pages', { title: 'Strike list', space: 'audio', blocks: [{ type: 'text', md: 'After service' }, { type: 'checklist', title: 'Strike', items: ['Coil cables'] }] });
-  const pid = r.data.id;
-  assert.strictEqual((await vol.get('/api/admin/todo')).status, 403, 'admins only');
-  let lists = (await admin.get('/api/admin/todo')).data.lists;
-  const x = lists.find((l) => l.page_id === pid);
-  assert.ok(x && x.title === 'Strike' && x.total === 1 && !x.scheduleText.length);
-  assert.strictEqual((await vol.put('/api/pages/' + pid + '/checklists/' + x.block_id, { title: 'X' })).status, 403);
-  r = await admin.put('/api/pages/' + pid + '/checklists/' + x.block_id, { title: 'Strike the stage', items: ['Coil cables', 'Cover the desk'], schedule: [{ day: 0, reset: '12:30', due: '14:00' }] });
+test('to do lists live on one page in groups: admins make and arrange them, everyone ticks them', async () => {
+  assert.strictEqual((await vol.post('/api/todo/lists', { title: 'X', items: ['a'] })).status, 403, 'admins make lists');
+  let r = await admin.post('/api/todo/lists', { group: 'Sunday morning', title: 'FOH startup', items: ['Rack on', 'Desk on', 'Rack on'], schedule: [{ day: 0, reset: '06:00', due: '09:15' }] });
   assert.strictEqual(r.status, 200);
-  lists = (await admin.get('/api/admin/todo')).data.lists;
-  const y = lists.find((l) => l.page_id === pid);
-  assert.deepStrictEqual([y.title, y.total, y.scheduleText.length], ['Strike the stage', 2, 1]);
-  assert.strictEqual((await admin.put('/api/pages/' + pid + '/checklists/' + x.block_id, { items: [] })).status, 400, 'a checklist needs a step');
-  assert.strictEqual((await admin.put('/api/pages/' + pid + '/checklists/' + x.block_id, { schedule: [{ day: 9, reset: '25:00' }] })).status, 400, 'bad reset times are refused');
-  r = await admin.del('/api/pages/' + pid + '/checklists/' + x.block_id);
+  const foh = r.data.id;
+  const stage = (await admin.post('/api/todo/lists', { group: 'Sunday morning', title: 'Stage', items: ['Mics out'] })).data.id;
+  const strike = (await admin.post('/api/todo/lists', { group: 'After service', title: 'Strike', items: ['Coil cables', 'Cover desk'] })).data.id;
+  assert.strictEqual((await admin.post('/api/todo/lists', { title: 'Empty', items: [] })).status, 400, 'a list needs a step');
+  assert.strictEqual((await admin.post('/api/todo/lists', { title: 'Bad', items: ['a'], schedule: [{ day: 9, reset: '25:00' }] })).status, 400, 'bad reset times are refused');
+  let g = (await vol.get('/api/todo/lists')).data.groups;
+  const names = g.map((x) => x.name);
+  assert.ok(names.indexOf('Sunday morning') >= 0 && names.indexOf('After service') > names.indexOf('Sunday morning'));
+  const sm = g.find((x) => x.name === 'Sunday morning');
+  assert.deepStrictEqual(sm.lists.map((l) => l.title), ['FOH startup', 'Stage']);
+  assert.deepStrictEqual(sm.lists[0].steps, ['Rack on', 'Desk on'], 'repeated steps are kept once');
+  // everyone ticks on the To do page ("page 0"); a started list shows on To do until it is finished
+  r = await vol.post('/api/pages/0/checklists/' + strike + '/tick', { item: 'Coil cables', done: true });
   assert.strictEqual(r.status, 200);
-  const page = (await admin.get('/api/pages/' + pid)).data.page;
-  assert.deepStrictEqual(page.blocks.map((b) => b.type), ['text'], 'the rest of the page stays');
+  assert.ok((await vol.get('/api/todo')).data.todo.some((t) => t.block_id === strike && t.page_id === 0));
+  assert.ok((await admin.get('/api/checklog')).data.runs.some((x) => x.block_id === strike && x.page_title === 'After service'), 'the log knows the list and its group');
+  await vol.post('/api/pages/0/checklists/' + strike + '/tick', { item: 'Cover desk', done: true });
+  assert.ok(!(await vol.get('/api/todo')).data.todo.some((t) => t.block_id === strike));
+  // edit, move to another group, reorder, rename and remove groups
+  assert.strictEqual((await vol.put('/api/todo/lists/' + stage, { title: 'Y' })).status, 403);
+  await admin.put('/api/todo/lists/' + stage, { title: 'Stage setup', group: 'After service' });
+  await admin.put('/api/todo/arrange', { order: [strike, stage, foh] });
+  g = (await vol.get('/api/todo/lists')).data.groups;
+  assert.deepStrictEqual(g.find((x) => x.name === 'After service').lists.map((l) => l.title), ['Strike', 'Stage setup']);
+  r = await admin.put('/api/todo/arrange', { groups: ['Wrap up', 'Sunday morning'], renames: { 'After service': 'Wrap up' } });
+  g = (await vol.get('/api/todo/lists')).data.groups;
+  assert.deepStrictEqual(g.map((x) => x.name).slice(0, 2), ['Wrap up', 'Sunday morning']);
+  assert.strictEqual(g[0].lists.length, 2, 'renaming a group moves its lists');
+  await admin.put('/api/todo/arrange', { groups: ['Sunday morning'] });
+  g = (await vol.get('/api/todo/lists')).data.groups;
+  assert.strictEqual(g.find((x) => x.name === 'Sunday morning').lists.length, 3, 'a removed group\'s lists move to the first group');
+  assert.strictEqual((await admin.del('/api/todo/lists/' + stage)).status, 200);
+  assert.strictEqual((await vol.post('/api/pages/0/checklists/' + stage + '/tick', { item: 'Mics out', done: true })).status, 409, 'a removed list cannot be ticked');
+});
+
+test('checklists that were on pages move to To do, keeping their ticks and log', async () => {
+  const os2 = require('os'), fs2 = require('fs');
+  const dir = fs2.mkdtempSync(path.join(os2.tmpdir(), 'lg-todo-'));
+  const DBm = require(path.join(ROOT, 'lib', 'db'));
+  // a database from before 0.20: back to migration 10, then a page with a checklist and a tick
+  const db1 = DBm.open(path.join(dir, 'x.db'));
+  db1.exec('DROP TABLE todo_lists'); db1.prepare('UPDATE schema_version SET v = 10').run();
+  db1.prepare("INSERT INTO spaces (slug, name) VALUES ('audio', 'Audio')").run();
+  const blocks = [{ type: 'text', md: 'Before' }, { type: 'checklist', id: 'abc12345', title: 'Desk check', items: ['Faders down', 'Scenes loaded'], schedule: [] }];
+  db1.prepare("INSERT INTO pages (space_id, title, blocks, version, created_at, updated_at) VALUES (1, 'Sunday desk', ?, 1, 1, 1)").run(JSON.stringify(blocks));
+  db1.prepare("INSERT INTO checklist_ticks (page_id, block_id, item, by_name, at) VALUES (1, 'abc12345', 'Faders down', 'Val', ?)").run(Date.now());
+  db1.close();
+  const db = DBm.open(path.join(dir, 'x.db'));
+  const list = db.prepare('SELECT * FROM todo_lists').get();
+  assert.deepStrictEqual([list.id, list.grp, list.title, JSON.parse(list.items)], ['abc12345', 'Sunday desk', 'Desk check', ['Faders down', 'Scenes loaded']]);
+  assert.strictEqual(db.prepare("SELECT page_id FROM checklist_ticks WHERE block_id = 'abc12345'").get().page_id, 0, 'the tick came along');
+  const page = JSON.parse(db.prepare('SELECT blocks FROM pages WHERE id = 1').get().blocks);
+  assert.deepStrictEqual(page.map((b) => b.type), ['text', 'text']);
+  assert.ok(page[1].md.includes('#/todo?l=abc12345'), 'the page points to To do');
+  db.close();
 });
 
 test('Gear Locker buckets: automatic, then the admin renames and orders them; To do shows checklists in progress', async () => {

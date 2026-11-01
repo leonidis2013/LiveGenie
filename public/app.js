@@ -508,9 +508,9 @@ async function viewHome() {
     return '<section class="hsec htodo' + (open.some((x) => x.overdue) ? ' bad' : '') + '" id="todo"><div class="hsh"><h2>' + icon('check') + (open.length ? open.length + ' checklist' + (open.length === 1 ? '' : 's') + ' to finish' : 'All checklists done') + '</h2><a href="#/todo">Open To do ›</a></div>' +
       '<div class="tstrip">' + open.map((x) => {
         const n = x.total - x.left, pct = x.total ? Math.round(100 * n / x.total) : 0;
-        return '<a class="tcard' + (x.overdue ? ' overdue' : '') + '" href="#/p/' + x.page_id + '?c=' + esc(x.block_id) + '"><div class="tct"><b>' + esc(x.title) + '</b><span>' + esc(x.page_title) + '</span></div>' +
+        return '<a class="tcard' + (x.overdue ? ' overdue' : '') + '" href="' + esc(todoHref(x)) + '"><div class="tct"><b>' + esc(x.title) + '</b><span>' + esc(x.page_title) + '</span></div>' +
           '<div class="tbar"><i style="width:' + pct + '%"></i></div><div class="tcf"><span>' + n + ' of ' + x.total + (x.overdue ? ' · overdue' : x.lastBy && n ? ' · ' + esc(x.lastBy) : '') + '</span><span class="tgo">Continue ›</span></div></a>';
-      }).join('') + done.map((x) => '<a class="tcard done" href="#/p/' + x.page_id + '?c=' + esc(x.block_id) + '"><div class="tct"><b>' + esc(x.title) + '</b><span>Done' + (x.completedBy ? ' by ' + esc(x.completedBy) : '') + '</span></div><span class="tok">' + icon('check') + '</span></a>').join('') + '</div></section>';
+      }).join('') + done.map((x) => '<a class="tcard done" href="' + esc(todoHref(x)) + '"><div class="tct"><b>' + esc(x.title) + '</b><span>Done' + (x.completedBy ? ' by ' + esc(x.completedBy) : '') + '</span></div><span class="tok">' + icon('check') + '</span></a>').join('') + '</div></section>';
   };
   app.innerHTML = `<div class="home2">
     <header class="hhero">
@@ -555,6 +555,8 @@ async function viewHome() {
   }, 30000);
 }
 
+/** Where a to do list opens: the To do page (or, for an older checklist still on a page, that page). */
+const todoHref = (x) => (x.page_id ? '#/p/' + x.page_id + '?c=' + encodeURIComponent(x.block_id) : '#/todo?l=' + encodeURIComponent(x.block_id));
 function todoRow(t) {
   const tmText = (x) => new Date(x).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' });
   const done = t.total - t.left;
@@ -563,25 +565,64 @@ function todoRow(t) {
     : t.dueAt ? '<span class="chip acc">Due ' + esc(tmText(t.dueAt)) + '</span>' : t.scheduled ? '<span class="chip acc">Today</span>' : '<span class="chip warn">In progress</span>';
   const sub = t.complete ? 'Finished' + (t.completedBy ? ' by ' + esc(t.completedBy) : '') + ' · ' + esc(t.page_title)
     : done + ' of ' + t.total + ' done · ' + esc(t.page_title) + (t.overdue ? ' · was due ' + esc(tmText(t.dueAt)) : '') + (t.lastBy && done ? ' · last ticked by ' + esc(t.lastBy) + ' ' + esc(ago(t.lastAt)) : '');
-  return '<a class="row todo' + (t.overdue ? ' overdue' : '') + (t.complete ? ' complete' : '') + '" href="#/p/' + t.page_id + '?c=' + esc(t.block_id) + '">' +
+  return '<a class="row todo' + (t.overdue ? ' overdue' : '') + (t.complete ? ' complete' : '') + '" href="' + esc(todoHref(t)) + '">' +
     '<span class="ring" style="--p:' + (t.total ? Math.round(100 * done / t.total) : 0) + '"></span>' +
     '<div class="t"><b>' + esc(t.title) + '</b><span>' + sub + '</span></div>' + status + '</a>';
 }
 
-/** Everything on the To do list on one screen (the To do tab on a phone). */
-async function viewTodo() {
+/**
+ * To do: every to do list, in its groups, on one page. Tap a list to open it and tick its steps; everyone sees
+ * the same ticks. Lists that are open now (started, or scheduled for today) are marked; overdue ones turn red.
+ */
+async function viewTodo(qs) {
   setTitle('To do');
-  const paint = (t) => '<div class="bar"><div class="grow"><h1 class="title" style="font-size:22px;letter-spacing:.06em;margin:4px 0 2px">To do</h1>' +
-    '<div class="note">Checklists someone has started and not finished, and scheduled ones from their reset time until the end of the day</div></div></div>' +
-    (t.todo.length ? '<div class="list">' + t.todo.map(todoRow).join('') + '</div>'
-      : '<div class="card empty">' + icon('check') + '<div style="margin-top:8px">Nothing to do right now.</div><div class="note" style="margin-top:4px">A checklist shows up here once someone starts it, and a scheduled one from its reset time (like Sundays at 6:00 AM).</div></div>');
-  app.innerHTML = '<div class="todov">' + paint(await get('/api/todo')) + '</div>';
+  let openId = qs && qs.get('l') ? qs.get('l') : null;
+  let shut = {}; try { shut = JSON.parse(localStorage.getItem('lg-todo-shut') || '{}'); } catch (e) { /* private mode */ }
+  let data = await get('/api/todo/lists');
+  const tm = (t) => new Date(t).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' });
+  const state = (x) => x.total && x.left === 0 ? ['done', 'Done'] : x.overdue ? ['bad', 'Overdue'] : x.left < x.total ? ['warn', (x.total - x.left) + ' of ' + x.total] : x.schedule.length && x.active ? ['acc', x.dueAt ? 'Due ' + tm(x.dueAt) : 'Today'] : ['', x.total + ' step' + (x.total === 1 ? '' : 's')];
+  const listHtml = (x) => {
+    const [cls, txt] = state(x), pct = x.total ? Math.round(100 * (x.total - x.left) / x.total) : 0, open = x.id === openId;
+    return '<div class="tdl' + (open ? ' open' : '') + (cls ? ' ' + cls : '') + '" data-l="' + esc(x.id) + '"><button type="button" class="tdh" data-open="' + esc(x.id) + '"><span class="ring" style="--p:' + pct + '"></span><span class="tdt"><b>' + esc(x.title) + '</b>' +
+      (x.scheduleText.length ? '<em>' + icon('clock') + esc(x.scheduleText.join('; ')) + '</em>' : '') + '</span><span class="chip ' + cls + '">' + esc(txt) + '</span><i>' + (open ? '▾' : '▸') + '</i></button>' +
+      (open ? '<div class="tdb">' + x.items.map((it) => '<label class="tdi' + (it.done ? ' on' : '') + '"><input type="checkbox" data-tick="' + esc(it.text) + '"' + (it.done ? ' checked' : '') + '><span>' + esc(it.text) + '</span>' + (it.done ? '<em>' + esc(it.by) + ' · ' + esc(tm(it.at)) + '</em>' : '') + '</label>').join('') +
+        '<div class="tdf"><span class="note">' + (x.lastReset ? 'Started over ' + esc(ago(x.lastReset.at)) + (x.lastReset.by ? ' by ' + esc(x.lastReset.by) : '') : '') + '</span><button type="button" class="ghost" data-reset="' + esc(x.id) + '">' + icon('restore') + 'Start over</button></div></div>' : '') + '</div>';
+  };
+  const paint = () => {
+    const groups = data.groups.filter((g) => g.lists.length);
+    const all = groups.flatMap((g) => g.lists);
+    const now = all.filter((x) => x.overdue || (x.left < x.total && x.left > 0) || (x.schedule.length && x.active && x.left > 0));
+    app.innerHTML = '<div class="todov"><div class="bar"><div class="grow"><h1 class="title" style="font-size:22px;letter-spacing:.06em;margin:4px 0 2px">To do</h1>' +
+      '<div class="note">' + (now.length ? now.length + ' open now' + (now.some((x) => x.overdue) ? ' · ' + now.filter((x) => x.overdue).length + ' overdue' : '') : 'Nothing open right now') + '</div></div>' +
+      (can('admin') ? '<a class="btn" href="#/admin/todo">' + icon('edit') + 'Manage lists</a>' : '') + '</div>' +
+      (groups.length ? groups.map((g) => {
+        const closed = shut[g.name] && !g.lists.some((x) => x.id === openId);
+        const openN = g.lists.filter((x) => now.includes(x)).length;
+        return '<section class="tdg' + (closed ? ' shut' : '') + '"><button type="button" class="gbh" data-g="' + esc(g.name) + '"><span>' + esc(g.name || 'To do lists') + '</span><em>' + g.lists.length + '</em>' + (openN ? '<b class="cnt' + (g.lists.some((x) => x.overdue) ? ' bad' : '') + '">' + openN + ' open</b>' : '') + '<i>' + (closed ? '▸' : '▾') + '</i></button>' +
+          (closed ? '' : '<div class="tdls">' + g.lists.map(listHtml).join('') + '</div>') + '</section>';
+      }).join('') : '<div class="card empty">' + icon('check') + '<div style="margin-top:8px">No to do lists yet.</div>' + (can('admin') ? '<div class="note" style="margin-top:4px"><a href="#/admin/todo">Make the first one</a> in Admin › To do lists.</div>' : '') + '</div>') + '</div>';
+    $$('[data-g]').forEach((b) => b.addEventListener('click', () => { shut[b.dataset.g] = !shut[b.dataset.g]; try { localStorage.setItem('lg-todo-shut', JSON.stringify(shut)); } catch (e) { /* private mode */ } paint(); }));
+    $$('[data-open]').forEach((b) => b.addEventListener('click', () => { openId = openId === b.dataset.open ? null : b.dataset.open; history.replaceState(null, '', '#/todo' + (openId ? '?l=' + encodeURIComponent(openId) : '')); lastHash = location.hash; paint(); }));
+    $$('[data-tick]').forEach((c) => c.addEventListener('change', async () => {
+      const id = c.closest('[data-l]').dataset.l;
+      try { await call('POST', '/api/pages/0/checklists/' + encodeURIComponent(id) + '/tick', { item: c.dataset.tick, done: c.checked }); await refresh(); }
+      catch (e) { toast(e.message, 'bad'); c.checked = !c.checked; }
+    }));
+    $$('[data-reset]').forEach((b) => b.addEventListener('click', async () => {
+      if (!await confirmBox('Start this list over?', 'Every tick is cleared for everyone. The run so far stays in the checklist log.', 'Start over')) return;
+      try { await call('POST', '/api/pages/0/checklists/' + encodeURIComponent(b.dataset.reset) + '/reset'); await refresh(); toast('Started over', 'ok'); } catch (e) { toast(e.message, 'bad'); }
+    }));
+    const o = openId && $('[data-l="' + CSS.escape(openId) + '"]'); if (o && !paint.scrolled) { paint.scrolled = true; o.scrollIntoView({ block: 'center' }); }
+  };
+  const refresh = async () => { data = await get('/api/todo/lists'); paint(); loadState().then(paintHeader).catch(() => {}); };
+  paint();
   const mine = app.firstElementChild;
   const timer = setInterval(async () => {
-    if (!mine.isConnected) return clearInterval(timer);
-    if (document.hidden || S.offline) return;
-    try { const t = await get('/api/todo'); if (mine.isConnected) mine.innerHTML = paint(t); } catch (e) { /* offline banner */ }
-  }, 30000);
+    if (!mine.isConnected || !app.contains(mine) && !app.querySelector('.todov')) return clearInterval(timer);
+    if (!app.querySelector('.todov')) return clearInterval(timer);
+    if (document.hidden || S.offline || document.activeElement && document.activeElement.matches('input')) return;
+    try { data = await get('/api/todo/lists'); paint(); } catch (e) { /* offline banner */ }
+  }, 20000);
 }
 
 async function viewSpace(slug) {
@@ -689,7 +730,7 @@ async function viewPage(id, focusChecklist) {
 
 // ----- editor -----
 const BLOCK_TYPES = [
-  ['text', 'Text', 'text'], ['callout', 'Callout', 'info'], ['checklist', 'Checklist', 'check'], ['patchview', 'Patch list', 'grid'],
+  ['text', 'Text', 'text'], ['callout', 'Callout', 'info'], ['patchview', 'Patch list', 'grid'],
   ['iplist', 'IP list', 'net'], ['image', 'Picture', 'image'], ['divider', 'Divider', 'line']
 ];
 const BLOCK_LABELS = { text: 'Text', callout: 'Callout', checklist: 'Checklist', patch: 'Patch list (old)', patchview: 'Patch list', iplist: 'IP list', image: 'Picture', divider: 'Divider' };
@@ -1161,50 +1202,64 @@ function reportProblem(where, ctx = {}) {
 
 // ----- admin: the checklist log -----
 /**
- * Admin › To do lists: every checklist on every page in one place. See where each one is now, change its steps
- * and reset times, start it over, open its page, remove it, or make a new one.
+ * Admin › To do lists: the groups and the lists in them, all on the To do page. Make, edit (steps, reset times,
+ * group), reorder, start over and remove lists; add, rename, reorder and remove groups.
  */
 const SCHED_DAYS = [['daily', 'Every day'], [0, 'Sundays'], [1, 'Mondays'], [2, 'Tuesdays'], [3, 'Wednesdays'], [4, 'Thursdays'], [5, 'Fridays'], [6, 'Saturdays']];
 async function tabTodoLists(pane) {
-  const d = await get('/api/admin/todo');
+  const d = await get('/api/todo/lists');
+  const groups = d.groups;
   const tm = (t) => new Date(t).toLocaleString([], { weekday: 'short', hour: 'numeric', minute: '2-digit' });
-  const state = (x) => x.left === 0 && x.total ? '<span class="chip ok">Done</span>'
-    : x.overdue ? '<span class="chip bad">Overdue</span>'
-    : x.left < x.total ? '<span class="chip warn">In progress · ' + (x.total - x.left) + ' of ' + x.total + '</span>'
-    : x.schedule.length && x.active ? '<span class="chip acc">On To do now</span>' : '<span class="chip">Not started</span>';
-  const row = (x, i) => '<div class="tlrow">' +
-    '<div class="tlt"><b>' + esc(x.title) + '</b><span><a href="#/p/' + x.page_id + '?c=' + esc(x.block_id) + '">' + esc(x.page_title) + '</a> · ' + esc(x.space_name) + ' · ' + x.total + ' step' + (x.total === 1 ? '' : 's') + '</span>' +
+  const state = (x) => x.total && x.left === 0 ? '<span class="chip ok">Done</span>' : x.overdue ? '<span class="chip bad">Overdue</span>'
+    : x.left < x.total ? '<span class="chip warn">In progress · ' + (x.total - x.left) + ' of ' + x.total + '</span>' : x.schedule.length && x.active ? '<span class="chip acc">On To do now</span>' : '';
+  const flat = groups.flatMap((g) => g.lists);
+  const row = (x, gi, li, n) => '<div class="tlrow"><div class="tlmv"><button class="ghost xs" data-up="' + gi + ':' + li + '"' + (li ? '' : ' disabled') + ' title="Up">' + icon('up') + '</button><button class="ghost xs" data-dn="' + gi + ':' + li + '"' + (li < n - 1 ? '' : ' disabled') + ' title="Down">' + icon('down') + '</button></div>' +
+    '<div class="tlt"><b>' + esc(x.title) + '</b><span>' + x.total + ' step' + (x.total === 1 ? '' : 's') + ' · <a href="#/todo?l=' + encodeURIComponent(x.id) + '">open on To do</a></span>' +
     '<span class="note">' + (x.scheduleText.length ? icon('clock') + esc(x.scheduleText.join('; ')) : 'No reset times: on To do while someone has started it') + (x.lastBy ? ' · last ticked by ' + esc(x.lastBy) + ' ' + esc(ago(x.lastAt)) : '') + (x.nextReset ? ' · next reset ' + esc(tm(x.nextReset)) : '') + '</span></div>' +
-    state(x) + '<div class="tla"><button class="btn" data-ed="' + i + '">' + icon('edit') + 'Edit</button><button class="ghost" data-rs="' + i + '" title="Start it over: clears every tick">' + icon('restore') + '</button><button class="ghost danger" data-rm="' + i + '" title="Remove from its page">' + icon('trash') + '</button></div></div>';
-  pane.innerHTML = '<p class="note pnote">Every checklist on every page. A checklist shows on <b>To do</b> while someone has started it and not finished, and a checklist with reset times shows there from each reset until the end of that day (red after its done-by time).</p>' +
-    '<div class="bar" style="margin:0 0 10px"><span class="grow note">' + d.lists.length + ' to do list' + (d.lists.length === 1 ? '' : 's') + '</span><button class="primary btn" id="tlNew">' + icon('plus') + 'New to do list</button></div>' +
-    (d.lists.length ? '<div class="tllist">' + d.lists.map(row).join('') + '</div>' : '<div class="card empty">No checklists yet. Make one here, or add a Checklist block to any page.</div>');
-  $('#tlNew', pane).addEventListener('click', () => todoListDialog(null, () => tabTodoLists(pane)));
-  $$('[data-ed]', pane).forEach((b) => b.addEventListener('click', () => todoListDialog(d.lists[Number(b.dataset.ed)], () => tabTodoLists(pane))));
+    state(x) + '<div class="tla"><button class="btn" data-ed="' + esc(x.id) + '">' + icon('edit') + 'Edit</button><button class="ghost" data-rs="' + esc(x.id) + '" title="Start it over: clears every tick">' + icon('restore') + '</button><button class="ghost danger" data-rm="' + esc(x.id) + '" title="Remove">' + icon('trash') + '</button></div></div>';
+  pane.innerHTML = '<p class="note pnote">Every to do list lives on the <a href="#/todo">To do</a> page, in its group. A list shows as open there while someone has started it and not finished, and a list with reset times opens at each reset until the end of that day (red after its done-by time).</p>' +
+    '<div class="bar" style="margin:0 0 10px"><span class="grow note">' + flat.length + ' list' + (flat.length === 1 ? '' : 's') + ' in ' + groups.length + ' group' + (groups.length === 1 ? '' : 's') + '</span>' +
+    '<button class="btn" id="tlGrp">' + icon('list') + 'Groups</button><button class="primary btn" id="tlNew">' + icon('plus') + 'New list</button></div>' +
+    (groups.length ? groups.map((g, gi) => '<section class="tlgrp"><div class="gbh"><span>' + esc(g.name || 'No group') + '</span><em>' + g.lists.length + '</em><button class="ghost xs" data-newin="' + gi + '" title="New list in this group">' + icon('plus') + '</button></div>' +
+      (g.lists.length ? '<div class="tllist">' + g.lists.map((x, li) => row(x, gi, li, g.lists.length)).join('') + '</div>' : '<p class="note">No lists in this group yet.</p>') + '</section>').join('')
+      : '<div class="card empty">No to do lists yet. Make a group (Sunday morning, Audio, Video…) and the lists in it.</div>');
+  const again = () => tabTodoLists(pane);
+  const find = (id) => flat.find((x) => x.id === id);
+  $('#tlNew', pane).addEventListener('click', () => todoListDialog(null, groups, again));
+  $('#tlGrp', pane).addEventListener('click', () => todoGroupsDialog(groups, again));
+  $$('[data-newin]', pane).forEach((b) => b.addEventListener('click', () => todoListDialog(null, groups, again, groups[Number(b.dataset.newin)].name)));
+  $$('[data-ed]', pane).forEach((b) => b.addEventListener('click', () => todoListDialog(find(b.dataset.ed), groups, again)));
+  const move = async (key, dir) => {
+    const [gi, li] = key.split(':').map(Number);
+    const g = groups[gi], j = li + dir;
+    if (j < 0 || j >= g.lists.length) return;
+    [g.lists[li], g.lists[j]] = [g.lists[j], g.lists[li]];
+    try { await call('PUT', '/api/todo/arrange', { order: groups.flatMap((x) => x.lists.map((l) => l.id)) }); again(); } catch (e) { toast(e.message, 'bad'); }
+  };
+  $$('[data-up]', pane).forEach((b) => b.addEventListener('click', () => move(b.dataset.up, -1)));
+  $$('[data-dn]', pane).forEach((b) => b.addEventListener('click', () => move(b.dataset.dn, 1)));
   $$('[data-rs]', pane).forEach((b) => b.addEventListener('click', async () => {
-    const x = d.lists[Number(b.dataset.rs)];
+    const x = find(b.dataset.rs);
     if (!await confirmBox('Start ' + x.title + ' over?', 'Every tick is cleared for everyone. The run so far stays in the checklist log.', 'Start over')) return;
-    try { await call('POST', '/api/pages/' + x.page_id + '/checklists/' + x.block_id + '/reset'); toast('Started over', 'ok'); loadState().then(paintHeader); tabTodoLists(pane); } catch (e) { toast(e.message, 'bad'); }
+    try { await call('POST', '/api/pages/0/checklists/' + encodeURIComponent(x.id) + '/reset'); toast('Started over', 'ok'); loadState().then(paintHeader); again(); } catch (e) { toast(e.message, 'bad'); }
   }));
   $$('[data-rm]', pane).forEach((b) => b.addEventListener('click', async () => {
-    const x = d.lists[Number(b.dataset.rm)];
-    if (!await confirmBox('Remove ' + x.title + '?', 'It is taken off ' + x.page_title + '. The page keeps its old version in History, so it can come back.', 'Remove', true)) return;
-    try { await call('DELETE', '/api/pages/' + x.page_id + '/checklists/' + x.block_id); toast('Removed', 'ok'); loadState().then(paintHeader); tabTodoLists(pane); } catch (e) { toast(e.message, 'bad'); }
+    const x = find(b.dataset.rm);
+    if (!await confirmBox('Remove ' + x.title + '?', 'The list and its ticks are removed. Its past runs stay in the checklist log until then.', 'Remove', true)) return;
+    try { await call('DELETE', '/api/todo/lists/' + encodeURIComponent(x.id)); toast('Removed', 'ok'); loadState().then(paintHeader); again(); } catch (e) { toast(e.message, 'bad'); }
   }));
 }
-/** New or edit: title, steps (one per line), reset times; a new one goes on a new page or an existing page. */
-async function todoListDialog(x, done) {
-  const spaces = S.spaces && S.spaces.length ? S.spaces : (await get('/api/spaces')).spaces;
-  if (!x && !spaces.length) { toast('Make a space first (Admin › Spaces)', 'bad'); return; }
+/** New or edit: group, title, steps (one per line), reset times. */
+function todoListDialog(x, groups, done, inGroup) {
   const rows = x ? x.schedule.map((r) => ({ ...r })) : [];
+  const names = groups.map((g) => g.name).filter(Boolean);
+  const cur = x ? x.group : inGroup != null ? inGroup : names[0] || '';
   const schedHtml = () => rows.map((r, i) => '<div class="tlsr"><select data-sd="' + i + '">' + SCHED_DAYS.map(([v, l]) => '<option value="' + v + '"' + (String(v) === String(r.day) ? ' selected' : '') + '>' + l + '</option>').join('') + '</select>' +
-    '<label>reset<input type="time" data-sr="' + i + '" value="' + esc(r.reset || '06:00') + '"></label><label>done by<input type="time" data-su="' + i + '" value="' + esc(r.due || '') + '"></label><button type="button" class="ghost xs" data-sx="' + i + '">' + icon('x') + '</button></div>').join('') || '<p class="note">No reset times: it shows on To do while someone has started it.</p>';
+    '<label>reset<input type="time" data-sr="' + i + '" value="' + esc(r.reset || '06:00') + '"></label><label>done by<input type="time" data-su="' + i + '" value="' + esc(r.due || '') + '"></label><button type="button" class="ghost xs" data-sx="' + i + '">' + icon('x') + '</button></div>').join('') || '<p class="note">No reset times: it shows as open on To do while someone has started it.</p>';
   modal('<h3>' + (x ? 'Edit ' + esc(x.title) : 'New to do list') + '</h3><form id="tlf">' +
-    '<label>Title</label><input id="tl_t" value="' + esc(x ? x.title : '') + '" placeholder="Sunday startup" required>' +
-    (x ? '<p class="note">On <a href="#/p/' + x.page_id + '" data-close>' + esc(x.page_title) + '</a></p>' :
-      '<div class="two"><div><label>Space</label><select id="tl_s">' + spaces.map((sp) => '<option value="' + esc(sp.slug) + '">' + esc(sp.name) + '</option>').join('') + '</select></div>' +
-      '<div><label>Page</label><select id="tl_p"><option value="">A new page with this title</option></select></div></div>') +
-    '<label>Steps <span class="note">(one per line)</span></label><textarea id="tl_i" rows="8" placeholder="Power on the rack&#10;Ring out the monitors&#10;Check every wireless mic">' + esc(x ? x.items.join('\n') : '') + '</textarea>' +
+    '<div class="two"><div><label>Group</label><input id="tl_g" list="tl_gs" value="' + esc(cur) + '" placeholder="Sunday morning"><datalist id="tl_gs">' + names.map((n) => '<option value="' + esc(n) + '">').join('') + '</datalist></div>' +
+    '<div><label>Title</label><input id="tl_t" value="' + esc(x ? x.title : '') + '" placeholder="FOH startup" required></div></div>' +
+    '<label>Steps <span class="note">(one per line)</span></label><textarea id="tl_i" rows="9" placeholder="Power on the rack&#10;Ring out the monitors&#10;Check every wireless mic">' + esc(x ? x.steps.join('\n') : '') + '</textarea>' +
     '<label>Reset times</label><div id="tl_sc" class="tlsc"></div><button type="button" class="btn" id="tl_add">' + icon('plus') + 'Add a reset time</button>' +
     '<div class="acts"><button type="button" data-close>Cancel</button><button class="primary">' + (x ? 'Save' : 'Make it') + '</button></div></form>', (w, close) => {
     w.classList.add('mwide');
@@ -1217,25 +1272,39 @@ async function todoListDialog(x, done) {
     };
     paintS();
     $('#tl_add', w).addEventListener('click', () => { rows.push({ day: 0, reset: '06:00', due: '' }); paintS(); });
-    const ss = $('#tl_s', w);
-    const loadPages = async () => { const sel = $('#tl_p', w); try { const r = await get('/api/spaces/' + encodeURIComponent(ss.value)); sel.innerHTML = '<option value="">A new page with this title</option>' + r.pages.map((p) => '<option value="' + p.id + '">Add to: ' + esc(p.title) + '</option>').join(''); } catch (e) { /* keep "new page" */ } };
-    if (ss) { ss.addEventListener('change', loadPages); loadPages(); }
+    setTimeout(() => $(x ? '#tl_i' : '#tl_t', w).focus(), 40);
     $('#tlf', w).addEventListener('submit', async (e) => {
       e.preventDefault();
-      const title = $('#tl_t', w).value.trim(), items = $('#tl_i', w).value.split('\n').map((t) => t.trim()).filter(Boolean);
-      if (!title) return toast('Give it a title', 'bad');
-      if (!items.length) return toast('Add at least one step', 'bad');
-      const schedule = rows.map((r) => ({ day: r.day, reset: r.reset || '06:00', due: r.due || '' }));
+      const body = { group: $('#tl_g', w).value.trim(), title: $('#tl_t', w).value.trim(), items: $('#tl_i', w).value.split('\n').map((t) => t.trim()).filter(Boolean), schedule: rows.map((r) => ({ day: r.day, reset: r.reset || '06:00', due: r.due || '' })) };
+      if (!body.title) return toast('Give it a title', 'bad');
+      if (!body.items.length) return toast('Add at least one step', 'bad');
       try {
-        if (x) await call('PUT', '/api/pages/' + x.page_id + '/checklists/' + x.block_id, { title, items, schedule });
-        else {
-          const block = { type: 'checklist', title, items, schedule };
-          const pid = $('#tl_p', w).value;
-          if (pid) { const p = (await get('/api/pages/' + pid)).page; await call('PUT', '/api/pages/' + pid, { title: p.title, space: p.space, blocks: p.blocks.concat(block), tech_only: p.tech_only, pinned: p.pinned, baseVersion: p.version }); }
-          else await call('POST', '/api/pages', { title, space: ss.value, blocks: [block] });
-        }
-        close(); toast(x ? 'Saved' : 'To do list made', 'ok'); loadState().then(paintHeader); done();
+        if (x) await call('PUT', '/api/todo/lists/' + encodeURIComponent(x.id), body); else await call('POST', '/api/todo/lists', body);
+        close(); toast(x ? 'Saved' : 'List made', 'ok'); loadState().then(paintHeader); done();
       } catch (err) { toast(err.message, 'bad'); }
+    });
+  });
+}
+/** Add, rename, reorder and remove groups (a removed group's lists move to the first group). */
+function todoGroupsDialog(groups, done) {
+  const rows = groups.map((g) => ({ name: g.name, was: g.name, n: g.lists.length }));
+  const paint = (w) => {
+    $('#tgl', w).innerHTML = rows.map((r, i) => '<div class="bkrow"><input data-i="' + i + '" value="' + esc(r.name) + '" maxlength="80" placeholder="Group name"><span class="note">' + r.n + '</span>' +
+      '<button type="button" class="ghost xs" data-u="' + i + '"' + (i ? '' : ' disabled') + '>' + icon('up') + '</button><button type="button" class="ghost xs" data-d="' + i + '"' + (i < rows.length - 1 ? '' : ' disabled') + '>' + icon('down') + '</button>' +
+      '<button type="button" class="ghost xs danger" data-x="' + i + '" title="Remove (its lists move to the first group)">' + icon('x') + '</button></div>').join('') || '<p class="note">No groups yet.</p>';
+    $$('[data-i]', w).forEach((x) => x.addEventListener('input', () => { rows[Number(x.dataset.i)].name = x.value; }));
+    $$('[data-u]', w).forEach((x) => x.addEventListener('click', () => { const i = Number(x.dataset.u); [rows[i - 1], rows[i]] = [rows[i], rows[i - 1]]; paint(w); }));
+    $$('[data-d]', w).forEach((x) => x.addEventListener('click', () => { const i = Number(x.dataset.d); [rows[i + 1], rows[i]] = [rows[i], rows[i + 1]]; paint(w); }));
+    $$('[data-x]', w).forEach((x) => x.addEventListener('click', () => { rows.splice(Number(x.dataset.x), 1); paint(w); }));
+  };
+  modal('<h3>To do groups</h3><p class="note">Groups split the To do page into sections, like Sunday morning, Wednesday night, Audio or Video. Rename or reorder them here.</p><div id="tgl" class="bkl"></div>' +
+    '<button type="button" class="btn" id="tgadd">' + icon('plus') + 'Add a group</button><div class="acts"><button type="button" data-close>Cancel</button><button class="primary" id="tgok">Save</button></div>', (w, close) => {
+    paint(w);
+    $('#tgadd', w).addEventListener('click', () => { rows.push({ name: '', was: null, n: 0 }); paint(w); const ins = $$('[data-i]', w); ins[ins.length - 1].focus(); });
+    $('#tgok', w).addEventListener('click', async () => {
+      const keep = rows.filter((r) => r.name.trim());
+      const renames = {}; keep.forEach((r) => { if (r.was != null && r.was !== r.name.trim()) renames[r.was] = r.name.trim(); });
+      try { await call('PUT', '/api/todo/arrange', { groups: keep.map((r) => r.name.trim()), renames }); close(); toast('Groups saved', 'ok'); done(); } catch (e) { toast(e.message, 'bad'); }
     });
   });
 }
@@ -1249,7 +1318,7 @@ async function tabChecklog(pane, pick) {
     '<div class="card"><div class="bar" style="margin-bottom:6px"><h2 class="grow" style="margin:0">Checklist log</h2><select id="clp"><option value="">All checklists</option>' +
     d.checklists.map((c) => '<option value="' + c.page_id + ':' + esc(c.block_id) + '"' + (pick === c.page_id + ':' + c.block_id ? ' selected' : '') + '>' + esc((c.title || 'Checklist') + ' · ' + c.page_title) + '</option>').join('') + '</select></div>' +
     (d.runs.length ? '<div class="tscroll"><table class="grid"><thead><tr><th>Run</th><th>Checklist</th><th>Done</th><th>Finished</th><th>Took</th><th>Who</th></tr></thead><tbody>' + d.runs.map((r) =>
-      '<tr class="' + (r.completed_at ? '' : r.over ? 'missed' : 'live') + '"><td>' + esc(tmx(r.run_start)) + '</td><td><a href="#/p/' + r.page_id + '?c=' + esc(r.block_id) + '">' + esc(r.title) + '</a><div class="note">' + esc(r.page_title) + '</div></td>' +
+      '<tr class="' + (r.completed_at ? '' : r.over ? 'missed' : 'live') + '"><td>' + esc(tmx(r.run_start)) + '</td><td><a href="' + esc(todoHref(r)) + '">' + esc(r.title) + '</a><div class="note">' + esc(r.page_title) + '</div></td>' +
       '<td>' + r.done + ' / ' + r.total + (r.missed.length ? '<div class="note">' + (r.over ? 'Not done: ' : 'Left: ') + esc(r.missed.join(', ')) + '</div>' : '') + '</td>' +
       '<td>' + (r.completed_at ? '<span class="chip ok">' + esc(tmx(r.completed_at)) + '</span>' : r.over ? '<span class="chip bad">Not finished</span>' : '<span class="chip acc">In progress</span>') + '</td>' +
       '<td>' + (r.first_at && r.last_at && r.completed_at ? esc(dur(r.first_at, r.last_at)) : '') + '</td><td>' + esc(r.people.join(', ')) + '</td></tr>').join('') + '</tbody></table></div>'
@@ -1466,7 +1535,7 @@ async function route() {
     else if (p[0] === 'd' && p[1] && p[2] === 'edit') await viewDeviceEdit(p[1]);
     else if (p[0] === 'd' && p[1]) await viewDevice(p[1]);
     else if (p[0] === 'search') await viewSearch(qs.get('q') || '');
-    else if (p[0] === 'todo') await viewTodo();
+    else if (p[0] === 'todo') await viewTodo(qs);
     else if (p[0] === 'settings') await viewSettings(p[1]);
     else if (p[0] === 'admin') await viewAdmin(p[1]);
     else app.innerHTML = '<div class="card empty">Page not found. <a href="#/">Go home</a></div>';

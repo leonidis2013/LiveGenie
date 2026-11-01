@@ -1380,3 +1380,41 @@ header.hhero { background:none; border:0; box-shadow:none; padding:0; position:s
 .tlsr { display:flex; gap:8px; align-items:center; flex-wrap:wrap; background:var(--card2); border-radius:8px; padding:6px 8px; }
 .tlsr label { display:flex; align-items:center; gap:6px; margin:0; font-size:12.5px; color:var(--dim); }
 .tlsr input, .tlsr select { width:auto; padding:5px 8px; }
+
+/* ---------- To do page: groups of lists (0.20) ---------- */
+.tdg { margin:0 0 18px; }
+.tdg .gbh .cnt { margin-left:4px; background:var(--warn); color:#1a1400; }
+.tdg .gbh .cnt.bad { background:var(--bad); color:#fff; }
+.tdls { display:flex; flex-direction:column; gap:8px; }
+.tdl { background:var(--card); border:1px solid var(--line); border-radius:12px; overflow:hidden; }
+.tdl.warn { border-color:color-mix(in srgb, var(--warn) 55%, var(--line)); }
+.tdl.bad { border-color:color-mix(in srgb, var(--bad) 60%, var(--line)); }
+.tdl.done { opacity:.8; }
+.tdh { display:flex; align-items:center; gap:12px; width:100%; background:none; border:0; padding:12px 14px; text-align:left; color:var(--fg); cursor:pointer; }
+.tdh:hover { background:var(--card2); }
+.tdh .ring { flex:none; }
+.tdt { flex:1; min-width:0; display:flex; flex-direction:column; gap:2px; }
+.tdt b { font-size:15px; }
+.tdt em { font-style:normal; font-size:12px; color:var(--dim); display:flex; align-items:center; gap:4px; }
+.tdt em .icon { width:12px; height:12px; }
+.tdh > i { font-style:normal; color:var(--dim); font-size:12px; }
+.chip.done { background:color-mix(in srgb, var(--ok) 16%, transparent); color:var(--ok); }
+.tdb { border-top:1px solid var(--line); padding:6px 10px 10px; }
+.tdi { display:flex; align-items:center; gap:10px; padding:10px 6px; border-radius:8px; cursor:pointer; font-size:15px; }
+.tdi:hover { background:var(--card2); }
+.tdi input { width:20px; height:20px; flex:none; accent-color:var(--ok); }
+.tdi span { flex:1; }
+.tdi.on span { color:var(--dim); text-decoration:line-through; }
+.tdi em { font-style:normal; font-size:12px; color:var(--dim); white-space:nowrap; }
+.tdf { display:flex; align-items:center; justify-content:space-between; gap:8px; margin-top:6px; padding:0 4px; }
+.tlgrp { margin:0 0 18px; }
+.tlgrp .gbh { cursor:default; }
+.tlgrp .gbh .ghost { margin-left:4px; order:4; }
+.tlmv { display:flex; flex-direction:column; }
+@media (max-width:600px) { .tdi { padding:12px 6px; } .tdi em { display:none; } }
+.tdh .ring { --p:0; width:30px; height:30px; flex:none; border-radius:50%; background:conic-gradient(var(--acc) calc(var(--p) * 1%), var(--inset) 0); display:grid; place-items:center; }
+.tdh .ring::after { content:""; width:20px; height:20px; border-radius:50%; background:var(--card); }
+.tdl.bad .ring { background:conic-gradient(var(--bad) calc(var(--p) * 1%), var(--inset) 0); }
+.tdl.done .ring { background:conic-gradient(var(--ok) calc(var(--p) * 1%), var(--inset) 0); }
+.tdg .gbh b.cnt { flex:none !important; width:auto !important; display:inline-flex; align-items:center; padding:1px 8px; border-radius:99px; font-size:11px; font-weight:800; line-height:1.5; letter-spacing:0; text-transform:none; }
+.tdf .ghost { display:inline-flex; align-items:center; gap:6px; }

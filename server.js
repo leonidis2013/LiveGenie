@@ -422,6 +422,7 @@ async function api(req, res, url, user, token) {
     const body = await readJson(req, 4 * 1024 * 1024);
     return send(res, 200, { ok: true, ...patch.save(body.doc, user, body.baseVersion, body.note) });
   }
+  if (a === 'patch' && b === 'publish' && m === 'POST') { need(user, 'admin'); const body = await readJson(req); return send(res, 200, { ok: true, ...patch.publish(body.level, body.note, user) }); }
   if (a === 'patch' && b === 'versions' && !c && m === 'GET') { need(user, 'admin'); return send(res, 200, { ok: true, versions: patch.versions() }); }
   if (a === 'patch' && b === 'versions' && c && !d && m === 'GET') { need(user, 'admin'); return send(res, 200, { ok: true, doc: patch.version(c) }); }
   if (a === 'patch' && b === 'versions' && c && d === 'restore' && m === 'POST') { need(user, 'admin'); return send(res, 200, { ok: true, ...patch.restore(c, user) }); }

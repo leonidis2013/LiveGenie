@@ -587,9 +587,29 @@ test('stage patch: one drawing, saved with versions; lists, checks, search and m
   r = await editor.put('/api/patch', { doc: { ...doc, title: 'Changed' }, baseVersion: v1 });
   assert.strictEqual(r.data.doc.title, 'Changed');
   const vs = (await editor.get('/api/patch/versions')).data.versions;
-  assert.ok(vs.length >= 2 && vs[0].version === r.data.version);
-  r = await editor.post('/api/patch/versions/' + v1 + '/restore');
-  assert.strictEqual(r.data.doc.title, doc.title, 'restoring brings the old one back as a new version');
+  assert.ok(vs.length >= 1 && vs[0].version === r.data.version);
+  // revisions: autosaves in one editing session are one draft; publishing numbers it major.minor.patch
+  const nBefore = vs.length;
+  r = await editor.put('/api/patch', { doc: { ...doc, title: 'Changed again' }, baseVersion: r.data.version });
+  assert.strictEqual((await editor.get('/api/patch/versions')).data.versions.length, nBefore, 'another autosave replaces the draft');
+  let pub = await editor.post('/api/patch/publish', { level: 'patch', note: 'First' });
+  assert.strictEqual(pub.data.rev, '1.0.0', 'the first revision is 1.0.0');
+  assert.deepStrictEqual([(await vol.get('/api/patch')).data.rev, (await vol.get('/api/patch')).data.draft], ['1.0.0', false]);
+  assert.strictEqual((await editor.post('/api/patch/publish', { level: 'patch' })).status, 400, 'nothing new to publish');
+  r = await editor.put('/api/patch', { doc: { ...doc, title: 'Changed' }, baseVersion: (await vol.get('/api/patch')).data.version });
+  assert.strictEqual((await vol.get('/api/patch')).data.draft, true);
+  assert.strictEqual((await editor.post('/api/patch/publish', { level: 'minor' })).data.rev, '1.1.0');
+  assert.strictEqual((await vol.post('/api/patch/publish', { level: 'major' })).status, 403);
+  const B = require(path.join(ROOT, 'lib', 'patch')).bump;
+  assert.deepStrictEqual([B('1.2.3', 'patch'), B('1.2.3', 'minor'), B('1.2.3', 'major'), B('', 'major')], ['1.2.4', '1.3.0', '2.0.0', '1.0.0']);
+  assert.ok((await editor.get('/api/patch/versions')).data.versions.filter((x) => x.rev).map((x) => x.rev).join() === '1.1.0,1.0.0', 'published revisions are listed with their numbers');
+  const r100 = (await editor.get('/api/patch/versions')).data.versions.find((x) => x.rev === '1.0.0');
+  r = await editor.post('/api/patch/versions/' + r100.version + '/restore');
+  assert.strictEqual(r.data.doc.title, 'Changed again', 'restoring brings revision 1.0.0 back as a new draft');
+  assert.strictEqual((await vol.get('/api/patch')).data.draft, true);
+  r = await editor.put('/api/patch', { doc: { ...doc }, baseVersion: r.data.version });
+  assert.strictEqual(r.data.doc.title, doc.title);
+  assert.ok(v1 > 0);
   // search, map and the device card
   const sr = (await vol.get('/api/search?q=pastor lav')).data;
   assert.ok(sr.gear.some((g) => g.name === 'Pastor lav'), 'search finds gear on the patch');
@@ -775,7 +795,7 @@ test('gear knows what it is: wireless mics pair with a receiver, capsules fit a 
   const dir = fs2.mkdtempSync(path.join(os2.tmpdir(), 'lg-kind-'));
   const DBm = require(path.join(ROOT, 'lib', 'db'));
   const db1 = DBm.open(path.join(dir, 'x.db'));
-  db1.exec(['kind', 'pair_id', 'txtype', 'capsule', 'freq'].map((c) => 'ALTER TABLE devices DROP COLUMN ' + c).join('; ')); db1.prepare('UPDATE schema_version SET v = 12').run();
+  db1.exec('ALTER TABLE patch DROP COLUMN rev; ALTER TABLE patch_versions DROP COLUMN rev; ALTER TABLE patch_versions DROP COLUMN kind'); db1.exec(['kind', 'pair_id', 'txtype', 'capsule', 'freq'].map((c) => 'ALTER TABLE devices DROP COLUMN ' + c).join('; ')); db1.prepare('UPDATE schema_version SET v = 12').run();
   db1.prepare("INSERT INTO settings (key, value) VALUES ('gear_models', ?)").run(JSON.stringify([{ kind: 'speaker', make: 'Brand', model: 'Col 70' }]));
   db1.prepare("INSERT INTO devices (name, aliases, category, make, model, location, ip, mac, photo, manual_url, notes, created_at, updated_at) VALUES ('Brand Col 70', '[]', 'audio', 'Brand', 'COL 70', '', '', '', '', '', '', 1, 1)").run();
   db1.close();
@@ -850,7 +870,7 @@ test('checklists that were on pages move to To do, keeping their ticks and log',
   const DBm = require(path.join(ROOT, 'lib', 'db'));
   // a database from before 0.20: back to migration 10, then a page with a checklist and a tick
   const db1 = DBm.open(path.join(dir, 'x.db'));
-  db1.exec('DROP TABLE todo_lists; ALTER TABLE devices DROP COLUMN networked; ' + ['kind', 'pair_id', 'txtype', 'capsule', 'freq'].map((c) => 'ALTER TABLE devices DROP COLUMN ' + c).join('; ')); db1.prepare('UPDATE schema_version SET v = 10').run();
+  db1.exec('ALTER TABLE patch DROP COLUMN rev; ALTER TABLE patch_versions DROP COLUMN rev; ALTER TABLE patch_versions DROP COLUMN kind'); db1.exec('DROP TABLE todo_lists; ALTER TABLE devices DROP COLUMN networked; ' + ['kind', 'pair_id', 'txtype', 'capsule', 'freq'].map((c) => 'ALTER TABLE devices DROP COLUMN ' + c).join('; ')); db1.prepare('UPDATE schema_version SET v = 10').run();
   db1.prepare("INSERT INTO spaces (slug, name) VALUES ('audio', 'Audio')").run();
   const blocks = [{ type: 'text', md: 'Before' }, { type: 'checklist', id: 'abc12345', title: 'Desk check', items: ['Faders down', 'Scenes loaded'], schedule: [] }];
   db1.prepare("INSERT INTO pages (space_id, title, blocks, version, created_at, updated_at) VALUES (1, 'Sunday desk', ?, 1, 1, 1)").run(JSON.stringify(blocks));

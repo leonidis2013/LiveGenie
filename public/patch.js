@@ -1336,10 +1336,26 @@ const PatchView = (() => {
       if (typeof DEV === 'undefined' || !DEV.list) return;
       const doc = st.doc, notes = [];
       let n = 0;
+      // the drawing numbers a repeated name "WMIC-2 #2"; that counts as the same name
+      const bare = (x) => String(x || '').replace(/\s+#\d+$/, '');
+      const same = (x, y) => (typeof Tags !== 'undefined' ? Tags.norm(bare(x)) === Tags.norm(bare(y)) : bare(x).toLowerCase() === bare(y).toLowerCase());
+      // tidy up copies an earlier sync made: a wireless mic or pack drawn twice (one linked to its Gear Locker card, one not)
+      for (const g of doc.gear.filter((x) => (x.kind === 'txmic' || x.kind === 'bodypack') && x.device_id)) {
+        const twin = doc.gear.find((o) => o !== g && o.kind === g.kind && (o.device_id === g.device_id || (!o.device_id && same(o.name, g.name))));
+        if (!twin) continue;
+        // keep the one that is on a channel or wired up; it takes over the Gear Locker link
+        const keepG = P.hostOf(doc, g) && !P.hostOf(doc, twin) ? g : twin, drop = keepG === g ? twin : g;
+        keepG.device_id = g.device_id;
+        doc.cables = doc.cables.filter((c) => c.a !== drop.id && c.b !== drop.id);
+        doc.gear = doc.gear.filter((x) => x !== drop);
+        n++;
+      }
       for (const host of doc.gear.filter((g) => (g.kind === 'receiver' || g.kind === 'iemtx') && g.device_id)) {
         const want = host.kind === 'receiver' ? 'txmic' : 'bodypack';
         for (const dev of DEV.list.filter((d) => d.pair_id === host.device_id && d.kind === want)) {
-          const ex = doc.gear.find((g) => g.device_id === dev.id);
+          // already drawn: linked to this card, or the same name not yet linked to any card
+          let ex = doc.gear.find((g) => g.device_id === dev.id);
+          if (!ex) { ex = doc.gear.find((g) => g.kind === want && !g.device_id && same(g.name, dev.name)); if (ex) { ex.device_id = dev.id; n++; } }
           if (ex) {
             if (P.hostOf(doc, ex)) continue;
             if (host.kind === 'iemtx') { P.connect(doc, host, 0, ex, 0, { kind: 'rf' }); n++; continue; }
@@ -1351,8 +1367,7 @@ const PatchView = (() => {
           const item = { name: dev.name, make: dev.make || undefined, model: dev.model || undefined, txtype: dev.txtype || undefined, freq: dev.freq || undefined, capsule: dev.capsule || undefined, device_id: dev.id };
           Object.keys(item).forEach((k) => { if (item[k] == null) delete item[k]; });
           const g = P.addMember(doc, host, item, null);
-          if (!g) { P.addGear(doc, { ...item, kind: want }); notes.push(dev.name); }
-          n++;
+          if (g) n++; else notes.push(dev.name);   // every channel taken: say so, but never draw a loose copy
         }
       }
       // network: the Gear Locker's "Plugged into" as cables
@@ -1370,7 +1385,7 @@ const PatchView = (() => {
           }
         } catch (e) { /* no map for this user */ }
       }
-      if (notes.length) toast(notes.join(', ') + (notes.length === 1 ? ' is' : ' are') + ' paired in the Gear Locker but every receiver channel is taken: ' + (notes.length === 1 ? 'it is' : 'they are') + ' on the drawing on ' + (notes.length === 1 ? 'its' : 'their') + ' own.');
+      if (notes.length) toast(notes.join(', ') + (notes.length === 1 ? ' is' : ' are') + ' paired in the Gear Locker, but every channel of ' + (notes.length === 1 ? 'its' : 'their') + ' receiver is taken, so ' + (notes.length === 1 ? 'it is' : 'they are') + ' not on the drawing. Free a channel or mark one as a spare.');
       if (n && canEdit) queueSave();
       return n;
     }
@@ -2287,6 +2302,16 @@ const PatchView = (() => {
       const T = (heads, rows, empty) => rows.length ? '<table class="rt"><thead><tr>' + heads.map((h) => '<th>' + h + '</th>').join('') + '</tr></thead><tbody>' + rows.map((r) => '<tr>' + r.map((c) => '<td>' + (c == null || c === '' ? '<span class="rd">—</span>' : c) + '</td>').join('') + '</tr>').join('') + '</tbody></table>' : '<p class="rnone">' + empty + '</p>';
       const sections = [];
       const add = (id, title, html, cls) => sections.push({ id, title, html, cls });
+      const G = new Map(doc.gear.map((g) => [g.id, g]));
+      const net = (g) => {
+        const dev = devOf(g);
+        const c = doc.cables.find((x) => x.ap === 'net' && x.a === g.id);
+        const sw = c ? G.get(c.b) : dev && dev.uplink_id ? (DEV.list || []).find((d) => d.id === dev.uplink_id) : null;
+        const port = c ? c.port : dev && dev.uplink_port;
+        const ips = dev ? (dev.ips || []) : [];
+        if (!ips.length && !sw) return '';
+        return (ips.length ? '<span class="mono">' + ips.map(esc).join('<br>') + '</span>' : '') + (sw ? '<div class="rs">into ' + esc(sw.name) + (port ? ' port ' + esc(port) : '') + '</div>' : '');
+      };
       // microphones
       const spareTag = (g) => (g.spare ? ' <span class="rspare">Spare</span>' : '');
       const dotOf = (f) => { const n = P.mhz(f); return n == null ? '' : '<i class="rband" style="background:' + P.bandColor(n) + '"></i>'; };
@@ -2298,18 +2323,21 @@ const PatchView = (() => {
         return ['<b>' + esc(g.name) + '</b>', esc(g.model || P.KINDS[g.kind].label), esc([g.person, g.use].filter(Boolean).join(' · ')),
           esc(l.map((r) => r.via.kind === 'console' ? r.port : r.via.name + ' ' + r.port).join(', ')), esc(l.map((r) => (r.console ? r.console.name + ' ' : '') + (r.ch == null ? '' : 'ch ' + r.ch)).join(', ')), esc(g.chname || '')];
       });
-      add('mics', 'Microphones', '<h3>Wireless mics</h3>' + T(['Tag', 'Model', 'Receiver', 'Capsule', 'Frequency', 'Person / use', 'Console input'], wl, 'No wireless mics.') +
+      // receivers are listed here (not again under Equipment), with where they live and their network
+      const rxRows = doc.gear.filter((g) => g.kind === 'receiver').map((g) => { const dev = devOf(g), used = P.members(doc, g).filter((m) => !m.g.spare).length;
+        return ['<b>' + esc(g.name) + '</b>', esc([g.make || (dev && dev.make), g.model || (dev && dev.model)].filter(Boolean).join(' ')), esc((dev && dev.location) || ''), used + ' of ' + g.ins.length, net(g)]; });
+      add('mics', 'Microphones', (rxRows.length ? '<h3>Wireless receivers</h3>' + T(['Tag', 'Make and model', 'Location', 'Channels in use', 'Network'], rxRows, '') : '') + '<h3>Wireless mics</h3>' + T(['Tag', 'Model', 'Receiver', 'Capsule', 'Frequency', 'Person / use', 'Console input'], wl, 'No wireless mics.') +
         '<h3>Wired mics, DIs and sources</h3>' + T(['Tag', 'Model', 'Person / use', 'Stage box input', 'Console channel', 'Channel name'], wired, 'No wired mics or DIs.'));
       // in-ears
       const ie = P.inears(doc).map((r) => {
         const packs = (P.members(doc, r.tx).map((m) => m.g).concat(r.packs || [])).filter((g, k, a) => g && a.indexOf(g) === k);
-        return ['<b>' + esc(tm(r.tx)) + '</b>', esc(r.tx.mode || ''), r.tx.freq ? dotOf(r.tx.freq) + esc(r.tx.freq) + ' MHz' : '', esc(r.mix || ''), esc(r.feeds.filter(Boolean).map((x) => x.from.name + ' ' + x.socket).join(', ')),
-          packs.map((g) => esc([tm(g), g.person || g.use, g.freq && g.freq + ' MHz'].filter(Boolean).join(' · ')) + spareTag(g)).join('<br>')];
+        const dev = devOf(r.tx);
+        return ['<b>' + esc(tm(r.tx)) + '</b>' + (dev && dev.location ? '<div class="rs">' + esc(dev.location) + '</div>' : ''), esc(r.tx.mode || ''), r.tx.freq ? dotOf(r.tx.freq) + esc(r.tx.freq) + ' MHz' : '', esc(r.mix || ''), esc(r.feeds.filter(Boolean).map((x) => x.from.name + ' ' + x.socket).join(', ')),
+          packs.map((g) => esc([tm(g), g.person || g.use, g.freq && g.freq + ' MHz'].filter(Boolean).join(' · ')) + spareTag(g)).join('<br>'), net(r.tx)];
       });
-      if (ie.length) add('iem', 'In-ear monitors', T(['Transmitter', 'Mode', 'Frequency', 'Mix', 'Fed from', 'Packs'], ie, ''));
+      if (ie.length) add('iem', 'In-ear monitors', T(['Transmitter', 'Mode', 'Frequency', 'Mix', 'Fed from', 'Packs', 'Network'], ie, ''));
       // equipment by group
       const ix = P.index(doc);
-      const G = new Map(doc.gear.map((g) => [g.id, g]));
       const names = (ids) => [...new Set(ids)].map((id) => G.get(id)).filter(Boolean).map((g) => esc(g.name));
       const conn = (g) => {
         const ins = doc.cables.filter((c) => c.b === g.id && c.kind !== 'rf' && c.ap !== 'net').map((c) => c.a);
@@ -2320,16 +2348,8 @@ const PatchView = (() => {
         const m = P.members(doc, g); if (m.length) parts.push(m.length + (g.kind === 'receiver' ? ' wireless mic' : ' pack') + (m.length === 1 ? '' : 's'));
         return parts.join('<br>');
       };
-      const net = (g) => {
-        const dev = devOf(g);
-        const c = doc.cables.find((x) => x.ap === 'net' && x.a === g.id);
-        const sw = c ? G.get(c.b) : dev && dev.uplink_id ? (DEV.list || []).find((d) => d.id === dev.uplink_id) : null;
-        const port = c ? c.port : dev && dev.uplink_port;
-        const ips = dev ? (dev.ips || []) : [];
-        if (!ips.length && !sw) return '';
-        return (ips.length ? '<span class="mono">' + ips.map(esc).join('<br>') + '</span>' : '') + (sw ? '<div class="rs">into ' + esc(sw.name) + (port ? ' port ' + esc(port) : '') + '</div>' : '');
-      };
-      const GROUPS = [['Console', ['console']], ['Stage I/O', ['stagebox']], ['Wireless receivers', ['receiver']], ['In-ears', ['iemtx', 'headamp']], ['Processing', ['processor']], ['Amplifiers', ['amp']], ['Speakers and monitors', ['speaker', 'wedge']], ['Network', ['network', 'computer']], ['Other', ['other']]];
+      // wireless receivers and in-ear transmitters have their own sections above, so they are not listed again here
+      const GROUPS = [['Console', ['console']], ['Stage I/O', ['stagebox']], ['Headphone amps', ['headamp']], ['Processing', ['processor']], ['Amplifiers', ['amp']], ['Speakers and monitors', ['speaker', 'wedge']], ['Network', ['network', 'computer']], ['Other', ['other']]];
       const eq = GROUPS.map(([title, kinds]) => {
         const list = doc.gear.filter((g) => kinds.includes(g.kind));
         if (!list.length) return '';

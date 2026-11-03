@@ -368,7 +368,7 @@ async function api(req, res, url, user, token) {
       let buckets = []; try { buckets = JSON.parse(store.getSetting('gear_buckets', '[]')); } catch (e) { /* default */ }
       const dupeSkip = Auth.atLeast(user, 'admin') ? devices.dupeSkip(store.getSetting) : [];
       return send(res, 200, { ok: true, categories: Devices.CATEGORIES, buckets, dupeSkip, devices: devices.list(user).map((d) => ({
-        id: d.id, name: d.name, aliases: d.aliases, category: d.category, make: d.make, model: d.model, location: d.location, bucket: d.bucket, kind: d.kind || pk.get(d.id) || '', pair_id: d.pair_id, txtype: d.txtype, capsule: d.capsule, freq: d.freq, networked: d.networked,
+        id: d.id, name: d.name, aliases: d.aliases, category: d.category, make: d.make, model: d.model, location: d.location, bucket: d.bucket, kind: d.kind || pk.get(d.id) || '', pair_id: d.pair_id, txtype: d.txtype, capsule: d.capsule, freq: d.freq, networked: d.networked, uplink_id: d.networked ? d.uplink_id : null, uplink_port: d.networked ? d.uplink_port : '',
         ips: d.ips, photo: d.photo, tech_only: d.tech_only, inputs: d.inputs, outputs: d.outputs, files: fileCount.get(d.id) || 0 })) });
     }
     if (m === 'GET' && b === 'models') return send(res, 200, { ok: true, models: devices.models(store.getSetting) });

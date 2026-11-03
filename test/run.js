@@ -864,6 +864,26 @@ test('merging two cards for the same gear: manuals, nicknames, pairings, plugged
   for (const id of [keep, sw, child]) await admin.del('/api/devices/' + id);
 });
 
+test('stage patch 0.23: signal stages and network cables to switch ports', async () => {
+  const P = require(path.join(ROOT, 'public', 'patchcore.js'));
+  const d = P.clean({});
+  const mic = P.addGear(d, { kind: 'mic', name: 'MIC-1' }), box = P.addGear(d, { kind: 'stagebox', name: 'SB-A', nin: 8, nout: 4 });
+  const con = P.addGear(d, { kind: 'console', name: 'FOH', nin: 16, nout: 8 }), amp = P.addGear(d, { kind: 'amp', name: 'PA-AMP1', nin: 2, nout: 2 });
+  const spk = P.addGear(d, { kind: 'speaker', name: 'SPK-1' }), sw = P.addGear(d, { kind: 'network', name: 'SW-1', nports: 8 });
+  assert.deepStrictEqual([mic, box, con, amp, spk].map((g) => P.stageOf(g)), [0, 1, 2, 4, 5].map((i) => P.STAGES[i]).map((x) => P.stageOf({ kind: { Sources: 'mic', 'Stage I/O': 'stagebox', Console: 'console', Amps: 'amp', Outputs: 'speaker' }[x] })), 'stages run in signal order');
+  const c1 = P.connectNet(d, con, sw, 1);
+  assert.ok(c1 && c1.ap === 'net' && c1.b === sw.id && c1.port === 1);
+  P.connectNet(d, box, sw, 1);
+  assert.strictEqual(d.cables.filter((c) => c.ap === 'net' && c.port === 1).length, 1, 'one cable per switch port');
+  P.connectNet(d, box, sw, 2);
+  assert.strictEqual(d.cables.filter((c) => c.ap === 'net' && c.a === box.id).length, 1, 'one network cable per piece of gear');
+  assert.strictEqual(P.netOf(d, box).port, 2);
+  P.connectNet(d, con, sw, 1);   // the console lost port 1 to the stage box earlier; plug it back in
+  const c2 = P.clean(JSON.parse(JSON.stringify(d)));
+  assert.strictEqual(c2.cables.filter((c) => c.ap === 'net').length, 2, 'network cables survive a save');
+  assert.strictEqual(P.connectNet(d, mic, amp, 1), null, 'only a switch takes a network cable');
+});
+
 test('checklists that were on pages move to To do, keeping their ticks and log', async () => {
   const os2 = require('os'), fs2 = require('fs');
   const dir = fs2.mkdtempSync(path.join(os2.tmpdir(), 'lg-todo-'));

@@ -1463,3 +1463,108 @@ header.hhero { background:none; border:0; box-shadow:none; padding:0; position:s
 .dform .dwl > .dform { padding:12px; border-radius:12px; background:var(--card2); border:1px solid var(--line); }
 .dform .dman .note { font-weight:400; }
 .pairs .row .k { color:var(--muted); font-size:13px; margin-left:auto; }
+
+/* ===== stage patch 0.23.0: key, network, select tool, fit, auto label, add pane ===== */
+/* the key: fixed along the bottom of the drawing, only what is drawn */
+.pcanvas .pkey { position:absolute; left:10px; right:58px; bottom:10px; z-index:2; display:flex; align-items:flex-start; gap:8px; pointer-events:none; }
+.pcanvas .pkey > * { pointer-events:auto; }
+.pkey .pkt { flex:none; font-size:11px; font-weight:800; letter-spacing:.12em; text-transform:uppercase; padding:5px 9px; min-height:0; border-radius:8px; background:color-mix(in srgb, var(--card) 92%, transparent); border:1px solid var(--line); color:var(--fg); }
+.pkey .pki { display:flex; flex-wrap:wrap; gap:4px 14px; align-items:center; padding:6px 10px; border-radius:10px; background:color-mix(in srgb, var(--card) 88%, transparent); border:1px solid var(--line); backdrop-filter:blur(6px); font-size:11.5px; color:var(--dim); max-height:84px; overflow:auto; }
+.pkey.shut .pki { display:none; }
+.pkey .kc, .pkey .kk { display:inline-flex; align-items:center; gap:6px; white-space:nowrap; }
+.pkey .kc i { width:12px; height:12px; border-radius:3px; opacity:.8; }
+.pkey svg { overflow:visible; }
+.pkey .ln { fill:none; stroke-width:2.4; }
+.pkey .pe-xlr .ln { stroke:color-mix(in srgb, var(--fg) 55%, transparent); }
+.pkey .pe-link .ln { stroke:#8b6cff; stroke-width:3.6; }
+.pkey .pe-dante .ln { stroke:#7b74ff; }
+.pkey .pe-aes .ln { stroke:#2ec4e6; stroke-dasharray:7 5; }
+.pkey .pe-speaker .ln { stroke:#ef8a3c; }
+.pkey .pe-wiem .ln { stroke:#ec6aa8; stroke-dasharray:8 6; }
+.pkey .pe-rf .ln { stroke:#e46cd9; stroke-dasharray:1.5 5; stroke-linecap:round; }
+.pkey .pe-net .ln { stroke:#22c3a6; stroke-dasharray:10 3 2 3; }
+@media print { .pcanvas .pkey { position:static; margin-top:8px; } .pkey .pkt { display:none; } .pkey.shut .pki { display:flex; } }
+/* network cables and sockets */
+#psvg .pe-net .ln { stroke:#22c3a6; stroke-width:2; stroke-dasharray:10 3 2 3; }
+#psvg .pa-net { fill:#22c3a6; }
+#psvg .netp .dot { fill:var(--card); stroke:#22c3a6; stroke-width:1.6; }
+#psvg .netp.used .dot { fill:#22c3a6; stroke:#22c3a6; }
+#psvg .netp .hitc { fill:transparent; }
+#psvg .pl-net { fill:#22c3a6; }
+#psvg .pshelf { font-size:12px; font-weight:800; letter-spacing:.16em; fill:var(--dim); }
+/* select tool and the selection chip */
+#pselt.on { background:color-mix(in srgb, var(--acc) 18%, transparent); color:var(--acc); }
+#pselt .icon { width:16px; height:16px; }
+#psvg.selecting { cursor:crosshair; }
+.pcanvas .pselchip { position:absolute; left:10px; top:10px; z-index:3; display:flex; flex-wrap:wrap; align-items:center; gap:4px; padding:5px 6px 5px 12px; border-radius:12px; background:var(--card); border:1px solid var(--line); box-shadow:0 8px 24px var(--shadow); max-width:calc(100% - 70px); }
+.pselchip b { font-size:13px; margin-right:4px; }
+.pselchip > button { min-height:0; padding:5px 9px; font-size:12.5px; }
+.pselchip .pscal { flex-basis:100%; display:flex; flex-wrap:wrap; gap:4px; padding-top:4px; }
+.pselchip .pscal.hide { display:none; }
+.pselchip .pscal button { min-height:0; padding:5px 9px; font-size:12px; background:var(--card2); }
+/* zoom buttons: their own tips, to the left (a browser tip could sit over the add pane) */
+.pcanvas .pzoom { z-index:2; }
+.pcanvas .pzoom button { position:relative; }
+.pcanvas .pzoom button[data-tip]:hover::after, .pcanvas .pzoom button[data-tip]:focus-visible::after { content:attr(data-tip); position:absolute; right:calc(100% + 6px); top:50%; transform:translateY(-50%); white-space:nowrap; font-size:12px; font-weight:600; padding:4px 8px; border-radius:6px; background:var(--fg); color:var(--bg); pointer-events:none; }
+#pfitb .icon { width:16px; height:16px; }
+/* a tag name with its Auto label button */
+.tagrow { display:flex; gap:6px; align-items:stretch; margin-top:3px; }
+.tagrow input { flex:1; min-width:0; margin-top:0 !important; }
+.tagrow .btn.sm, .tagrow button { flex:none; min-height:0; padding:6px 10px; font-size:12.5px; white-space:nowrap; }
+.pform .pdevren { margin:-2px 0 8px; font-weight:500; }
+/* the add pane */
+.psec { margin:4px 0 12px; }
+.psech { font-size:12px; font-weight:700; color:var(--fg); margin:4px 0 8px; }
+.pnone { margin:0 0 10px; }
+.pnewd { border:1px solid var(--line); border-radius:12px; background:var(--card2); margin:6px 0 12px; }
+.pnewd > summary { list-style:none; cursor:pointer; display:flex; align-items:center; gap:6px; padding:10px 12px; font-weight:700; font-size:13.5px; }
+.pnewd > summary::-webkit-details-marker { display:none; }
+.pnewd > summary .icon { width:16px; height:16px; }
+.pnewd[open] > summary { border-bottom:1px solid var(--line); }
+.pnewd .pnew { background:transparent; border:0; margin:0; padding:10px 12px 12px; display:flex; flex-direction:column; gap:8px; }
+.pnewd .pnew label { display:block; margin:0; font-size:12px; font-weight:600; color:var(--dim); }
+.pnewd .pnew input, .pnewd .pnew select { display:block; width:100%; margin-top:3px; background:var(--bg); border:1px solid var(--line); border-radius:8px; padding:7px 9px; font-size:14px; color:var(--fg); min-height:36px; }
+.pnewd .pnew .tagrow input { margin-top:0; }
+.pnewd .pnf { display:grid; grid-template-columns:1fr 1fr; gap:8px; }
+.pnewd .pnf .wide { grid-column:1 / -1; }
+.pnewd .pnadd { width:100%; justify-content:center; margin-top:4px; }
+.pnewd .pnew .note { margin:0; font-size:11.5px; text-align:center; }
+/* auto label preview */
+.alh { display:flex; align-items:center; gap:6px; margin:12px 0 6px; font-size:13px; }
+.allist { max-height:34vh; overflow:auto; border:1px solid var(--line); border-radius:10px; }
+.modal .alr, .alr { display:flex; align-items:center; gap:10px; padding:7px 10px; border-bottom:1px solid var(--line); font-size:13px; font-weight:500; color:var(--fg); margin:0; cursor:pointer; }
+.alr:last-child { border-bottom:0; }
+.alr input[type=checkbox] { flex:none; width:16px; height:16px; margin:0; }
+.alr .alo { flex:1; min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; color:var(--dim); }
+.alr.on .alo { color:var(--fg); }
+.alr .alo em { font-style:normal; color:var(--dim); font-size:12px; }
+.alr .aln { flex:none; margin-left:auto; max-width:45%; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.alr .alsp { flex:none; width:auto; min-height:0; padding:3px 6px; font-size:12px; }
+@media (max-width:600px) { .alr { flex-wrap:wrap; } .alr .aln { max-width:none; } .pkey .pki { max-height:64px; } }
+.tagrow button { background:var(--card); border:1px solid var(--line); border-radius:8px; color:var(--fg); font-weight:600; }
+@media (max-width:1023px) { .ptools .palign { display:none !important; } }
+
+/* ===== wireless systems (0.23.0): a dashed box round a receiver and its mics, or an in-ear transmitter and its packs ===== */
+#psvg .wbox .wb { fill:color-mix(in srgb, #e46cd9 4%, transparent); stroke:color-mix(in srgb, #e46cd9 55%, var(--line)); stroke-width:1.2; stroke-dasharray:6 4; }
+#psvg .pcard.sel .wbox .wb { stroke:var(--acc); }
+#psvg .wbox .wl { font-size:11px; font-weight:700; fill:color-mix(in srgb, #e46cd9 70%, var(--fg)); letter-spacing:.02em; }
+#psvg .wlt { cursor:pointer; }
+#psvg .wlt rect { fill:var(--card2); stroke:var(--line); }
+#psvg .wlt text { font-size:10px; fill:var(--dim); }
+#psvg .wlt:hover rect { stroke:var(--acc); }
+#psvg .crx { font-size:11px; fill:var(--dim); }
+#psvg .crx .pn { fill:var(--fg); font-weight:600; }
+#psvg .wrf .wln { stroke:#e46cd9; stroke-width:1.4; stroke-dasharray:4 3; fill:none; }
+#psvg .wrf .wan { stroke:#e46cd9; stroke-width:1.3; fill:none; stroke-linecap:round; }
+#psvg .wrf .wfq { font-size:9.5px; fill:var(--dim); font-variant-numeric:tabular-nums; }
+#psvg .wrf .wbd { stroke:var(--card); stroke-width:1; }
+#psvg .wmini .mbg { fill:color-mix(in srgb, #e46cd9 12%, var(--card)); stroke:color-mix(in srgb, #e46cd9 45%, transparent); }
+#psvg .wmini text { font-size:10.5px; fill:var(--fg); font-weight:600; }
+#psvg .wrf.spare, #psvg .wmini.spare { opacity:.5; }
+#psvg .wmini.spare .mbg { stroke-dasharray:3 2; }
+#psvg .wmini .wsp { font-size:8px; font-weight:800; letter-spacing:.08em; fill:var(--dim); }
+#psvg .cadd.wslot rect { fill:transparent; stroke:color-mix(in srgb, #e46cd9 45%, transparent); stroke-dasharray:3 3; }
+#psvg .cadd.wslot text { font-size:10.5px; fill:color-mix(in srgb, #e46cd9 70%, var(--dim)); }
+.pkey .wkey rect { fill:none; stroke:color-mix(in srgb, #e46cd9 55%, var(--line)); stroke-dasharray:3 2; }
+.pkey .wkey path { stroke:#e46cd9; stroke-dasharray:3 2; }
+@media print { #psvg .wbox .wl, #psvg .wmini text { fill:#111820; } #psvg .wlt { display:none; } }

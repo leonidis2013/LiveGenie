@@ -1,0 +1,73 @@
+/* ===== Stage patch PDF report (0.23.0): only exists while printing ===== */
+#preport { display:none; }
+.prev { margin-left:8px; letter-spacing:0; }
+.rchip { display:inline-block; font-size:11px; font-weight:700; padding:1px 8px; border-radius:999px; background:var(--card2); color:var(--fg); border:1px solid var(--line); margin-right:4px; vertical-align:1px; text-transform:none; }
+.rchip.draft { background:color-mix(in srgb, var(--warn) 18%, transparent); color:var(--warn); border-color:color-mix(in srgb, var(--warn) 40%, transparent); }
+.rchip.none { color:var(--dim); font-weight:600; }
+/* publish dialog and revisions list */
+.publv { display:grid; gap:8px; margin:6px 0 12px; }
+.modal .publ, .publ { display:flex !important; flex-direction:row; background:var(--card2); gap:10px; align-items:flex-start; padding:10px 12px; border:1px solid var(--line); border-radius:10px; cursor:pointer; margin:0 !important; }
+.publ:has(input:checked) { border-color:var(--acc); background:color-mix(in srgb, var(--acc) 14%, var(--card2)); }
+.publ input { width:auto !important; margin-top:3px; }
+.publ span { display:flex; flex-direction:column; gap:2px; }
+.publ b { font-size:14px; } .publ em { font-style:normal; font-size:12px; color:var(--dim); }
+.rlist { max-height:55vh; overflow:auto; display:flex; flex-direction:column; gap:6px; }
+.rrow { display:flex; align-items:center; gap:10px; padding:8px 10px; border-radius:10px; background:var(--card2); }
+.rrow.cur { outline:1px solid color-mix(in srgb, var(--ok) 50%, transparent); }
+.rrow .rt { display:flex; flex-direction:column; min-width:0; flex:1; }
+.rrow .rt b { font-size:14px; } .rrow .rt span { font-size:12px; color:var(--dim); overflow:hidden; text-overflow:ellipsis; }
+.rrow .btn.sm, .rrow .chip { flex:none; margin-left:auto; }
+.rautos summary { cursor:pointer; color:var(--dim); font-size:13px; padding:6px 2px; }
+.rautos .rrow { margin-top:6px; }
+@media (max-width:520px) { .rrow { flex-wrap:wrap; } .rrow .btn.sm { margin-left:0; } }
+
+@media print {
+  body.printreport > *:not(#preport) { display:none !important; }
+  body.printreport { background:#fff !important; }
+  body.printreport #preport { display:block; color:#111820; font:11px/1.4 system-ui, -apple-system, "Segoe UI", sans-serif; }
+  @page { size:letter portrait; margin:16mm 13mm 15mm; }
+  @page landscape { size:letter landscape; margin:13mm 12mm; }
+  #preport section { break-before:page; }
+  #preport section:first-of-type { break-before:auto; }
+  #preport h2 { font-size:17px; margin:0 0 10px; padding-bottom:6px; border-bottom:2px solid #111820; letter-spacing:.01em; }
+  #preport h3 { font-size:12.5px; margin:14px 0 6px; text-transform:uppercase; letter-spacing:.08em; color:#2b3440; break-after:avoid; }
+  /* title page */
+  #preport .rcover { height:240mm; display:flex; flex-direction:column; justify-content:center; align-items:flex-start; padding:0 8mm; position:relative; }
+  #preport .rlogo { max-width:62mm; max-height:34mm; object-fit:contain; margin-bottom:12mm; }
+  #preport .rorg { font-size:14px; font-weight:700; color:#2b3440; }
+  #preport .rkick { margin-top:6mm; font-size:11px; font-weight:800; letter-spacing:.2em; text-transform:uppercase; color:#2563d6; }
+  #preport .rcover h1 { font-size:32px; line-height:1.15; margin:2mm 0 2mm; text-transform:none; letter-spacing:0; }
+  #preport .rsub { font-size:13px; color:#4d5866; margin:0; }
+  #preport .rmeta { display:grid; grid-template-columns:32mm 1fr; gap:3mm 6mm; margin-top:14mm; padding-top:6mm; border-top:1px solid #c9d1db; width:100%; font-size:12px; }
+  #preport .rmeta dt { color:#4d5866; font-weight:600; } #preport .rmeta dd { margin:0; font-weight:600; }
+  #preport .rfoot { position:absolute; bottom:0; left:8mm; font-size:9.5px; color:#8a95a3; }
+  /* contents */
+  #preport .rtoc ol { margin:6mm 0 0; padding:0; list-style:none; counter-reset:t; font-size:13px; }
+  #preport .rtoc li { counter-increment:t; padding:3mm 0; border-bottom:1px dotted #c9d1db; }
+  #preport .rtoc li::before { content:counter(t) "."; display:inline-block; width:9mm; font-weight:700; color:#2563d6; }
+  /* the drawing, landscape */
+  #preport .rdraw { page:landscape; }
+  #preport .rsvg { width:100%; height:150mm; display:flex; align-items:center; justify-content:center; }
+  #preport .rsvg svg { width:100% !important; height:100% !important; max-height:150mm; }
+  #preport .rkey { display:flex; flex-wrap:wrap; gap:3mm 6mm; margin-top:4mm; padding-top:3mm; border-top:1px solid #d3dae3; font-size:9.5px; color:#2b3440; }
+  #preport .rkey span { display:inline-flex; align-items:center; gap:5px; }
+  #preport .rkey i { width:10px; height:10px; border-radius:3px; display:inline-block; }
+  /* tables */
+  #preport table.rt { width:100%; border-collapse:collapse; font-size:10px; margin-bottom:4mm; }
+  #preport table.rt thead { display:table-header-group; }
+  #preport table.rt th { text-align:left; font-size:8.5px; text-transform:uppercase; letter-spacing:.06em; color:#4d5866; border-bottom:1.5px solid #111820; padding:4px 6px; }
+  #preport table.rt td { border-bottom:1px solid #e1e6ec; padding:4px 6px; vertical-align:top; }
+  #preport table.rt tr { break-inside:avoid; }
+  #preport table.rt tbody tr:nth-child(even) td { background:#f6f8fa; }
+  #preport .rs { color:#4d5866; font-size:9px; }
+  #preport .rd { color:#b2bac4; }
+  #preport .rnone { color:#4d5866; font-style:italic; }
+  #preport .mono { font-family:ui-monospace, Menlo, monospace; }
+  #preport, #preport * { print-color-adjust:exact; -webkit-print-color-adjust:exact; }
+}
+@media print {
+  #preport .rspare { display:inline-block; margin-left:4px; font-size:7.5px; font-weight:800; letter-spacing:.08em; text-transform:uppercase; color:#4d5866; border:1px solid #c9d1db; border-radius:3px; padding:0 3px; }
+  #preport .rband { display:inline-block; width:7px; height:7px; border-radius:50%; margin-right:4px; vertical-align:0; }
+  #preport .rlv { display:inline-block; font-size:8px; font-weight:800; letter-spacing:.06em; text-transform:uppercase; padding:1px 5px; border-radius:3px; }
+  #preport .rlv.bad { background:#fde2e2; color:#a11c1c; } #preport .rlv.warn { background:#fdf0d5; color:#7a5800; } #preport .rlv.note { background:#e6edf7; color:#2b4a7a; }
+}

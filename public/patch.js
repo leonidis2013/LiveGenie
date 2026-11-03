@@ -14,8 +14,10 @@
 const PatchView = (() => {
   const P = PatchCore;
   // every measure is a multiple of the 10 px grid, so sockets sit on grid lines and cables run straight into them
+  /** A wireless system's mini-cards: MINI wide, RFG of radio line between them and the receiver or transmitter; WLH the label over the box. */
+  const MINI = 150, RFG = 70, SIDE = MINI + RFG, WLH = 24;
   const GRID = 10, CW = 300, HEAD = 50, ROW = 20, FOOT = 10, COLGAP = 100, VGAP = 30, LINKY = 30;
-  const KIND_STYLE = { xlr: 'Analog · XLR', link: 'Digital snake', dante: 'Dante · Cat6', aes: 'AES3', speaker: 'Speaker · NL4', wiem: 'Wired IEM', rf: 'Wireless · RF' };
+  const KIND_STYLE = { xlr: 'Analog · XLR', link: 'Digital snake', dante: 'Dante · Cat6', aes: 'AES3', speaker: 'Speaker · NL4', wiem: 'Wired IEM', rf: 'Wireless · RF', net: 'Network · Cat6' };
   /** A short tag for a make: initials for "X & Y" names, the first word of a long one. */
   const makeTag = (m) => { m = String(m || '').trim(); if (/ & /.test(m)) return m.split(/\s*&\s*/).map((w) => w[0] || '').join('&'); return m.length > 10 ? m.split(/\s+/)[0] : m; };
   const CHW = 7;   // average width of a letter on a card (11.5 px text), for shortening names so they never run into each other
@@ -27,6 +29,12 @@ const PatchView = (() => {
   const COLOR_CSS = { red: '#ef4444', green: '#22c55e', yellow: '#eab308', blue: '#3b82f6', 'light blue': '#38bdf8', 'lt blue': '#38bdf8', cyan: '#06b6d4', purple: '#a855f7', magenta: '#d946ef', pink: '#ec4899', orange: '#f97316', white: '#e5e7eb', black: '#111827', grey: '#9ca3af', gray: '#9ca3af', brown: '#92400e', off: 'transparent' };
   const colorCss = (c) => COLOR_CSS[key(c)] || COLOR_CSS[key(c).replace(/^(dark|light|lt|dk)\s*/, '')] || '#9ca3af';
   const SRC_KINDS = ['mic', 'di', 'source', 'txmic'];
+  /** "RX-1 (SLXD4D)": a tag name with its model, for lists and pickers. */
+  const tm = (g) => (typeof Tags !== 'undefined' ? Tags.withModel(g.name, g.model) : g.name);
+  /** The Gear Locker card behind a piece of gear (null when it has none, or the list is not loaded). */
+  const devOf = (g) => (g && g.device_id && typeof DEV !== 'undefined' && DEV.list ? DEV.list.find((d) => d.id === g.device_id) || null : null);
+  /** Gear with a network socket: switches and computers, anything ticked "On the network" in the Gear Locker, or already cabled. */
+  const hasNet = (doc, g) => g.kind === 'network' || g.kind === 'computer' || !!(devOf(g) || {}).networked || !!P.netOf(doc, g);
 
   // ================= cards =================
   /** Gear drawn as cards: everything except mics and packs that live inside a wireless system. */
@@ -37,12 +45,14 @@ const PatchView = (() => {
   }
 
   /** Lay out one card: which rows it shows, where each socket sits (relative to the card), how tall it is. */
-  function cardModel(doc, ix, g) {
+  function cardModel(doc, ix, g, edit) {
     const k = P.KINDS[g.kind];
     const usedIn = (i) => !!ix.into.get(g.id + ':' + i);
     const usedOut = (j) => !!((ix.from.get(g.id + ':' + j) || []).length || (g.feeds || {})[j]);
     const mem = P.members(doc, g);
-    const memAt = new Map(mem.map((m) => [m.port, m]));
+    const live = mem.filter((m) => !m.g.spare), spares = mem.filter((m) => m.g.spare);
+    const memAt = new Map(live.map((m) => [m.port, m]));
+    const sys = g.kind === 'receiver' || g.kind === 'iemtx', shut = sys && !!g.wlshut;
     const small = g.ins.length + g.outs.length <= 4;
     const open = small || !!g.open;
     const rows = [], inY = {}, outY = {};
@@ -54,14 +64,27 @@ const PatchView = (() => {
         if (!show) { freeIn++; return; }
         rows.push({ in: i, out: i < g.outs.length ? i : null, member: memAt.get(i) || null });
       });
+      // spare mics: a row each under the channels, shown greyed beside the receiver
+      if (g.kind === 'receiver' && !shut) spares.forEach((m) => rows.push({ spare: m }));
     } else {
-      const ins = g.ins.map((_, i) => i).filter((i) => open || usedIn(i));
-      const outs = g.outs.map((_, j) => j).filter((j) => open || usedOut(j));
+      // the radio link of a wireless mic, transmitter or pack is shown by where it sits, not by a socket
+      const ins = g.kind === 'bodypack' ? [] : g.ins.map((_, i) => i).filter((i) => open || usedIn(i));
+      const outs = g.kind === 'iemtx' || g.kind === 'txmic' ? [] : g.outs.map((_, j) => j).filter((j) => open || usedOut(j));
       freeIn = g.ins.length - ins.length; freeOut = g.outs.length - outs.length;
       for (let r = 0; r < Math.max(ins.length, outs.length); r++) rows.push({ in: ins[r] != null ? ins[r] : null, out: outs[r] != null ? outs[r] : null });
     }
-    // an IEM transmitter lists its packs
-    if (g.kind === 'iemtx') mem.forEach((m) => rows.push({ pack: m }));
+    // an IEM transmitter lists its packs (and, while editing, a row to add one)
+    if (g.kind === 'iemtx' && !shut) { mem.forEach((m) => rows.push({ pack: m })); if (edit) rows.push({ addpack: true }); }
+    // a network switch: its ports (the ones in use, or all of them when open)
+    const portY = {};
+    if (g.kind === 'network') {
+      const used = new Map(doc.cables.filter((c) => c.ap === 'net' && c.b === g.id && c.port).map((c) => [c.port, c]));
+      const n = g.nports || 8, showAll = !!g.open || n <= 8;
+      for (let p = 1; p <= n; p++) { if (showAll || used.has(p)) rows.push({ port: p, cable: used.get(p) || null }); else freeIn++; }
+    }
+    // a network socket on anything that is on the network
+    const net = hasNet(doc, g);
+    if (net) rows.push({ net: true });
     // a console lists the stage box channels that reach it over its links
     let slink = [];
     if (g.kind === 'console') {
@@ -74,10 +97,12 @@ const PatchView = (() => {
       slink.sort((a, b) => a.ch - b.ch);
       if (slink.length) { rows.push({ head: (ix.linkName(slink[0].sb.id, g.id) || 'Link') + ' channels' }); slink.forEach((s) => rows.push({ slink: s })); }
     }
-    if (!small && (freeIn || freeOut || g.open)) rows.push({ more: true, freeIn, freeOut });
-    rows.forEach((r, n) => { const y = HEAD + n * ROW + ROW / 2; if (r.in != null && !r.pack) inY[r.in] = y; if (r.out != null) outY[r.out] = y; });
+    if ((!small || g.kind === 'network') && (freeIn || freeOut || (g.open && g.kind !== 'network') || (g.kind === 'network' && g.open && (g.nports || 8) > 8))) rows.push({ more: true, freeIn, freeOut, ports: g.kind === 'network' });
+    let netY = null;
+    rows.forEach((r, n) => { const y = HEAD + n * ROW + ROW / 2; if (r.in != null && !r.pack) inY[r.in] = y; if (r.out != null) outY[r.out] = y; if (r.port) portY[r.port] = y; if (r.net) netY = y; });
     const h = HEAD + rows.length * ROW + (rows.length ? FOOT : 0);
-    return { g, k, rows, inY, outY, w: CW, h: Math.max(HEAD + FOOT, h), mem, link: !!k.link, small };
+    const side = sys && !shut ? (g.kind === 'receiver' ? 'left' : 'right') : null;
+    return { g, k, rows, inY, outY, portY, netY, w: CW, h: Math.max(HEAD + FOOT, h), mem, live, spares, link: !!k.link, small, sys, shut, side, ox: side === 'left' ? -SIDE - 8 : -8, ow: CW + (side ? SIDE : 0) + 16 };
   }
 
   // ================= placing cards =================
@@ -101,78 +126,99 @@ const PatchView = (() => {
       const ranked = col.map((g, n) => ({ g, n, f: feedY(g) }));
       ranked.sort((a, b) => (a.f == null) - (b.f == null) || (a.f || 0) - (b.f || 0) || (a.g.order || 0) - (b.g.order || 0) || a.n - b.n);
       let y = 0;
-      ranked.forEach(({ g }) => { pos.set(g.id, { x, y }); y = snap(y + models.get(g.id).h + VGAP); });
+      ranked.forEach(({ g }) => { const o = outer(models.get(g.id), { x: 0, y: 0 }); pos.set(g.id, { x, y: y - o.y }); y = snap(y + o.h + VGAP); });
       x += CW + COLGAP;
     }
     return pos;
   }
   /**
-   * Auto-arrange: a one-time layout of the whole drawing by signal flow. Each card goes one column right of the
-   * furthest card that feeds it (sources first, speakers last); within a column, cards line up with what feeds them,
-   * with a few passes to untangle the cables. Gear with no cables goes by its type.
+   * Auto-arrange: a one-time layout of the whole drawing in the order sound travels, left to right:
+   * sources (mics, receivers) → stage I/O → console → processing → amps → outputs (speakers, wedges, in-ears).
+   * A card never leaves its stage; cables only decide the order within a stage (each card near what it connects to,
+   * a few passes to untangle). Loops (a stage box that feeds the console and is fed by it) do not matter.
+   * Network gear (switches, computers) gets a lane under the signal flow; gear with no cables goes in a
+   * "Not connected" row along the bottom.
    */
   function autoArrange(doc) {
     const ix = P.index(doc);
-    const models = new Map(cardGear(doc).map((g) => [g.id, cardModel(doc, ix, g)]));
+    const list = cardGear(doc);
+    const models = new Map(list.map((g) => [g.id, cardModel(doc, ix, g)]));
     const ids = [...models.keys()];
-    const succ = new Map(ids.map((id) => [id, new Set()])), pred = new Map(ids.map((id) => [id, new Set()]));
-    const edge = (a, b) => { if (a === b || !succ.has(a) || !succ.has(b)) return; succ.get(a).add(b); pred.get(b).add(a); };
+    const nb = new Map(ids.map((id) => [id, new Set()]));
+    const cardIdOf = (id) => { const g = ix.G.get(id); const h = g && P.hostOf(doc, g); return h ? h.id : id; };
+    const wired = new Set();
     for (const c of doc.cables) {
-      const ha = P.hostOf(doc, ix.G.get(c.a) || {}), hb = P.hostOf(doc, ix.G.get(c.b) || {});
-      const a = ha ? ha.id : c.a, b = hb ? hb.id : c.b;
-      if (c.ap === 'link' || c.bp === 'link') {
-        // links run toward the console: stage box → (network) → console
-        const ga = ix.G.get(a), gb = ix.G.get(b);
-        if (!ga || !gb) continue;
-        const rank = (g) => ({ stagebox: 0, network: 1, computer: 2, console: 3 }[g.kind] != null ? { stagebox: 0, network: 1, computer: 2, console: 3 }[g.kind] : 1);
-        if (rank(ga) <= rank(gb)) edge(a, b); else edge(b, a);
-      } else edge(a, b);
+      const a = cardIdOf(c.a), b = cardIdOf(c.b);
+      if (a === b || !nb.has(a) || !nb.has(b)) continue;      // a mic inside its receiver
+      nb.get(a).add(b); nb.get(b).add(a); wired.add(a); wired.add(b);
     }
-    // columns: longest path from the start (cycles are cut where they close)
-    const layer = new Map(), state = new Map();
-    const visit = (id) => {
-      if (state.get(id) === 2) return layer.get(id);
-      if (state.get(id) === 1) return -1;              // a loop: ignore that cable
-      state.set(id, 1);
-      let l = 0;
-      pred.get(id).forEach((p) => { const pl = visit(p); if (pl >= 0) l = Math.max(l, pl + 1); });
-      state.set(id, 2); layer.set(id, l);
-      return l;
+    const stage = (id) => P.stageOf(models.get(id).g);
+    const loose = ids.filter((id) => !wired.has(id));
+    const netIds = ids.filter((id) => wired.has(id) && stage(id) === 'net');
+    const flow = ids.filter((id) => wired.has(id) && stage(id) !== 'net');
+    const used = [...new Set(flow.map(stage))].sort((a, b) => a - b);
+    const cols = used.map((st0) => flow.filter((id) => stage(id) === st0));
+    const kindRank = (id) => P.KIND_ORDER.indexOf(models.get(id).g.kind);
+    cols.forEach((col) => col.sort((a, b) => kindRank(a) - kindRank(b) || (models.get(a).g.order || 0) - (models.get(b).g.order || 0)));
+    // order within a stage: next to what it connects to in the stages either side
+    const colOf = new Map(); cols.forEach((col, ci) => col.forEach((id) => colOf.set(id, ci)));
+    const rank = new Map(); const setRank = () => cols.forEach((col) => col.forEach((id, i) => rank.set(id, i)));
+    setRank();
+    const bary = (id, side) => {
+      const l = [...nb.get(id)].filter((x) => colOf.has(x) && (side < 0 ? colOf.get(x) < colOf.get(id) : colOf.get(x) > colOf.get(id))).map((x) => rank.get(x));
+      return l.length ? l.reduce((s1, v) => s1 + v, 0) / l.length : null;
     };
-    ids.forEach(visit);
-    const maxL = Math.max(0, ...layer.values());
-    // gear with no cables at all: placed by type across the same columns
-    ids.forEach((id) => { if (!pred.get(id).size && !succ.get(id).size) layer.set(id, Math.round(P.colOf(models.get(id).g) / 7 * Math.max(maxL, 3))); });
-    // a source column pulled right next to what it feeds (a mic feeding the stage box sits just left of it)
-    for (let pass = 0; pass < 3; pass++) ids.forEach((id) => { const s2 = [...succ.get(id)]; if (s2.length && pred.get(id).size === 0) layer.set(id, Math.max(layer.get(id), Math.min(...s2.map((x) => layer.get(x))) - 1)); });
-    const cols = new Map();
-    ids.forEach((id) => { const l = layer.get(id); if (!cols.has(l)) cols.set(l, []); cols.get(l).push(id); });
-    const keys = [...cols.keys()].sort((a, b) => a - b);
-    // order within columns: barycentre sweeps, left to right then back
-    const pos = new Map();
-    keys.forEach((k) => cols.get(k).sort((a, b) => (P.colOf(models.get(a).g) - P.colOf(models.get(b).g)) || ((models.get(a).g.order || 0) - (models.get(b).g.order || 0))).forEach((id, i) => pos.set(id, i)));
-    const bary = (id, nb) => { const l = [...nb.get(id)].map((x) => pos.get(x)).filter((v) => v != null); return l.length ? l.reduce((s1, v) => s1 + v, 0) / l.length : pos.get(id); };
-    for (let sweep = 0; sweep < 6; sweep++) {
-      const seq = sweep % 2 ? keys.slice().reverse() : keys;
-      seq.forEach((k) => { const col = cols.get(k); const nb = sweep % 2 ? succ : pred; col.sort((a, b) => bary(a, nb) - bary(b, nb)); col.forEach((id, i) => pos.set(id, i)); });
-    }
-    // places: columns left to right; each card as close to the height of what feeds it as the column allows
-    const out = new Map();
-    let x = 0;
-    keys.forEach((k) => {
-      let y = 0;
-      cols.get(k).forEach((id) => {
-        const m = models.get(id);
-        const ps = [...pred.get(id)].filter((p) => out.has(p)).map((p) => out.get(p).y);
-        const want = ps.length ? ps.reduce((s1, v) => s1 + v, 0) / ps.length : 0;
-        const yy = snap(Math.max(y, want));
-        out.set(id, { x, y: yy });
-        y = snap(yy + m.h + VGAP);
+    for (let sweep = 0; sweep < 8; sweep++) {
+      const side = sweep % 2 ? 1 : -1;
+      const seq = side < 0 ? cols.map((_, i) => i) : cols.map((_, i) => cols.length - 1 - i);
+      seq.forEach((ci) => {
+        const col = cols[ci];
+        const keyOf = new Map(col.map((id, i) => { const b = bary(id, side); return [id, b == null ? i : b]; }));
+        col.sort((a, b) => keyOf.get(a) - keyOf.get(b) || rank.get(a) - rank.get(b));
+        col.forEach((id, i) => rank.set(id, i));
       });
-      x += CW + COLGAP + 20;
+    }
+    // places: each card level with what feeds it from the left, as far as its column allows
+    const out = new Map();
+    const STEP = CW + COLGAP + 20;
+    cols.forEach((col, ci) => {
+      let y = 0;
+      col.forEach((id) => {
+        const m = models.get(id);
+        const ps = [...nb.get(id)].filter((p) => out.has(p) && colOf.get(p) < ci).map((p) => out.get(p).y);
+        const want = ps.length ? ps.reduce((s1, v) => s1 + v, 0) / ps.length : 0;
+        const o = outer(m, { x: 0, y: 0 });
+        const yy = snap(Math.max(y - o.y, want));
+        out.set(id, { x: ci * STEP, y: yy });
+        y = snap(yy + o.y + o.h + VGAP);
+      });
     });
+    const bottom = () => Math.max(0, ...[...out.entries()].map(([id, p]) => { const o = outer(models.get(id), p); return o.y + o.h; }));
+    // the network lane: under the flow, from the console's column on
+    const row = (list, y0, x0) => {
+      const perRow = Math.max(2, cols.length || 4);
+      let x = x0, y = y0, h = 0, n = 0;
+      list.forEach((id) => {
+        const m = models.get(id);
+        const o = outer(m, { x: 0, y: 0 });
+        if (n && n % perRow === 0) { x = x0; y = snap(y + h + VGAP); h = 0; }
+        out.set(id, { x: x - o.x - 8, y: y - o.y }); x += Math.max(STEP, snap(o.w + COLGAP)); h = Math.max(h, o.h); n++;
+      });
+      return list.length ? y + h : y0;
+    };
+    if (netIds.length) {
+      const ci = used.indexOf(2);
+      row(netIds.sort((a, b) => kindRank(a) - kindRank(b)), snap(bottom() + 90), Math.max(0, ci) * STEP);
+    }
+    // gear with no cables: a row along the bottom, in stage order
+    if (loose.length) {
+      const order = (id) => { const s0 = stage(id); return s0 === 'net' ? 6 : s0; };
+      row(loose.sort((a, b) => order(a) - order(b) || kindRank(a) - kindRank(b) || (models.get(a).g.order || 0) - (models.get(b).g.order || 0)), snap((out.size ? bottom() : 0) + (out.size ? 110 : 0)), 0);
+    }
     return out;
   }
+  /** The space a card takes, with its wireless system box (mini-cards to the left of a receiver, to the right of an in-ear transmitter). */
+  const outer = (m, p) => { p = p || m.g; return m.sys ? { x: p.x + m.ox, y: p.y - WLH, w: m.ow, h: m.h + WLH + 6 } : { x: p.x, y: p.y, w: m.w, h: m.h }; };
   const overlaps = (a, b, m) => a.x < b.x + b.w + m && b.x < a.x + a.w + m && a.y < b.y + b.h + m && b.y < a.y + a.h + m;
   /** A free spot near (x, y): slide down until the card does not sit on another. */
   function freeSpot(rects, w, h, x, y) {
@@ -186,21 +232,22 @@ const PatchView = (() => {
     return { x, y };
   }
   /** Give every card a place: missing places come from Tidy (all of them on a new drawing). */
-  function place(doc) {
+  function place(doc, edit) {
     const ix = P.index(doc);
-    const models = new Map(cardGear(doc).map((g) => [g.id, cardModel(doc, ix, g)]));
+    const models = new Map(cardGear(doc).map((g) => [g.id, cardModel(doc, ix, g, edit)]));
     const missing = [...models.values()].filter((m) => m.g.x == null || m.g.y == null);
     if (missing.length) {
       const tidy = tidyPositions(doc, ix, models);
       if (missing.length === models.size) missing.forEach((m) => { const p = tidy.get(m.g.id); m.g.x = p.x; m.g.y = p.y; });
       else {
-        const placed = [...models.values()].filter((m) => m.g.x != null && m.g.y != null).map((m) => ({ x: m.g.x, y: m.g.y, w: m.w, h: m.h }));
+        const placed = [...models.values()].filter((m) => m.g.x != null && m.g.y != null).map((m) => outer(m));
         // its Tidy column, next to cards of the same kind if there are some
         missing.forEach((m) => {
           const same = [...models.values()].find((o) => o !== m && o.g.x != null && P.colOf(o.g) === P.colOf(m.g));
           const tp = tidy.get(m.g.id);
-          const p = freeSpot(placed, m.w, m.h, same ? same.g.x : tp.x, same ? same.g.y : tp.y);
-          m.g.x = p.x; m.g.y = p.y; placed.push({ x: p.x, y: p.y, w: m.w, h: m.h });
+          const o = outer(m, { x: 0, y: 0 });
+          const p = freeSpot(placed, o.w, o.h, (same ? same.g.x : tp.x) + o.x, (same ? same.g.y : tp.y) + o.y);
+          m.g.x = p.x - o.x; m.g.y = p.y - o.y; placed.push(outer(m));
         });
       }
     }
@@ -321,6 +368,11 @@ const PatchView = (() => {
     for (const c of doc.cables) {
       const ma = models.get(c.a), mb = models.get(c.b);
       if (!ma || !mb) continue;           // a member's radio link stays inside its card
+      if (c.ap === 'net') {
+        if (ma.netY == null) continue;
+        list.push({ id: c.id, c, net: true, ma, mb, kind: 'net', label: c.label || '' });
+        continue;
+      }
       if (c.ap === 'link' || c.bp === 'link') {
         const a = ma.g, b = mb.g;
         const sb = a.kind === 'stagebox' ? a : b.kind === 'stagebox' ? b : null;
@@ -342,6 +394,11 @@ const PatchView = (() => {
   /** Where a cable starts and ends, and which way it leaves and arrives. */
   function ends(e, pos) {
     const A = pos(e.ma.g), B = pos(e.mb.g);
+    if (e.net) {
+      // out of the gear's network socket (right side) into the switch port (left side)
+      const py = e.c.port && e.mb.portY[e.c.port] != null ? e.mb.portY[e.c.port] : LINKY;
+      return { s: { x: A.x + CW, y: A.y + e.ma.netY }, sd: [1, 0], e: { x: B.x, y: B.y + py }, ed: [-1, 0] };
+    }
     if (e.link) {
       const right = A.x + CW / 2 <= B.x + CW / 2;
       return { s: { x: right ? A.x + CW : A.x, y: A.y + LINKY }, sd: [right ? 1 : -1, 0], e: { x: right ? B.x : B.x + CW, y: B.y + LINKY }, ed: [right ? -1 : 1, 0] };
@@ -351,13 +408,13 @@ const PatchView = (() => {
 
   /** Route every cable. cache: earlier routes, reused for cables whose ends did not move (keep = ids that may be reused). */
   function routeAll(E, models, pos, cache, keep) {
-    const rects = [...models.values()].map((m) => { const p = pos(m.g); return { x: p.x, y: p.y, w: m.w, h: m.h }; });
+    const rects = [...models.values()].map((m) => outer(m, pos(m.g)));
     if (!rects.length) return new Map();
     const b = { x0: Math.min(...rects.map((r) => r.x)) - 160, y0: Math.min(...rects.map((r) => r.y)) - 120, x1: Math.max(...rects.map((r) => r.x + r.w)) + 160, y1: Math.max(...rects.map((r) => r.y + r.h)) + 120 };
     const R = makeRouter(rects, b);
     const out = new Map();
     // links first (they are the thick ones), then the rest from top to bottom
-    const order = E.slice().sort((p, q) => (q.link - p.link) || (pos(p.ma.g).y + (p.ma.outY[p.c.ap] || 0)) - (pos(q.ma.g).y + (q.ma.outY[q.c.ap] || 0)));
+    const order = E.slice().sort((p, q) => (!!q.link - !!p.link) || (pos(p.ma.g).y + (p.ma.outY[p.c.ap] || 0)) - (pos(q.ma.g).y + (q.ma.outY[q.c.ap] || 0)));
     for (const e of order) {
       const en = ends(e, pos);
       const sig = [en.s.x, en.s.y, en.e.x, en.e.y].join(',');
@@ -395,10 +452,10 @@ const PatchView = (() => {
     switch (g.kind) {
       case 'mic': case 'di': case 'source': case 'wedge': return [who(g), g.model].filter(Boolean).join(' · ');
       case 'txmic': return [who(g), g.capsule, g.freq && g.freq + ' MHz'].filter(Boolean).join(' · ');
-      case 'receiver': return [g.model, m.mem.length + ' of ' + g.ins.length + ' ch in use'].filter(Boolean).join(' · ');
+      case 'receiver': return [g.model, m.shut ? m.live.length + ' mic' + (m.live.length === 1 ? '' : 's') + (m.spares.length ? ' + ' + m.spares.length + ' spare' : '') : m.live.length + ' of ' + g.ins.length + ' ch in use'].filter(Boolean).join(' · ');
       case 'stagebox': return usedIns + ' of ' + g.ins.length + ' in · ' + usedOuts + ' of ' + g.outs.length + ' out';
       case 'console': return [g.model, usedIns ? usedIns + ' local in' : '', usedOuts ? usedOuts + ' local out' : ''].filter(Boolean).join(' · ');
-      case 'iemtx': { const ie = P.inears(doc).find((x) => x.tx.id === g.id); return [g.mode, ie && ie.mix, g.freq && g.freq + ' MHz'].filter(Boolean).join(' · '); }
+      case 'iemtx': { const ie = P.inears(doc).find((x) => x.tx.id === g.id); return [g.mode, ie && ie.mix, g.freq && g.freq + ' MHz', m.shut ? m.live.length + ' pack' + (m.live.length === 1 ? '' : 's') : ''].filter(Boolean).join(' · '); }
       case 'bodypack': return [who(g), g.phones].filter(Boolean).join(' · ');
       default: return [who(g), g.model].filter(Boolean).join(' · ');
     }
@@ -410,13 +467,82 @@ const PatchView = (() => {
       '<pattern id="pgrid" width="20" height="20" patternUnits="userSpaceOnUse"><circle cx="0" cy="0" r="1.1" class="gdot"/></pattern></defs>';
   }
 
+  /** The key's sample for wireless systems: a dashed box with a radio line. */
+  const WL_KEY = '<svg width="30" height="12" class="wkey"><rect x="1" y="1" width="28" height="10" rx="3"/><path d="M6 6h18"/></svg>';
+  /** The dashed box round a wireless system, with its label and the fold toggle. */
+  function sysBox(doc, m, p) {
+    if (!m.sys) return '';
+    const g = m.g, o = outer(m, p);
+    const n = m.live.length, sp = m.spares.length;
+    const t = tm(g) + ' · ' + (g.kind === 'receiver' ? n + ' of ' + g.ins.length + ' in use' : n + ' pack' + (n === 1 ? '' : 's')) + (sp ? ' · ' + sp + ' spare' : '');
+    return '<g class="wbox"><rect class="wb" x="' + o.x + '" y="' + o.y + '" width="' + o.w + '" height="' + o.h + '" rx="14"/>' +
+      '<text class="wl" x="' + (o.x + 12) + '" y="' + (o.y + 15) + '">' + esc(cut(t, Math.floor((o.w - 60) / CHW))) + '</text>' +
+      '<g class="wlt" data-wl="' + g.id + '"><rect x="' + (o.x + o.w - 34) + '" y="' + (o.y + 3) + '" width="26" height="16" rx="5"/><text x="' + (o.x + o.w - 21) + '" y="' + (o.y + 15) + '" text-anchor="middle">' + (m.shut ? '▸' : '▾') + '</text><title>' + (m.shut ? 'Show the ' + (g.kind === 'receiver' ? 'mics' : 'packs') : 'Fold to just the ' + (g.kind === 'receiver' ? 'receiver' : 'transmitter')) + '</title></g></g>';
+  }
+  /** A mic or pack inside a wireless system: a small card, and its radio line (antenna, frequency, band dot) to the receiver or transmitter. */
+  function mini(doc, m, g, mx, ry, side, spare) {
+    const host = m.g, fq = P.mhz(g.freq) != null ? g.freq : (g.kind === 'bodypack' ? host.freq : '');
+    const f = P.mhz(fq);
+    const mix = g.kind === 'bodypack' ? ((P.inears(doc).find((x) => x.tx.id === host.id) || {}).mix || '') : '';
+    const t = [g.name, g.person || g.use, mix].filter(Boolean).join(' · ');
+    // the radio line: from the mini-card to the card edge
+    const lx1 = side === 'left' ? mx + MINI : mx - RFG, lx2 = side === 'left' ? mx + SIDE : mx;
+    const ax = side === 'left' ? mx + MINI + 6 : lx1 + 6;
+    let s = '<g class="wrf' + (spare ? ' spare' : '') + '"><path class="wln" d="M' + lx1 + ' ' + ry + 'H' + lx2 + '"/>' +
+      '<path class="wan" d="M' + ax + ' ' + (ry - 8) + 'v8M' + (ax - 4) + ' ' + (ry - 8) + 'l4 4 4-4"/>' +
+      (f != null ? '<circle class="wbd" cx="' + ((lx1 + lx2) / 2 + 22) + '" cy="' + (ry - 7) + '" r="3.5" fill="' + P.bandColor(f) + '"><title>TV channel band ' + P.band(f) * 6 + '–' + (P.band(f) * 6 + 6) + ' MHz</title></circle><text class="wfq" x="' + ((lx1 + lx2) / 2 + 14) + '" y="' + (ry - 4) + '" text-anchor="end">' + esc(String(fq).replace(/\s*mhz/i, '')) + '</text>' : '') + '</g>';
+    s += '<g class="crow mem wmini' + (spare ? ' spare' : '') + '" data-mem="' + g.id + '"><rect class="mbg" x="' + mx + '" y="' + (ry - 9) + '" width="' + MINI + '" height="18" rx="5"/>' +
+      '<text x="' + (mx + 8) + '" y="' + (ry + 4) + '">' + esc(cut(t, Math.floor((MINI - (spare ? 52 : 16)) / CHW))) + '</text>' +
+      (spare ? '<text class="wsp" x="' + (mx + MINI - 6) + '" y="' + (ry + 4) + '" text-anchor="end">SPARE</text>' : '') +
+      '<title>' + esc([tm(g), g.person || g.use, mix, g.capsule, fq && fq + ' MHz', spare ? 'spare' : ''].filter(Boolean).join(' · ')) + '</title></g>';
+    return s;
+  }
+  /**
+   * What each cable does, for its name (Tags.cableName): 'in' when it ends on a stage box or console input (at: the box's letter,
+   * L / M for a console's local inputs; input: the socket number; back: how many cables further up the chain), 'lnk' for SLink, Dante
+   * and other digital links, 'net' for network, 'spk' for amp to speaker, 'out' for the rest. Returns Map cable id → info.
+   */
+  function cableInfos(doc) {
+    const ix = P.index(doc), G = ix.G, out = new Map();
+    const byPos = (a, b) => (a.x || 0) - (b.x || 0) || (a.y || 0) - (b.y || 0) || (a.order || 0) - (b.order || 0);
+    // stage box letters: from the tag (SB-A → A), else A, B, C… in drawing order
+    const letter = new Map(), usedL = new Set();
+    const boxes = doc.gear.filter((g) => g.kind === 'stagebox').sort(byPos);
+    boxes.forEach((g) => { const m = /^SB[\s-]?([A-Z])\b/i.exec(g.name || ''); if (m) { letter.set(g.id, m[1].toUpperCase()); usedL.add(m[1].toUpperCase()); } });
+    let li = 0;
+    boxes.forEach((g) => { if (letter.has(g.id)) return; while (usedL.has(String.fromCharCode(65 + li)) || 'LM'.includes(String.fromCharCode(65 + li))) li++; const L = String.fromCharCode(65 + li); letter.set(g.id, L); usedL.add(L); });
+    // a console's local inputs: L for the first, M for the second…
+    doc.gear.filter((g) => g.kind === 'console').sort(byPos).forEach((g, i) => letter.set(g.id, String.fromCharCode(76 + i)));
+    const DIGITAL = ['link', 'dante', 'aes'];
+    for (const c of doc.cables) {
+      if (c.kind === 'rf') continue;
+      const a = G.get(c.a), b = G.get(c.b);
+      if (!a || !b) continue;
+      if (c.ap === 'net') { out.set(c.id, { type: 'net' }); continue; }
+      if (c.ap === 'link' || c.bp === 'link' || DIGITAL.includes(c.kind)) { out.set(c.id, { type: 'lnk' }); continue; }
+      // follow the signal down to a stage box or console input
+      let cur = c, back = 0, info = null;
+      for (let n = 0; n < 8 && cur; n++) {
+        const B = G.get(cur.b);
+        if (!B) break;
+        if ((B.kind === 'stagebox' || B.kind === 'console') && cur.bp !== 'link') { info = { type: 'in', at: letter.get(B.id), input: Number(cur.bp) + 1, back }; break; }
+        const k = P.KINDS[B.kind] || {};
+        if (B.kind === 'amp' || B.kind === 'processor' || B.kind === 'speaker' || B.kind === 'wedge' || B.kind === 'iemtx' || B.kind === 'headamp') break;
+        const nexts = k.pass === 'same' ? (ix.from.get(B.id + ':' + cur.bp) || []) : B.outs.flatMap((_, j) => ix.from.get(B.id + ':' + j) || []);
+        cur = nexts[0]; back++;
+      }
+      if (info) { out.set(c.id, info); continue; }
+      out.set(c.id, { type: a.kind === 'amp' && (b.kind === 'speaker' || b.kind === 'wedge') ? 'spk' : 'out' });
+    }
+    return out;
+  }
   function cardSvg(doc, ix, m, p, opts) {
     const g = m.g, cat = (P.KINDS[g.kind] || P.KINDS.other).cat;
     const x = p.x, y = p.y, w = m.w, h = m.h;
     const sub = cardSub(doc, ix, m);
     const chars = Math.floor(w / 8.6);
     const mk = g.make ? cut(makeTag(g.make).toUpperCase(), 10) : '';
-    let s = '<g class="pcard cat-' + cat + '" data-g="' + g.id + '"' + (m.mem.length ? ' data-m="' + m.mem.map((x) => x.g.id).join(',') + '"' : '') + '>' +
+    let s = '<g class="pcard cat-' + cat + (m.sys ? ' wsys' : '') + '" data-g="' + g.id + '"' + (m.mem.length ? ' data-m="' + m.mem.map((x) => x.g.id).join(',') + '"' : '') + '>' + sysBox(doc, m, p) +
       '<rect class="cbg" x="' + x + '" y="' + y + '" width="' + w + '" height="' + h + '" rx="10"/>' +
       '<rect class="cgl" x="' + x + '" y="' + y + '" width="' + w + '" height="' + h + '" rx="10" fill="url(#pg-' + cat + ')"/>' +
       '<rect class="cbd" x="' + x + '" y="' + y + '" width="' + w + '" height="' + h + '" rx="10"/>' +
@@ -430,7 +556,7 @@ const PatchView = (() => {
     m.rows.forEach((r, n) => {
       const ry = y + HEAD + n * ROW + ROW / 2;
       if (r.more) {
-        const t = r.freeIn || r.freeOut ? '+ ' + [r.freeIn ? r.freeIn + ' free in' : '', r.freeOut ? r.freeOut + ' free out' : ''].filter(Boolean).join(' · ') + '  ▾' : 'Show used only  ▴';
+        const t = r.freeIn || r.freeOut ? '+ ' + [r.freeIn ? r.freeIn + (r.ports ? ' free port' + (r.freeIn === 1 ? '' : 's') : ' free in') : '', r.freeOut ? r.freeOut + ' free out' : ''].filter(Boolean).join(' · ') + '  ▾' : 'Show used only  ▴';
         s += '<g class="cmore" data-open="' + g.id + '"><rect x="' + (x + 6) + '" y="' + (ry - 9) + '" width="' + (w - 12) + '" height="18" rx="5"/><text x="' + (x + w / 2) + '" y="' + (ry + 4) + '" text-anchor="middle">' + esc(t) + '</text></g>';
         return;
       }
@@ -443,15 +569,45 @@ const PatchView = (() => {
         return;
       }
       if (r.pack) {
+        // a pack on an in-ear transmitter: a mini-card on the right, "IEM-1 · Kyle · Mix 3", the frequency on its radio line
         const pg = r.pack.g;
-        s += '<g class="crow mem" data-mem="' + pg.id + '"><rect class="mbg" x="' + (x + 6) + '" y="' + (ry - 9) + '" width="' + (w - 12) + '" height="18" rx="5"/><text x="' + (x + 14) + '" y="' + (ry + 4) + '"><tspan class="pn">Pack</tspan> ' + esc(cut([pg.person || pg.use || pg.name, pg.person && pg.use ? pg.use : '', pg.phones].filter(Boolean).join(' · '), Math.floor((w - 50) / CHW))) + '</text><title>' + esc(pg.name) + '</title></g>';
+        s += '<text class="crx" x="' + (x + w - 12) + '" y="' + (ry + 4) + '" text-anchor="end">' + (pg.spare ? 'Spare pack' : 'Pack') + '</text>';
+        s += mini(doc, m, pg, x + w + RFG, ry, 'right', pg.spare);
         return;
       }
-      if (r.member) {
-        // a receiver channel with its mic
+      if (r.addpack) {
+        s += '<g class="cadd wslot" data-addpk="' + g.id + '"><rect x="' + (x + w + RFG) + '" y="' + (ry - 9) + '" width="' + MINI + '" height="18" rx="5"/><text x="' + (x + w + RFG + 10) + '" y="' + (ry + 4) + '">+ pack</text><title>Add a pack to ' + esc(g.name) + '</title></g>';
+        return;
+      }
+      if (r.port) {
+        // a switch port, and what plugs into it
+        const c = r.cable, a = c && ix.G.get(c.a);
+        s += '<g class="sk in netp' + (c ? ' used' : '') + '" data-g="' + g.id + '" data-net="' + r.port + '"><rect class="hitc" x="' + (x - 9) + '" y="' + (ry - 9) + '" width="18" height="18"/><rect class="dot" x="' + (x - 4.5) + '" y="' + (ry - 4.5) + '" width="9" height="9" rx="2"/><text x="' + (x + 10) + '" y="' + (ry + 4) + '"><tspan class="pn">Port ' + r.port + '</tspan>' + (a ? ' ' + esc(cut(a.name, Math.floor((w - 70) / CHW))) : '') + '</text><title>' + esc(g.name + ' port ' + r.port + (a ? ': ' + a.name : ' (free)')) + '</title></g>';
+        return;
+      }
+      if (r.net) {
+        // the network socket: where it plugs in (switch and port)
+        const c = P.netOf(doc, g), b = c && ix.G.get(c.b);
+        const t = b ? b.name + (c.port ? ' port ' + c.port : '') : '';
+        s += '<g class="sk out netp' + (c ? ' used' : '') + '" data-g="' + g.id + '" data-p="net"><rect class="hitc" x="' + (x + w - 9) + '" y="' + (ry - 9) + '" width="18" height="18"/><rect class="dot" x="' + (x + w - 4.5) + '" y="' + (ry - 4.5) + '" width="9" height="9" rx="2"/><text x="' + (x + w - 10) + '" y="' + (ry + 4) + '" text-anchor="end">' + (t ? esc(cut(t, Math.floor((w - 60) / CHW))) + ' ' : '') + '<tspan class="pn">Net</tspan></text><title>' + esc(g.name + ' network' + (t ? ': ' + t : ': drag to a switch')) + '</title></g>';
+        return;
+      }
+      if (r.spare) {
+        // a spare mic: greyed, beside the receiver, with the channel it sits on
+        const sg = r.spare.g;
+        s += '<text class="chd" x="' + (x + 12) + '" y="' + (ry + 4) + '">SPARE · ' + esc(g.ins[r.spare.port] || '') + '</text>';
+        if (m.side) s += mini(doc, m, sg, x - SIDE, ry, 'left', true);
+        return;
+      }
+      if (r.member || (g.kind === 'receiver' && m.side && r.in != null)) {
+        // a receiver channel: its name in the card, its mic as a mini-card on the left (or a slot to add one)
+        const tg = r.member && r.member.g;
+        s += '<text class="crx" x="' + (x + 12) + '" y="' + (ry + 4) + '"><tspan class="pn">' + esc(g.ins[r.in]) + '</tspan>' + (tg && !m.side ? ' ' + esc(cut(tm(tg), 18)) : '') + '</text>';
+        if (m.side && tg) s += mini(doc, m, tg, x - SIDE, ry, 'left');
+        else if (m.side && opts.edit) s += '<g class="cadd wslot" data-addtx="' + g.id + ':' + r.in + '"><rect x="' + (x - SIDE) + '" y="' + (ry - 9) + '" width="' + MINI + '" height="18" rx="5"/><text x="' + (x - SIDE + 10) + '" y="' + (ry + 4) + '">+ mic</text><title>Put a wireless mic on ' + esc(g.ins[r.in]) + '</title></g>';
+      } else if (r.member) {
         const tg = r.member.g;
-        const t = [tg.person || tg.use || tg.name, tg.txtype, tg.capsule || tg.model, tg.freq].filter(Boolean).join(' · ');
-        s += '<g class="crow mem" data-mem="' + tg.id + '"><rect class="mbg" x="' + (x + 6) + '" y="' + (ry - 9) + '" width="' + (half + 30) + '" height="18" rx="5"/><text x="' + (x + 12) + '" y="' + (ry + 4) + '"><tspan class="pn">' + esc(g.ins[r.in]) + '</tspan> ' + esc(cut(t, Math.floor((half + 6) / CHW) - g.ins[r.in].length)) + '</text><title>' + esc(tg.name + (t ? ': ' + t : '')) + '</title></g>';
+        s += '<text class="crx" x="' + (x + 12) + '" y="' + (ry + 4) + '"><tspan class="pn">' + esc(g.ins[r.in]) + '</tspan> ' + esc(cut(tm(tg), 18)) + '</text>';
       } else if (r.in != null) {
         const t = socketText(doc, ix, g, 'in', r.in);
         const used = !!ix.into.get(g.id + ':' + r.in);
@@ -480,7 +636,7 @@ const PatchView = (() => {
    * Returns { svg, bbox, routes, models, ix, E }.
    */
   function draw(doc, view) {
-    const { ix, models } = place(doc);
+    const { ix, models } = place(doc, view.edit);
     const drag = view.drag;
     const pos = (g) => (drag && drag.ids.has(g.id) ? { x: g.x + drag.dx, y: g.y + drag.dy } : { x: g.x, y: g.y });
     const E = edges(doc, ix, models);
@@ -489,7 +645,7 @@ const PatchView = (() => {
     // lines, with hops over the vertical runs of lines drawn before them
     let lines = '', labels = '';
     const verts = [];
-    const order = E.slice().sort((p, q) => (q.link - p.link));
+    const order = E.slice().sort((p, q) => (!!q.link - !!p.link));
     order.forEach((e) => {
       const r = routes.get(e.id); if (!r) return;
       const pts = r.pts;
@@ -513,18 +669,23 @@ const PatchView = (() => {
     let cards = '';
     const all = [...models.values()];
     all.forEach((m) => { cards += cardSvg(doc, ix, m, pos(m.g), view); });
-    const rects = all.map((m) => { const p = pos(m.g); return { x: p.x, y: p.y, w: m.w, h: m.h }; });
+    const rects = all.map((m) => outer(m, pos(m.g)));
     const bbox = rects.length ? { x0: Math.min(...rects.map((r) => r.x)) - 30, y0: Math.min(...rects.map((r) => r.y)) - 30, x1: Math.max(...rects.map((r) => r.x + r.w)) + 30, y1: Math.max(...rects.map((r) => r.y + r.h)) + 30 } : { x0: 0, y0: 0, x1: 640, y1: 320 };
-    // the key, under the drawing
-    const ky = bbox.y1 + 26, kx = bbox.x0 + 4;
-    let keyHtml = '<g class="pkey"><text class="kh" x="' + kx + '" y="' + ky + '">KEY</text>';
-    Object.entries(P.CATS).forEach(([, v], i) => { const x = kx + (i % 4) * 150, y = ky + 22 + Math.floor(i / 4) * 22; keyHtml += '<rect x="' + x + '" y="' + (y - 11) + '" width="16" height="14" rx="3" fill="' + v.color + '" opacity=".75"/><text x="' + (x + 24) + '" y="' + y + '">' + esc(v.label) + '</text>'; });
-    Object.entries(KIND_STYLE).forEach(([k, v], i) => { const x = kx + (i % 4) * 150, y = ky + 78 + Math.floor(i / 4) * 22; keyHtml += '<g class="pe pe-' + k + '"><path class="ln" d="M' + x + ' ' + (y - 4) + 'h28" marker-end="url(#pa-' + k + ')"/></g><text x="' + (x + 36) + '" y="' + y + '">' + esc(v) + '</text>'; });
-    keyHtml += '</g>';
-    bbox.y1 = ky + 110; bbox.x1 = Math.max(bbox.x1, kx + 600);
+    // what the key lists: only the colours and cable kinds this drawing has
+    const key = { cats: [...new Set(all.map((m) => (P.KINDS[m.g.kind] || P.KINDS.other).cat))], kinds: [...new Set(E.map((e) => e.kind))], wireless: all.some((m) => m.sys) };
+    // gear with no cables, laid along the bottom by Auto-arrange: a label over that row
+    const wiredIds = new Set();
+    doc.cables.forEach((c) => { const ga = ix.G.get(c.a), gb = ix.G.get(c.b); const ha = ga && P.hostOf(doc, ga), hb = gb && P.hostOf(doc, gb); const a = ha ? ha.id : c.a, b = hb ? hb.id : c.b; if (a !== b) { wiredIds.add(a); wiredIds.add(b); } });
+    const loose = all.filter((m) => !wiredIds.has(m.g.id)), tied = all.filter((m) => wiredIds.has(m.g.id));
+    let shelf = '';
+    if (loose.length && tied.length) {
+      const top = Math.min(...loose.map((m) => pos(m.g).y)), low = Math.max(...tied.map((m) => pos(m.g).y + m.h));
+      if (top > low) shelf = '<text class="pshelf" x="' + Math.min(...loose.map((m) => pos(m.g).x)) + '" y="' + (top - 14) + '">NOT CONNECTED</text>';
+    }
+    bbox.y1 += 40;    // room for the key along the bottom of the view
     const empty = !all.length ? '<text class="pempty" x="320" y="150" text-anchor="middle">' + (view.edit ? 'Add equipment from the right, or right-click here.' : 'Nothing on the stage patch yet.') + '</text>' : '';
     const grid = view.edit ? '<rect class="pgridbg" x="' + (bbox.x0 - 4000) + '" y="' + (bbox.y0 - 4000) + '" width="' + (bbox.x1 - bbox.x0 + 8000) + '" height="' + (bbox.y1 - bbox.y0 + 8000) + '" fill="url(#pgrid)"/>' : '';
-    return { svg: defs() + grid + '<g class="pes">' + lines + '</g>' + labels + cards + keyHtml + empty + '<g id="pguides"></g>', bbox, routes, models, ix, E };
+    return { svg: defs() + grid + shelf + '<g class="pes">' + lines + '</g>' + labels + cards + empty + '<g id="pguides"></g>', bbox, routes, models, ix, E, key };
   }
 
   // ================= following a signal =================
@@ -561,6 +722,8 @@ const PatchView = (() => {
       g.ins.forEach((_, i) => up(g, i, 0));
       g.outs.forEach((_, j) => down(g, j, 0));
       if (P.KINDS[g.kind].link) linkCables(g.id).forEach(({ c, other }) => { cables.add(c.id); gear.add(other); });
+      // its network cable (or, for a switch, what plugs into it)
+      doc.cables.forEach((c) => { if (c.ap === 'net' && (c.a === g.id || c.b === g.id)) { cables.add(c.id); gear.add(c.a === g.id ? c.b : c.a); } });
     };
     if (start.cable) {
       const c = start.cable;
@@ -627,9 +790,9 @@ const PatchView = (() => {
   async function view(qs) {
     setTitle('Stage patch');
     let data = await get('/api/patch');
-    await Promise.all([loadDevices(), GearModels.load()]);
+    await Promise.all([loadDevices(true), GearModels.load()]);
     const st = {
-      doc: data.doc, version: data.version, edit: false, sel: [], selCable: null, selSocket: null,
+      doc: data.doc, version: data.version, rev: data.rev || '', draft: !!data.draft, edit: false, sel: [], selCable: null, selSocket: null,
       undo: [], redo: [], tf: null, report: 'inputs', saving: false, dirtySave: false, pending: null, spares: false,
       snap: true, cache: null, drag: null, placeAt: null
     };
@@ -641,13 +804,15 @@ const PatchView = (() => {
       <div class="crumbs"><a href="#/">Home</a><span>/</span></div>
       <div class="bar pbar"><div class="grow"><div class="ptitle" id="ptl"></div></div>
         ${canEdit ? '<button class="btn" id="pedit">' + icon('edit') + '<span>Edit</span></button>' : ''}
+        <button class="btn ghost" id="pfitb" title="Fit the whole drawing on screen (F)"><svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M4 9V4h5M20 9V4h-5M4 15v5h5M20 15v5h-5" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg><span>Fit</span></button>
         <button class="btn ghost" id="ppdf" title="Export PDF">${icon('pdf')}<span class="hide-sm">PDF</span></button>
-        ${canEdit ? '<button class="btn ghost" id="phist" title="Versions">' + icon('clock') + '<span class="hide-sm">History</span></button>' : ''}</div>
+        ${canEdit ? '<button class="btn ghost" id="phist" title="Revisions">' + icon('clock') + '<span class="hide-sm">History</span></button>' : ''}</div>
       <div class="ptools hide" id="ptools">
         <button class="ghost" id="pun" title="Undo (Ctrl+Z)">↶ Undo</button><button class="ghost" id="pre" title="Redo">↷ Redo</button>
         <span class="tsep"></span>
         <button class="ghost" id="paddb" title="Show the equipment list">${icon('plus')}Add equipment</button>
-        <button class="ghost" id="plabels" title="Name cables from a pattern: where they go, the channel, a number">${icon('edit')}Label cables</button>
+        <button class="ghost" id="plabels" title="Tag names for the gear and a number for each cable, with a preview">${icon('edit')}Auto label</button>
+        <button class="ghost" id="pselt" aria-pressed="false" title="Select: drag a box around cards to pick several, then drag one to move them all (Shift-drag works too)"><svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><rect x="4" y="4" width="16" height="16" rx="2" fill="none" stroke="currentColor" stroke-width="2" stroke-dasharray="3 3"/></svg>Select</button>
         <button class="ghost" id="ptidy" title="Lay the whole drawing out once by signal flow (undo puts it back)">${icon('list')}Auto-arrange</button>
         <label class="tog sm" title="Cards snap to the grid and line up with each other. Hold Alt to place freely."><input type="checkbox" id="psnap"${st.snap ? ' checked' : ''}> Snap</label>
         <span class="palign hide" id="palign"><span class="tsep"></span>
@@ -656,7 +821,9 @@ const PatchView = (() => {
         <span class="note" id="psave"></span><span class="grow"></span>
         <span class="note phint">Drag a card to move it · drag its <b>→</b> onto another card to connect · right-click for more</span></div>
       <div class="pmain"><div class="pcanvas" id="pcv"><svg id="psvg"><g id="pvp"></g><path id="ptmp" class="ptmp" d=""/><rect id="pmq" class="pmq" x="0" y="0" width="0" height="0"/></svg>
-        <div class="pzoom"><button id="pzi" title="Zoom in">+</button><button id="pzo" title="Zoom out">−</button><button id="pzf" title="Fit">⤢</button></div>
+        <div class="pzoom"><button id="pzi" aria-label="Zoom in" data-tip="Zoom in">+</button><button id="pzo" aria-label="Zoom out" data-tip="Zoom out">−</button><button id="pzf" aria-label="Fit" data-tip="Fit">⤢</button></div>
+        <div class="pkey hide" id="pkey"></div>
+        <div class="pselchip hide" id="pselchip"></div>
         <button class="fab padd hide" id="padd" aria-label="Add equipment">${icon('plus')}</button></div>
         <aside class="ppane" id="ppane"></aside></div>
       <div class="pchecks" id="pchk"></div>
@@ -670,14 +837,34 @@ const PatchView = (() => {
     // ---------- painting ----------
     function paintTitle() {
       const d = st.doc;
-      $('#ptl').innerHTML = '<div class="pkicker">STAGE PATCH</div><h1 class="title">' + esc(d.title) + '</h1>' + (d.subtitle ? '<div class="note">' + esc(d.subtitle) + '</div>' : '<div class="note">Click any piece of gear or cable to follow its signal.</div>') +
+      $('#ptl').innerHTML = '<div class="pkicker">STAGE PATCH <span class="prev" id="prev">' + revChip() + '</span></div><h1 class="title">' + esc(d.title) + '</h1>' + (d.subtitle ? '<div class="note">' + esc(d.subtitle) + '</div>' : '<div class="note">Click any piece of gear or cable to follow its signal.</div>') +
         (st.edit ? '<button class="linkbtn" id="ptedit">Edit title</button>' : '');
       const te = $('#ptedit'); if (te) te.addEventListener('click', titleDialog);
+    }
+    /** "Rev 1.1.0" and a Draft chip when there are changes since it was published. */
+    function revChip() {
+      return (st.rev ? '<span class="rchip">Rev ' + esc(st.rev) + '</span>' : '<span class="rchip none">Not published yet</span>') + (st.draft && st.rev ? '<span class="rchip draft">Draft</span>' : '');
+    }
+    const paintRev = () => { const el = $('#prev'); if (el) el.innerHTML = revChip(); };
+    function paintKey() {
+      const el = $('#pkey'); if (!el) return;
+      const cats = Object.entries(P.CATS).filter(([k]) => D.key.cats.includes(k));
+      const kinds = Object.entries(KIND_STYLE).filter(([k]) => D.key.kinds.includes(k));
+      const wl = D.key.wireless;
+      el.classList.toggle('hide', !cats.length && !kinds.length && !wl);
+      if (!cats.length && !kinds.length && !wl) { el.innerHTML = ''; return; }
+      let shut = !wide(); try { const v = localStorage.getItem('lg-pkey'); if (v) shut = v === 'shut'; } catch (e) { /* private mode */ }
+      el.classList.toggle('shut', shut);
+      el.innerHTML = '<button type="button" class="pkt" id="pkt" aria-expanded="' + !shut + '">Key ' + (shut ? '▸' : '▾') + '</button><div class="pki">' +
+        cats.map(([, v]) => '<span class="kc"><i style="background:' + v.color + '"></i>' + esc(v.label) + '</span>').join('') +
+        kinds.map(([k, v]) => '<span class="kk"><svg width="30" height="10"><g class="pe pe-' + k + '"><path class="ln" d="M1 5h27"/></g></svg>' + esc(v) + '</span>').join('') + (wl ? '<span class="kk">' + WL_KEY + 'Wireless system · RF</span>' : '') + '</div>';
+      $('#pkt', el).addEventListener('click', () => { try { localStorage.setItem('lg-pkey', el.classList.contains('shut') ? 'open' : 'shut'); } catch (e) { /* private mode */ } paintKey(); });
     }
     function paintDrawing() {
       D = draw(st.doc, { edit: st.edit, drag: st.drag, cache: st.cache });
       st.cache = D.routes;
       vp.innerHTML = D.svg;
+      if (!st.drag) paintKey();
       svg.classList.toggle('editing', st.edit);
       highlight();
     }
@@ -688,6 +875,8 @@ const PatchView = (() => {
     }
     function paintChecks() {
       const list = P.checks(st.doc);
+      // a network cable on gear whose Gear Locker card is not ticked "On the network"
+      st.doc.cables.filter((c) => c.ap === 'net').forEach((c) => { const g = gearOf(c.a), dev = devOf(g); if (g && dev && !dev.networked && g.kind !== 'network' && g.kind !== 'computer') list.push({ level: 'warn', text: g.name + ' has a network cable, but its Gear Locker card is not ticked “On the network”. Tick it, or remove the cable.', gear: [g.id] }); });
       // a list, worst first: tap one to see it on the drawing
       const rank = { bad: 0, warn: 1, note: 2 };
       const order = list.map((c, i) => ({ c, i })).sort((p, q) => rank[p.c.level] - rank[q.c.level]);
@@ -710,7 +899,29 @@ const PatchView = (() => {
       highlight(); paintPane(); paintAlign();
       if (!wide() && !opts.noSheet && (st.sel.length === 1 || st.selCable)) sheet();
     }
-    function paintAlign() { $('#palign').classList.toggle('hide', !(st.edit && st.sel.length > 1)); }
+    function paintAlign() {
+      const many = st.edit && st.sel.length > 1;
+      $('#palign').classList.toggle('hide', !many);
+      const chip = $('#pselchip'); if (!chip) return;
+      chip.classList.toggle('hide', !many);
+      if (!many) { chip.innerHTML = ''; return; }
+      chip.innerHTML = '<b>' + st.sel.length + ' selected</b><button type="button" class="ghost" id="psc_al" aria-expanded="false">Align ▾</button><button type="button" class="ghost" id="psc_fit">Fit selection</button><button type="button" class="ghost danger" id="psc_rm">Remove</button><button type="button" class="ghost" id="psc_cl">Clear</button>' +
+        '<div class="pscal hide" id="psc_menu">' + [['left', '⇤ Left edges'], ['top', '⤒ Top edges'], ['center', '↔ Centres'], ['vdist', '⇕ Space evenly'], ['hdist', '⇔ Space across']].map(([k, l]) => '<button type="button" data-al3="' + k + '">' + l + '</button>').join('') + '</div>';
+      $('#psc_al', chip).addEventListener('click', () => { const m = $('#psc_menu', chip); m.classList.toggle('hide'); $('#psc_al', chip).setAttribute('aria-expanded', String(!m.classList.contains('hide'))); });
+      $$('[data-al3]', chip).forEach((b) => b.addEventListener('click', () => align(b.dataset.al3)));
+      $('#psc_rm', chip).addEventListener('click', removeSelection);
+      $('#psc_fit', chip).addEventListener('click', () => fit(selBox()));
+      $('#psc_cl', chip).addEventListener('click', () => select(null));
+    }
+    /** Remove every selected card (one undo step), after asking. */
+    async function removeSelection() {
+      const ids = st.sel.filter((id) => gearOf(id));
+      if (!ids.length) return;
+      if (!await confirmBox('Remove ' + ids.length + ' pieces of gear?', 'They come off the stage patch with their cables (and the mics or packs inside them). Undo brings them back.', 'Remove', true)) return;
+      st.sel = [];
+      change(() => ids.forEach((id) => P.removeGear(st.doc, id)), 'Removed ' + ids.length + ' pieces of gear. Undo brings them back.');
+      paintAlign();
+    }
     function highlight() {
       if (!D) return;
       const on = st.sel.length || st.selCable || st.selSocket;
@@ -730,17 +941,30 @@ const PatchView = (() => {
 
     // ---------- pan and zoom ----------
     function apply() { const t = 'translate(' + st.tf.x + ',' + st.tf.y + ') scale(' + st.tf.k + ')'; vp.setAttribute('transform', t); $('#ptmp').setAttribute('transform', t); $('#pmq').setAttribute('transform', t); }
-    function fit() {
-      const b = D.bbox, W = b.x1 - b.x0, H = b.y1 - b.y0;
-      const r0 = cv.getBoundingClientRect();
-      // readable first: shrink to fit the width, but not so far the text gets too small (pan for the rest)
-      // big enough to read: never smaller than this (pan or zoom out for the rest); a small drawing grows a little
-      const k = Math.max(wide() ? 0.9 : 0.7, Math.min(1.15, (r0.width - 20) / W));
+    /**
+     * Fit: the whole drawing (or a box, like the selection) in view with a margin, clear of the key along the bottom,
+     * the zoom buttons, and the details pane when it floats over the drawing.
+     */
+    function fit(box) {
+      const b0 = box && box.x0 != null ? box : D.bbox;
       cv.style.height = Math.round(Math.max(460, window.innerHeight - (wide() ? 190 : 230))) + 'px';
-      void H;
       const r = cv.getBoundingClientRect();
-      st.tf = { k, x: Math.max(10, (r.width - W * k) / 2) - b.x0 * k, y: 10 - b.y0 * k };
+      const key = $('#pkey'), keyH = key && !key.classList.contains('hide') ? key.getBoundingClientRect().height + 12 : 0;
+      const pane = $('#ppane'), pr = pane && getComputedStyle(pane).position === 'absolute' && pane.offsetParent ? pane.getBoundingClientRect() : null;
+      const paneW = pr && pr.width && pr.left < r.right && pr.right > r.left ? r.right - pr.left + 8 : 0;
+      const M = 16, left = M, top = M, right = r.width - M - Math.max(48, paneW), bottom = r.height - M - keyH;
+      const W = Math.max(40, b0.x1 - b0.x0), H = Math.max(40, b0.y1 - b0.y0);
+      const k = Math.max(0.05, Math.min(1.15, (right - left) / W, (bottom - top) / H));
+      st.tf = { k, x: left + ((right - left) - W * k) / 2 - b0.x0 * k, y: top + Math.max(0, ((bottom - top) - H * k) / 2) - b0.y0 * k };
+      st.userView = false;
       apply();
+    }
+    /** The box round the selected cards (for Fit selection). */
+    function selBox() {
+      const ms = st.sel.map((id) => D.models.get(cardOf(id))).filter(Boolean);
+      if (!ms.length) return null;
+      const rs = ms.map((m) => outer(m));
+      return { x0: Math.min(...rs.map((r) => r.x)) - 30, y0: Math.min(...rs.map((r) => r.y)) - 30, x1: Math.max(...rs.map((r) => r.x + r.w)) + 30, y1: Math.max(...rs.map((r) => r.y + r.h)) + 30 };
     }
     function focusGear(id) {
       const m = D && D.models.get(cardOf(id));
@@ -752,14 +976,20 @@ const PatchView = (() => {
     }
     const world = (cx, cy) => { const r = svg.getBoundingClientRect(); return { x: (cx - r.left - st.tf.x) / st.tf.k, y: (cy - r.top - st.tf.y) / st.tf.k }; };
     function zoomAt(f, cx, cy) {
+      st.userView = true;
       const r = svg.getBoundingClientRect(); const px = cx - r.left, py = cy - r.top;
-      const k = Math.max(0.2, Math.min(3, st.tf.k * f));
+      const k = Math.max(0.05, Math.min(3, st.tf.k * f));
       st.tf.x = px - (px - st.tf.x) * (k / st.tf.k); st.tf.y = py - (py - st.tf.y) * (k / st.tf.k); st.tf.k = k; apply();
     }
-    svg.addEventListener('wheel', (e) => { e.preventDefault(); if (e.ctrlKey || e.metaKey || !e.deltaX) zoomAt(Math.exp(-e.deltaY * 0.0015), e.clientX, e.clientY); else { st.tf.x -= e.deltaX; st.tf.y -= e.deltaY; apply(); } }, { passive: false });
+    svg.addEventListener('wheel', (e) => { e.preventDefault(); if (e.ctrlKey || e.metaKey || !e.deltaX) zoomAt(Math.exp(-e.deltaY * 0.0015), e.clientX, e.clientY); else { st.userView = true; st.tf.x -= e.deltaX; st.tf.y -= e.deltaY; apply(); } }, { passive: false });
+    // double-click (or double-tap) the empty drawing: fit
+    svg.addEventListener('dblclick', (e) => { if (!e.target.closest('.pcard') && !e.target.closest('.pe')) { e.preventDefault(); fit(); } });
+    // rotate the phone or resize the window: fit again, unless someone has panned or zoomed since
+    let rsz = null;
+    window.addEventListener('resize', function onResize() { if (!svg.isConnected) return window.removeEventListener('resize', onResize); clearTimeout(rsz); rsz = setTimeout(() => { if (D && !st.userView && !st.drag) fit(); }, 200); });
     $('#pzi').addEventListener('click', () => { const r = svg.getBoundingClientRect(); zoomAt(1.25, r.left + r.width / 2, r.top + r.height / 2); });
     $('#pzo').addEventListener('click', () => { const r = svg.getBoundingClientRect(); zoomAt(0.8, r.left + r.width / 2, r.top + r.height / 2); });
-    $('#pzf').addEventListener('click', fit);
+    $('#pzf').addEventListener('click', () => fit());
 
     // ---------- moving cards: grid, smart guides ----------
     function guidesFor(ids, dx, dy, free) {
@@ -811,21 +1041,22 @@ const PatchView = (() => {
           e.preventDefault(); svg.setPointerCapture(e.pointerId);
           const isLink = src.classList.contains('ldot'), isHand = src.classList.contains('hand');
           let x0 = w0.x, y0 = w0.y;
-          if (!isHand && !isLink) { const m = D.models.get(src.dataset.g); x0 = m.g.x + m.w; y0 = m.g.y + m.outY[Number(src.dataset.p)]; }
-          gesture = { connect: true, gid: src.dataset.g, port: isLink ? 'link' : isHand ? null : Number(src.dataset.p), x0, y0, sx: e.clientX, sy: e.clientY, moved: false };
+          const isNet = src.dataset.p === 'net';
+          if (!isHand && !isLink) { const m = D.models.get(src.dataset.g); x0 = m.g.x + m.w; y0 = m.g.y + (isNet ? m.netY : m.outY[Number(src.dataset.p)]); }
+          gesture = { connect: true, gid: src.dataset.g, port: isLink ? 'link' : isHand ? null : isNet ? 'net' : Number(src.dataset.p), x0, y0, sx: e.clientX, sy: e.clientY, moved: false };
           return;
         }
         const card = t.closest('.pcard');
-        if (card && !t.closest('.cmore') && !t.closest('.sk.in')) {
+        if (card && !t.closest('.cmore') && !t.closest('.wlt') && !t.closest('.sk.in')) {
           e.preventDefault(); svg.setPointerCapture(e.pointerId);
           const id = card.dataset.g;
           const ids = st.sel.includes(id) && st.sel.length > 1 ? new Set(st.sel.filter((x) => D.models.has(x))) : new Set([id]);
-          gesture = { move: true, id, ids, sx: e.clientX, sy: e.clientY, w0, moved: false, target: t, shift: e.shiftKey };
+          gesture = { move: true, id, ids, sx: e.clientX, sy: e.clientY, w0, moved: false, target: t, shift: e.shiftKey || e.ctrlKey || e.metaKey };
           return;
         }
-        if (!card && e.shiftKey) { e.preventDefault(); svg.setPointerCapture(e.pointerId); gesture = { marquee: true, w0, sx: e.clientX, sy: e.clientY, moved: false }; return; }
+        if (!card && (e.shiftKey || st.selTool)) { e.preventDefault(); svg.setPointerCapture(e.pointerId); clearTimeout(longTimer); gesture = { marquee: true, w0, sx: e.clientX, sy: e.clientY, moved: false, add: e.shiftKey || e.ctrlKey || e.metaKey }; return; }
       }
-      gesture = { pan: true, sx: e.clientX, sy: e.clientY, x: st.tf.x, y: st.tf.y, moved: false, target: t, shift: e.shiftKey };
+      gesture = { pan: true, sx: e.clientX, sy: e.clientY, x: st.tf.x, y: st.tf.y, moved: false, target: t, shift: e.shiftKey || e.ctrlKey || e.metaKey };
       svg.setPointerCapture(e.pointerId);
     });
     svg.addEventListener('pointermove', (e) => {
@@ -872,7 +1103,7 @@ const PatchView = (() => {
         gesture.box = { x0: x, y0: y, x1: x + Math.abs(w.x - gesture.w0.x), y1: y + Math.abs(w.y - gesture.w0.y) };
         return;
       }
-      if (gesture.pan) { st.tf.x = gesture.x + e.clientX - gesture.sx; st.tf.y = gesture.y + e.clientY - gesture.sy; apply(); }
+      if (gesture.pan) { st.userView = true; st.tf.x = gesture.x + e.clientX - gesture.sx; st.tf.y = gesture.y + e.clientY - gesture.sy; apply(); }
     });
     const end = (e) => {
       clearTimeout(longTimer);
@@ -899,10 +1130,20 @@ const PatchView = (() => {
       }
       if (g.marquee) {
         $('#pmq').setAttribute('width', 0); $('#pmq').setAttribute('height', 0);
-        if (g.box) { const ids = [...D.models.values()].filter((m) => m.g.x < g.box.x1 && m.g.x + m.w > g.box.x0 && m.g.y < g.box.y1 && m.g.y + m.h > g.box.y0).map((m) => m.g.id); select({ gear: ids }, { noSheet: true }); }
+        if (g.box) {
+          // every card the box touches; Shift or Ctrl adds to what was picked
+          const ids = [...D.models.values()].filter((m) => { const o = outer(m); return o.x < g.box.x1 && o.x + o.w > g.box.x0 && o.y < g.box.y1 && o.y + o.h > g.box.y0; }).map((m) => m.g.id);
+          select({ gear: g.add ? [...new Set(st.sel.concat(ids))] : ids }, { noSheet: true });
+        } else if (!g.add) select(null);
         return;
       }
-      if (g.pan && !g.moved) tap(g.target, g.shift);
+      if (g.pan && !g.moved) {
+        // a double tap on the empty drawing fits it
+        const empty = !(g.target.closest && (g.target.closest('.pcard') || g.target.closest('.pe')));
+        if (isTouch(e) && empty && Date.now() - (st.lastTap || 0) < 320) { st.lastTap = 0; fit(); return; }
+        st.lastTap = isTouch(e) && empty ? Date.now() : 0;
+        tap(g.target, g.shift);
+      }
     };
     const snapOr = (v) => Math.round(v);
     svg.addEventListener('pointerup', end);
@@ -913,12 +1154,19 @@ const PatchView = (() => {
     function tap(t, shift) {
       if (st.pending && st.edit) { const p = st.pending; st.pending = null; markPending(); dropOn(t, p.gid, p.port); return; }
       const addtx = t.closest('.cadd');
+      if (addtx && st.edit && addtx.dataset.addpk) { memberDialog(gearOf(addtx.dataset.addpk)); return; }
       if (addtx && st.edit) { const [hid, ch] = addtx.dataset.addtx.split(':'); memberDialog(gearOf(hid), null, Number(ch)); return; }
       const more = t.closest('.cmore');
+      const wlt = t.closest('.wlt');
+      if (wlt) { const g = gearOf(wlt.dataset.wl); const flip = () => { g.wlshut = !g.wlshut; if (!g.wlshut) delete g.wlshut; }; if (st.edit) change(flip, null, true); else { flip(); st.cache = null; paintDrawing(); if (canEdit) queueSave(); } return; }
       if (more) { const g = gearOf(more.dataset.open); if (st.edit) change(() => { g.open = !g.open; if (!g.open) delete g.open; }, null, true); else { g.open = !g.open; if (!g.open) delete g.open; st.cache = null; paintDrawing(); } return; }
       const sk = t.closest('.sk'), card = t.closest('.pcard'), edge = t.closest('.pe'), mem = t.closest('.crow.mem'), slk = t.closest('.crow.slk');
       if (mem) return select({ gear: [mem.dataset.mem] });
       if (slk) return select({ gear: [slk.dataset.g] });
+      if (sk && (sk.dataset.net || sk.dataset.p === 'net')) {
+        const c = sk.dataset.net ? st.doc.cables.find((x) => x.ap === 'net' && x.b === sk.dataset.g && x.port === Number(sk.dataset.net)) : P.netOf(st.doc, gearOf(sk.dataset.g));
+        return c ? select({ cable: c.id }) : select({ gear: [sk.dataset.g] });
+      }
       if (sk) return select({ gear: [sk.dataset.g], socket: { g: sk.dataset.g, p: Number(sk.dataset.p), side: sk.classList.contains('in') ? 'in' : 'out' } });
       if (card) {
         if (shift && st.edit) { const id = card.dataset.g; const s = st.sel.includes(id) ? st.sel.filter((x) => x !== id) : st.sel.concat(id); return select({ gear: s }, { noSheet: true }); }
@@ -948,31 +1196,32 @@ const PatchView = (() => {
           if (P.KINDS[g.kind].fields.includes('person')) it('Tag a person…', () => personDialog(g));
           if (!host) it('Connect to…', () => { st.pending = { gid: g.id, port: null }; markPending(); toast('Now tap the card it goes to'); });
           if (g.kind === 'receiver') it('Add a mic to a channel', () => memberDialog(g));
-          if (g.kind === 'iemtx') it('Add an IEM pack', () => memberDialog(g));
+          if (g.kind === 'iemtx') it('Add an in-ear pack', () => memberDialog(g));
+          if (!host && g.kind !== 'network' && hasNet(st.doc, g)) { const sws = st.doc.gear.filter((x) => x.kind === 'network'); if (sws.length) it('Plug into a switch…', () => netDialog(g, sws[0], null)); }
           if (g.kind === 'stagebox') it('Assign console channels…', () => channelDialog(g));
           if (g.kind === 'console') it('Channel names and colours…', () => namesDialog(g));
           const m = D.models.get(g.id);
           if (m && !m.small) it(g.open ? 'Show used sockets only' : 'Show every socket', () => change(() => { g.open = !g.open; if (!g.open) delete g.open; }, null, true));
-          if (host) it('Take out of ' + host.name, () => change(() => { st.doc.cables = st.doc.cables.filter((c) => !((c.a === g.id || c.b === g.id) && c.kind === 'rf')); delete g.x; delete g.y; }, g.name + ' is on its own now'));
+          if (host) it('Take out of ' + host.name, () => takeOut(g, host));
           else it('Duplicate', () => duplicate(g));
           sep();
           it(host ? 'Remove ' + (g.kind === 'txmic' ? 'mic' : 'pack') : 'Remove', () => removeGear(g.id), { danger: true });
         } else {
           const dev = g.device_id && typeof DEV !== 'undefined' && DEV.list ? DEV.list.find((d) => d.id === g.device_id) : null;
           if (dev) it('Open its gear card', () => { location.hash = '#/d/' + dev.id; });
-          it('Report a problem', () => reportProblem(g.name + (g.use ? ' (' + g.use + ')' : ''), { gear: g.id, device_id: g.device_id || undefined }));
+          it('Report a problem', () => reportProblem(g.name, { gear: g.id, device_id: g.device_id || undefined, model: g.model || undefined }));
         }
       } else if (edge && edge.dataset.c) {
         const c = st.doc.cables.find((x) => x.id === edge.dataset.c);
         select({ cable: c.id }, { noSheet: true });
         const a = gearOf(c.a), b = gearOf(c.b);
-        items.push({ title: a.name + ' → ' + b.name });
+        items.push({ title: (c.label ? c.label + ': ' : '') + a.name + ' → ' + b.name });
         it('Follow its signal', () => select({ cable: c.id }));
         if (st.edit) {
           sep();
-          Object.entries(KIND_STYLE).filter(([k]) => (c.ap === 'link') === (k === 'link' || k === 'dante')).forEach(([k, v]) => it(v, () => change(() => { st.doc.cables.find((x) => x.id === c.id).kind = k; }, null, true), { check: c.kind === k }));
+          Object.entries(KIND_STYLE).filter(([k]) => c.ap === 'net' ? false : c.ap === 'link' ? (k === 'link' || k === 'dante') : (k !== 'link' && k !== 'dante' && k !== 'net')).forEach(([k, v]) => it(v, () => change(() => { st.doc.cables.find((x) => x.id === c.id).kind = k; }, null, true), { check: c.kind === k }));
           sep();
-          it('Label and length…', () => { select({ cable: c.id }); if (!wide()) sheet(); });
+          it('Tag name and length…', () => { select({ cable: c.id }); if (!wide()) sheet(); });
           it('Remove cable', () => { st.selCable = null; change(() => { st.doc.cables = st.doc.cables.filter((x) => x.id !== c.id); }, 'Cable removed'); }, { danger: true });
         }
       } else {
@@ -983,7 +1232,7 @@ const PatchView = (() => {
           it('Snap to grid', () => { st.snap = !st.snap; $('#psnap').checked = st.snap; saveSnap(); }, { check: st.snap });
           sep();
         }
-        it('Zoom to fit', fit);
+        it('Fit the drawing (F)', () => fit());
         it('Export PDF', () => $('#ppdf').click());
       }
       const m = document.createElement('div');
@@ -1011,12 +1260,119 @@ const PatchView = (() => {
       const targetId = sk ? sk.dataset.g : ld ? ld.dataset.g : card ? card.dataset.g : null;
       const b = gearOf(targetId);
       if (!a || !b || a === b) return;
+      // a network cable: gear's network socket to a switch port
+      if (port === 'net' || (sk && sk.dataset.net)) {
+        const sw = b.kind === 'network' ? b : a.kind === 'network' && port !== 'net' ? a : null, g = sw === b ? a : b;
+        if (!sw) return toast('Plug it into a network switch (add one from Add equipment)', 'bad');
+        if (!hasNet(st.doc, g)) return toast(g.name + ' is not on the network. Tick “On the network” on its Gear Locker card first.', 'bad');
+        return netDialog(g, sw, sk && sk.dataset.net ? Number(sk.dataset.net) : null);
+      }
+      if (port == null && ((b.kind === 'network' && a.kind !== 'network' && hasNet(st.doc, a) && !P.KINDS[a.kind].link) || (a.kind === 'network' && b.kind !== 'network' && hasNet(st.doc, b) && !P.KINDS[b.kind].link))) {
+        const sw = b.kind === 'network' ? b : a;
+        return netDialog(sw === b ? a : b, sw, null);
+      }
       if (port === 'link' || ld) {
         if (!P.KINDS[a.kind].link || !P.KINDS[b.kind].link) return toast(b.name + ' has no link socket', 'bad');
         return picker(a, b, { linkOnly: true });
       }
       if (sk && port != null && !mem) { change(() => P.connect(st.doc, a, port, b, Number(sk.dataset.p)), a.name + ' ' + a.outs[port] + ' → ' + b.name + ' ' + b.ins[Number(sk.dataset.p)]); return; }
       picker(a, b, { port, toIn: sk ? Number(sk.dataset.p) : null });
+    }
+    /** Plug gear into a switch: which port. Fills in "Plugged into" on its Gear Locker card. */
+    function netDialog(g, sw, port) {
+      const taken = new Map(st.doc.cables.filter((c) => c.ap === 'net' && c.b === sw.id && c.port && c.a !== g.id).map((c) => [c.port, gearOf(c.a)]));
+      const cur = P.netOf(st.doc, g);
+      let pick = port || (cur && cur.b === sw.id && cur.port) || 0;
+      if (!pick) for (let n = 1; n <= (sw.nports || 8); n++) if (!taken.has(n)) { pick = n; break; }
+      const opts = Array.from({ length: sw.nports || 8 }, (_, i) => i + 1).map((n) => '<option value="' + n + '"' + (n === pick ? ' selected' : '') + '>Port ' + n + (taken.has(n) ? ' · ' + esc(taken.get(n).name) + ' (replaces it)' : '') + '</option>').join('');
+      modal('<h3>Plug ' + esc(tm(g)) + ' into ' + esc(tm(sw)) + '</h3><form id="pnf"><label>Port</label><select id="pn_port"><option value="">Not sure yet</option>' + opts + '</select>' +
+        '<p class="note">' + (g.device_id && sw.device_id ? 'Its Gear Locker card gets “Plugged into ' + esc(sw.name) + '” too, so the network map matches.' : 'Add both to the Gear Locker and the network map shows it too.') + '</p>' +
+        '<div class="acts"><button type="button" data-close>Cancel</button><button class="primary">Connect</button></div></form>', (w, close) => {
+        $('#pnf', w).addEventListener('submit', (e) => {
+          e.preventDefault(); const n = Number($('#pn_port', w).value) || null; close();
+          change(() => P.connectNet(st.doc, gearOf(g.id), gearOf(sw.id), n), g.name + ' → ' + sw.name + (n ? ' port ' + n : ''));
+        });
+      });
+    }
+    /** Change a Gear Locker card: the whole card from the server with these fields changed. */
+    async function putDevice(id, fields) {
+      const d = (await get('/api/devices/' + id)).device;
+      await call('PUT', '/api/devices/' + id, { ...d, ...fields });
+      if (typeof forgetDevices === 'function') forgetDevices();
+      await loadDevices(true);
+    }
+    /** Network cables drawn or removed here go to "Plugged into" on the Gear Locker cards (and back). */
+    function syncNet(before, after) {
+      const sig = (doc) => new Map(doc.cables.filter((c) => c.ap === 'net').map((c) => [c.a, c]));
+      const A = sig(before), B = sig(after);
+      const G = new Map(after.gear.concat(before.gear).map((g) => [g.id, g]));
+      const jobs = [];
+      B.forEach((c, gid) => {
+        const o = A.get(gid);
+        if (o && o.b === c.b && o.port === c.port) return;
+        const g = G.get(gid), sw = G.get(c.b);
+        if (g && sw && g.device_id && sw.device_id) jobs.push([g.device_id, { networked: true, uplink_id: sw.device_id, uplink_port: c.port ? String(c.port) : '' }]);
+      });
+      A.forEach((c, gid) => {
+        if (B.has(gid)) return;
+        const g = G.get(gid), sw = G.get(c.b), dev = devOf(g);
+        if (g && sw && dev && sw.device_id && g.device_id) jobs.push([g.device_id, { uplink_id: null, uplink_port: '', _only: sw.device_id }]);
+      });
+      if (!jobs.length || !canEdit) return;
+      (async () => {
+        for (const [id, f] of jobs) {
+          try {
+            if (f._only) { const d = (await get('/api/devices/' + id)).device; if (d.uplink_id !== f._only) continue; delete f._only; }
+            await putDevice(id, f);
+          } catch (e) { toast('Gear Locker not updated: ' + e.message, 'bad'); }
+        }
+      })();
+    }
+    /**
+     * What the Gear Locker knows, brought onto the drawing once when it opens: wireless mics and packs paired with a
+     * receiver or transmitter that is here, and "Plugged into" between gear and a switch that are both here.
+     */
+    async function syncFromLocker() {
+      if (typeof DEV === 'undefined' || !DEV.list) return;
+      const doc = st.doc, notes = [];
+      let n = 0;
+      for (const host of doc.gear.filter((g) => (g.kind === 'receiver' || g.kind === 'iemtx') && g.device_id)) {
+        const want = host.kind === 'receiver' ? 'txmic' : 'bodypack';
+        for (const dev of DEV.list.filter((d) => d.pair_id === host.device_id && d.kind === want)) {
+          const ex = doc.gear.find((g) => g.device_id === dev.id);
+          if (ex) {
+            if (P.hostOf(doc, ex)) continue;
+            if (host.kind === 'iemtx') { P.connect(doc, host, 0, ex, 0, { kind: 'rf' }); n++; continue; }
+            const usedCh = new Set(P.members(doc, host).map((m) => m.port)), ch = host.ins.findIndex((_, i) => !usedCh.has(i));
+            if (ch < 0) { notes.push(dev.name); continue; }
+            P.connect(doc, ex, 0, host, ch, { kind: 'rf' }); delete ex.x; delete ex.y; n++;
+            continue;
+          }
+          const item = { name: dev.name, make: dev.make || undefined, model: dev.model || undefined, txtype: dev.txtype || undefined, freq: dev.freq || undefined, capsule: dev.capsule || undefined, device_id: dev.id };
+          Object.keys(item).forEach((k) => { if (item[k] == null) delete item[k]; });
+          const g = P.addMember(doc, host, item, null);
+          if (!g) { P.addGear(doc, { ...item, kind: want }); notes.push(dev.name); }
+          n++;
+        }
+      }
+      // network: the Gear Locker's "Plugged into" as cables
+      if (doc.gear.some((g) => g.kind === 'network' && g.device_id)) {
+        try {
+          const links = (DEV.list || []).filter((d) => d.uplink_id).map((d) => ({ from: d.uplink_id, to: d.id, port: d.uplink_port }));
+          for (const l of links) {
+            const sw = doc.gear.find((g) => g.kind === 'network' && g.device_id === l.from);
+            const g = doc.gear.find((x) => x.device_id === l.to && !P.hostOf(doc, x));
+            if (!sw || !g || g === sw || P.netOf(doc, g)) continue;
+            const port = parseInt(l.port, 10) || null;
+            if (port && st.doc.cables.some((c) => c.ap === 'net' && c.b === sw.id && c.port === port)) continue;
+            if (port && port > (sw.nports || 8)) sw.nports = Math.min(128, port);
+            P.connectNet(doc, g, sw, port); n++;
+          }
+        } catch (e) { /* no map for this user */ }
+      }
+      if (notes.length) toast(notes.join(', ') + (notes.length === 1 ? ' is' : ' are') + ' paired in the Gear Locker but every receiver channel is taken: ' + (notes.length === 1 ? 'it is' : 'they are') + ' on the drawing on ' + (notes.length === 1 ? 'its' : 'their') + ' own.');
+      if (n && canEdit) queueSave();
+      return n;
     }
     function linkLabel(a, b) {
       const it = [a, b].map((g) => GearModels.find(g.model, g.kind)).find((m) => m && m.link);
@@ -1046,12 +1402,12 @@ const PatchView = (() => {
       if (!wire && !linkable) return toast(!a.outs.length ? a.name + ' has no outputs' : b.name + ' has no inputs', 'bad');
       // mic onto a receiver, pack onto a transmitter: a member of the wireless system
       if (a.kind === 'txmic' && b.kind === 'receiver') return memberDialog(b, a);
-      if (a.kind === 'iemtx' && b.kind === 'bodypack') { change(() => P.connect(st.doc, a, 0, b, 0, { kind: 'rf' }), b.name + ' paired with ' + a.name); return; }
+      if (a.kind === 'iemtx' && b.kind === 'bodypack') { change(() => P.connect(st.doc, a, 0, b, 0, { kind: 'rf' }), b.name + ' paired with ' + a.name); pairInLocker(b, a); return; }
       const freeOut = opts.port != null ? opts.port : Math.max(0, a.outs.findIndex((_, j) => !(ix.from.get(a.id + ':' + j) || []).length));
       const firstFree = opts.toIn != null ? opts.toIn : Math.max(0, b.ins.findIndex((_, i) => !ix.into.get(b.id + ':' + i)));
       const opt = (list, sel, taken) => list.map((p, i) => '<option value="' + i + '"' + (i === sel ? ' selected' : '') + '>' + esc(p) + (taken(i) ? ' •' : '') + '</option>').join('');
       const stereo = a.outs.length > 1 && b.ins.length > 1 && /^(L|R)$/.test(a.outs[freeOut] || '') ? 2 : 1;
-      let html = '<h3>Connect ' + esc(a.name) + ' → ' + esc(b.name) + '</h3><form id="pcf">';
+      let html = '<h3>Connect ' + esc(tm(a)) + ' → ' + esc(tm(b)) + '</h3><form id="pcf">';
       if (linkable && (opts.linkOnly || sb || a.kind === 'network' || b.kind === 'network')) {
         html += '<label class="tog pk"><input type="checkbox" id="pcf_lk"' + (linked(a, b) ? ' checked disabled' : ' checked') + '> <span><b>' + (linked(a, b) ? 'Linked' : 'Link them') + '</b> with <input id="pcf_ln" class="inl" value="' + esc(linkLabel(a, b) || 'Link') + '"' + (linked(a, b) ? ' disabled' : '') + '></span></label>';
       }
@@ -1067,8 +1423,8 @@ const PatchView = (() => {
         html += '<div class="two"><div><label>From</label><select id="pcf_a">' + opt(a.outs, freeOut, (j) => (ix.from.get(a.id + ':' + j) || []).length) + '</select></div>' +
           '<div><label>To</label><select id="pcf_b">' + opt(b.ins, firstFree, (i) => ix.into.get(b.id + ':' + i)) + '</select></div></div>' +
           '<div class="two"><div><label>Cables in a row</label><input id="pcf_n" type="number" min="1" max="' + Math.min(a.outs.length, b.ins.length) + '" value="' + stereo + '"><span class="note">1 = just this cable. 8 connects the next 8 outputs to the next 8 inputs in order (a snake, both sides of a stereo feed).</span></div>' +
-          '<div><label>Cable</label><select id="pcf_k">' + Object.entries(KIND_STYLE).filter(([k]) => k !== 'link').map(([k, v]) => '<option value="' + k + '"' + (k === P.guessCable(a, 0, b, 0) ? ' selected' : '') + '>' + v + '</option>').join('') + '</select></div></div>' +
-          '<label>Cable label <span class="note">(optional; Label cables in the toolbar can name them all at once)</span></label><input id="pcf_l"><p class="note">• already in use: connecting replaces what is there.</p>';
+          '<div><label>Cable</label><select id="pcf_k">' + Object.entries(KIND_STYLE).filter(([k]) => k !== 'link' && k !== 'net').map(([k, v]) => '<option value="' + k + '"' + (k === P.guessCable(a, 0, b, 0) ? ' selected' : '') + '>' + v + '</option>').join('') + '</select></div></div>' +
+          '<label>Cable tag name <span class="note">(optional; Auto label in the toolbar numbers them all at once)</span></label><input id="pcf_l"><p class="note">• already in use: connecting replaces what is there.</p>';
       }
       html += '<div class="acts"><button type="button" data-close>Cancel</button><button class="primary">Connect</button></div></form>';
       modal(html, (w, close) => {
@@ -1103,42 +1459,82 @@ const PatchView = (() => {
       const free = host.ins.map((p, i) => i).filter((i) => !used.has(i));
       if (rx && !free.length) return toast('Every channel on ' + host.name + ' has a transmitter. Take one out first.', 'bad');
       const people = peopleList();
+      const want = rx ? 'txmic' : 'bodypack';
+      // wireless mics or packs in the Gear Locker that are not on the drawing yet
+      const onDoc = new Set(st.doc.gear.map((g) => g.device_id).filter(Boolean));
+      const locker = ((typeof DEV !== 'undefined' && DEV.list) || []).filter((d) => d.kind === want && !onDoc.has(d.id))
+        .sort((a, b) => (b.pair_id === host.device_id) - (a.pair_id === host.device_id) || a.name.localeCompare(b.name, undefined, { numeric: true }));
       const dl = (id, kinds) => '<datalist id="' + id + '">' + GearModels.all().filter((m) => kinds.includes(m.kind)).map((m) => '<option value="' + esc(m.model) + '">' + esc(m.make || '') + '</option>').join('') + '</datalist>';
-      modal('<h3>' + (existing ? 'Put ' + esc(existing.name) + ' on ' + esc(host.name) : rx ? 'Add a transmitter to ' + esc(host.name) : 'Add an IEM pack to ' + esc(host.name)) + '</h3><form id="pmf">' +
+      const pairedTo = (d) => { const h = d.pair_id && DEV.list.find((x) => x.id === d.pair_id); return h ? (d.pair_id === host.device_id ? ' · paired with this one' : ' · paired with ' + h.name) : ''; };
+      modal('<h3>' + (existing ? 'Put ' + esc(tm(existing)) + ' on ' + esc(tm(host)) : rx ? 'Add a wireless mic to ' + esc(tm(host)) : 'Add an in-ear pack to ' + esc(tm(host))) + '</h3><form id="pmf">' +
         (rx ? '<label>Receiver channel</label><select id="pm_ch">' + free.map((i) => '<option value="' + i + '"' + (i === chPick ? ' selected' : '') + '>' + esc(host.ins[i]) + '</option>').join('') + '</select>' : '') +
-        (existing ? '' : (rx
+        (existing ? '' : (locker.length ? '<label>From the Gear Locker</label><select id="pm_dev"><option value="">New ' + (rx ? 'wireless mic' : 'pack') + '…</option>' + locker.map((d) => '<option value="' + d.id + '">' + esc(Tags.withModel(d.name, d.model) + pairedTo(d)) + '</option>').join('') + '</select>' : '') +
+          '<div id="pm_new"><label>Tag name</label><div class="tagrow"><input id="pm_n" placeholder="' + (rx ? 'WMIC-1' : 'IEM-1') + '"><button type="button" class="btn sm" id="pm_auto">Auto label</button></div>' +
+          (rx
           ? '<fieldset class="pmset"><legend>Transmitter</legend><div class="three"><div><label>Type</label><select id="pm_t">' + TX_TYPES.map((t) => '<option>' + t + '</option>').join('') + '</select></div>' +
               '<div><label>Make</label><input id="pm_mk" list="pm_mks" value="' + esc(host.make || '') + '"></div><div><label>Model</label><input id="pm_m" list="pm_tx" placeholder="Transmitter model"></div></div>' +
               '<label>Frequency (MHz)</label><input id="pm_f" inputmode="decimal" placeholder="000.000"></fieldset>' +
             '<fieldset class="pmset"><legend>Capsule or mic</legend><div class="two"><div><label>Make</label><input id="pm_cmk" list="pm_mks"></div><div><label>Model</label><input id="pm_c" list="pm_cap" placeholder="Capsule, lav or headset mic"></div></div></fieldset>'
-          : '<div class="two"><div><label>Pack model</label><input id="pm_m" list="pm_pk" placeholder="Pack model"></div><div><label>Earphones</label><input id="pm_e" placeholder="Earphones"></div></div>') +
-          '<div class="two"><div><label>Who uses it</label><input id="pm_p" list="pmppl" placeholder="Name"></div><div><label>Used for</label><input id="pm_u" placeholder="What it picks up"></div></div>' +
+          : '<div class="two"><div><label>Make</label><input id="pm_mk" list="pm_mks" value="' + esc(host.make || '') + '"></div><div><label>Pack model</label><input id="pm_m" list="pm_pk" placeholder="Pack model"></div></div><label>Earphones</label><input id="pm_e" placeholder="Earphones">') +
+          '</div><div class="two"><div><label>Who uses it</label><input id="pm_p" list="pmppl" placeholder="Name"></div><div><label>Used for</label><input id="pm_u" placeholder="' + (rx ? 'What it picks up' : 'Whose mix') + '"></div></div>' +
           '<datalist id="pmppl">' + people.map((p) => '<option value="' + esc(p) + '">').join('') + '</datalist>' + dl('pm_tx', ['txmic']) + dl('pm_cap', ['capsule', 'mic']) + dl('pm_pk', ['bodypack']) +
-          '<datalist id="pm_mks">' + GearModels.makes().map((m) => '<option value="' + esc(m) + '">').join('') + '</datalist>') +
+          '<datalist id="pm_mks">' + GearModels.makes().map((m) => '<option value="' + esc(m) + '">').join('') + '</datalist>' +
+          (host.device_id ? '<p class="note">It gets its own Gear Locker card, paired with ' + esc(host.name) + '.</p>' : '')) +
         '<div class="acts"><button type="button" data-close>Cancel</button><button class="primary">' + (existing ? 'Put it on' : 'Add') + '</button></div></form>', (w, close) => {
         w.classList.add('mwide');
         const pm = $('#pm_m', w);
         // picking a transmitter model you added before fills in its type
         if (pm && rx) pm.addEventListener('change', () => { const m = GearModels.find(pm.value, 'txmic'); if (m) { if (m.make) $('#pm_mk', w).value = m.make; if (m.capsule && TX_TYPES.includes(m.capsule)) $('#pm_t', w).value = m.capsule; } });
         const pc = $('#pm_c', w); if (pc) pc.addEventListener('change', () => { const m = GearModels.find(pc.value, 'capsule') || GearModels.find(pc.value, 'mic'); if (m && m.make) $('#pm_cmk', w).value = m.make; });
-        setTimeout(() => { const f = $('#pm_m', w) || $('#pm_ch', w); if (f) f.focus(); }, 40);
-        $('#pmf', w).addEventListener('submit', (e) => {
+        const pd = $('#pm_dev', w); if (pd) pd.addEventListener('change', () => $('#pm_new', w).classList.toggle('hide', !!pd.value));
+        const pa = $('#pm_auto', w);
+        if (pa) pa.addEventListener('click', () => { $('#pm_n', w).value = Tags.suggest(want, allNames(), { person: $('#pm_p', w).value.trim() }); });
+        setTimeout(() => { const f = $('#pm_dev', w) || $('#pm_n', w) || $('#pm_ch', w); if (f) f.focus(); }, 40);
+        $('#pmf', w).addEventListener('submit', async (e) => {
           e.preventDefault();
           const ch = rx ? Number($('#pm_ch', w).value) : null;
           const v = (id) => { const x = $(id, w); return x ? x.value.trim() : ''; };
           close();
-          if (existing) { change(() => { P.connect(st.doc, gearOf(existing.id), 0, gearOf(host.id), ch, { kind: 'rf' }); delete gearOf(existing.id).x; }, existing.name + ' is on ' + host.name + ' ' + host.ins[ch]); return; }
-          const item = rx ? { person: v('#pm_p'), use: v('#pm_u'), txtype: v('#pm_t'), make: v('#pm_mk'), model: v('#pm_m'), capsule: v('#pm_c'), capmake: v('#pm_cmk'), freq: v('#pm_f') }
-            : { person: v('#pm_p'), use: v('#pm_u'), model: v('#pm_m') || 'IEM pack', phones: v('#pm_e') };
-          Object.keys(item).forEach((k) => { if (!item[k]) delete item[k]; });
-          if (rx) {
-            if (!item.model) item.model = item.txtype || 'Transmitter';
-            GearModels.add([v('#pm_m') ? { kind: 'txmic', make: item.make, model: item.model, capsule: item.txtype } : null, item.capsule ? { kind: 'capsule', make: item.capmake, model: item.capsule } : null].filter(Boolean));
-          } else if (v('#pm_m')) GearModels.add([{ kind: 'bodypack', model: item.model }]);
-          const g = change(() => P.addMember(st.doc, gearOf(host.id), item, ch), rx ? 'Transmitter added to ' + host.name + ' ' + host.ins[ch] : 'Pack added to ' + host.name);
-          if (g) select({ gear: [g.id] }, { noSheet: true });
+          if (existing) {
+            change(() => { const ex = gearOf(existing.id); if (rx) P.connect(st.doc, ex, 0, gearOf(host.id), ch, { kind: 'rf' }); else P.connect(st.doc, gearOf(host.id), 0, ex, 0, { kind: 'rf' }); delete ex.x; delete ex.y; }, existing.name + ' is on ' + host.name + (rx ? ' ' + host.ins[ch] : ''));
+            pairInLocker(existing, host);
+            return;
+          }
+          const picked = pd && pd.value ? DEV.list.find((d) => d.id === Number(pd.value)) : null;
+          let item;
+          if (picked) item = { name: picked.name, make: picked.make, model: picked.model, txtype: picked.txtype, freq: picked.freq, capsule: picked.capsule, device_id: picked.id, person: v('#pm_p'), use: v('#pm_u') };
+          else {
+            item = rx ? { name: v('#pm_n'), person: v('#pm_p'), use: v('#pm_u'), txtype: v('#pm_t'), make: v('#pm_mk'), model: v('#pm_m'), capsule: v('#pm_c'), capmake: v('#pm_cmk'), freq: v('#pm_f') }
+              : { name: v('#pm_n'), person: v('#pm_p'), use: v('#pm_u'), make: v('#pm_mk'), model: v('#pm_m') || 'IEM pack', phones: v('#pm_e') };
+            if (rx) {
+              if (!item.model) item.model = item.txtype || 'Transmitter';
+              GearModels.add([v('#pm_m') ? { kind: 'txmic', make: item.make, model: item.model, capsule: item.txtype } : null, item.capsule ? { kind: 'capsule', make: item.capmake, model: item.capsule } : null].filter(Boolean));
+            } else if (v('#pm_m')) GearModels.add([{ kind: 'bodypack', make: item.make, model: item.model }]);
+          }
+          Object.keys(item).forEach((k) => { if (item[k] == null || item[k] === '') delete item[k]; });
+          if (!item.name) item.name = Tags.suggest(want, allNames(), { person: item.person });
+          const g = change(() => P.addMember(st.doc, gearOf(host.id), item, ch), (rx ? 'Wireless mic added to ' + host.name + ' ' + host.ins[ch] : 'Pack added to ' + host.name));
+          if (!g) return;
+          select({ gear: [g.id] }, { noSheet: true });
+          if (picked) pairInLocker(g, host);
+          else if (host.device_id && canEdit) {
+            // its own Gear Locker card, paired with the receiver or transmitter
+            try {
+              const r = await call('POST', '/api/devices', { name: g.name, kind: want, category: 'audio', make: g.make || '', model: g.model || '', txtype: g.txtype || '', freq: g.freq || '', capsule: g.capsule || '', capsule_typed: !!g.capsule, capsule_id: '', pair_id: host.device_id });
+              const x = gearOf(g.id); if (x) { x.device_id = r.id; queueSave(); }
+              if (typeof forgetDevices === 'function') forgetDevices(); await loadDevices(true); paintPane();
+            } catch (err) { toast('Not added to the Gear Locker: ' + err.message, 'bad'); }
+          }
         });
       });
+    }
+    /** Every tag name on the drawing (for Auto label). */
+    const allNames = (skip) => st.doc.gear.filter((g) => g.id !== skip).map((g) => g.name);
+    /** A mic or pack put on a receiver or transmitter here is paired with it in the Gear Locker too. */
+    async function pairInLocker(g, host) {
+      const dev = devOf(gearOf(g.id) || g);
+      if (!dev || !host.device_id || dev.pair_id === host.device_id || !canEdit) return;
+      try { await putDevice(dev.id, { pair_id: host.device_id }); } catch (e) { toast('Gear Locker not updated: ' + e.message, 'bad'); }
     }
     /** The names already tagged on the drawing, and the team's names. */
     function peopleList() {
@@ -1219,61 +1615,79 @@ const PatchView = (() => {
       });
     }
     /**
-     * Smart cable labels: one pattern names every cable (or only the ones without a label), from what each cable
-     * connects: {to} {toNum} → "Stage box 23", {ch} {name} → "23 WMIC-1", C{n} → C01, C02…
+     * Auto label: tag names for the gear (RX-1, WMIC-1 Kyle, SB-A, FOH SQ-5, PA-AMP1…) and one number for each cable
+     * (C-001, C-002… in signal order, the same at both ends). A preview with a tick on each; nothing changes until Apply.
+     * Ticked to start with: only gear and cables that still have their default name (the model, the type, or none).
      */
-    function cableTokens(c, ix) {
-      const a = gearOf(c.a), b = gearOf(c.b);
-      const fromPort = c.ap === 'link' ? '' : a.outs[c.ap], toPort = c.bp === 'link' ? '' : b.ins[c.bp];
-      let ch = '';
-      if (c.bp !== 'link' && b.kind === 'stagebox') ch = P.chanOf(b, c.bp) == null ? '' : P.chanOf(b, c.bp);
-      else if (c.bp !== 'link' && b.kind === 'console') ch = (b.localstart || 1) + c.bp;
-      const u = c.ap === 'link' ? {} : P.upstream(st.doc, ix, c.b, c.bp);
-      const src = u.src || (SRC_KINDS.includes(a.kind) ? a : null);
-      if (!ch && src) { const l = P.landing(st.doc, src)[0]; if (l && l.ch != null) ch = l.ch; }
-      const num = (p) => (String(p || '').match(/\d+/) || [''])[0];
-      return { from: a.name, fromPort, fromNum: num(fromPort), to: b.name, toPort, toNum: num(toPort), ch, name: src && src.chname || '', person: src && src.person || '', use: src && src.use || '', type: (KIND_STYLE[c.kind] || '').split(' · ')[0] };
-    }
-    const LABEL_PRESETS = [['{to} {toNum}', 'Where it plugs in (Stage box 23)'], ['{ch} {name}', 'Console channel and name (23 WMIC-1)'], ['{name}', 'Channel name (WMIC-1)'], ['{from} → {to}', 'From and to'], ['C{n}', 'Numbered (C01, C02…)'], ['', 'My own pattern…']];
-    function labelsDialog() {
-      const kinds = [...new Set(st.doc.cables.filter((c) => c.kind !== 'rf').map((c) => c.kind))];
-      modal('<h3>Label cables</h3><p class="note">One pattern names your cables from what they connect, ready to print on the cable ends. Undo puts the old labels back.</p><form id="plf">' +
-        '<label>Pattern</label><select id="pl_p">' + LABEL_PRESETS.map(([v, l]) => '<option value="' + esc(v) + '">' + esc(l) + '</option>').join('') + '</select>' +
-        '<input id="pl_c" class="mono" value="{to} {toNum}" style="margin-top:6px"><p class="note">You can use {from} {fromPort} {fromNum} {to} {toPort} {toNum} {ch} {name} {person} {use} {type} and {n} (a running number).</p>' +
-        '<div class="two"><div><label>{n} starts at</label><input id="pl_s" type="number" min="0" value="1"></div><div><label>Digits in {n}</label><select id="pl_d"><option value="1">1, 2, 3</option><option value="2" selected>01, 02, 03</option><option value="3">001, 002</option></select></div></div>' +
-        '<label>Which cables</label><div class="plk">' + kinds.map((k) => '<label class="tog sm"><input type="checkbox" data-k="' + k + '"' + (k === 'link' || k === 'dante' ? '' : ' checked') + '> ' + esc(KIND_STYLE[k]) + '</label>').join('') + '</div>' +
-        '<label class="tog sm"><input type="checkbox" id="pl_all"> Replace labels already there</label>' +
-        '<div class="plprev" id="pl_v"></div>' +
-        '<div class="acts"><button type="button" class="ghost" id="pl_clear">Clear labels</button><span class="grow"></span><button type="button" data-close>Cancel</button><button class="primary">Label them</button></div></form>', (w, close) => {
+    const isDefaultName = (g) => {
+      const n = P.tagKey(String(g.name || '').replace(/\s*#\d+$/, ''));
+      const k = P.KINDS[g.kind] || P.KINDS.other;
+      const plain = [k.label, g.model, (g.make || '') + ' ' + (g.model || ''), 'Handheld', 'Transmitter', 'IEM pack', 'Pack'].filter(Boolean).map(P.tagKey);
+      return !n || plain.includes(n) || /(mic|pack)$/.test(n) && (g.kind === 'txmic' || g.kind === 'bodypack') && !/^(wmic|iem)/.test(n);
+    };
+    function autoLabelDialog() {
+      const ix = P.index(st.doc);
+      // drawing order: wired gear stage by stage (left to right, top to bottom), then gear with no cables
+      const wired = new Set();
+      st.doc.cables.forEach((c) => { const ga = gearOf(c.a), gb = gearOf(c.b); const a = (P.hostOf(st.doc, ga) || ga).id, b = (P.hostOf(st.doc, gb) || gb).id; if (a !== b) { wired.add(a); wired.add(b); } });
+      const pos = (g) => { const h = P.hostOf(st.doc, g) || g; return { l: wired.has(h.id) ? 0 : 1, s: P.stageOf(h) === 'net' ? 6 : P.stageOf(h), x: h.x || 0, y: h.y || 0, m: h === g ? -1 : (P.members(st.doc, h).find((m) => m.g.id === g.id) || { port: 0 }).port }; };
+      const gearOrder = st.doc.gear.slice().sort((a, b) => { const p = pos(a), q = pos(b); return p.l - q.l || p.s - q.s || p.x - q.x || p.y - q.y || p.m - q.m; });
+      const infos = cableInfos(st.doc);
+      const cabOrder = st.doc.cables.filter((c) => c.kind !== 'rf' && infos.has(c.id)).sort((c1, c2) => {
+        const a1 = gearOf(c1.a), a2 = gearOf(c2.a), p = pos(a1), q = pos(a2);
+        return p.s - q.s || p.y - q.y || p.x - q.x || String(c1.ap).localeCompare(String(c2.ap), undefined, { numeric: true }) || (gearOf(c1.b).y || 0) - (gearOf(c2.b).y || 0);
+      });
+      const tick = new Map(gearOrder.map((g) => [g.id, isDefaultName(g)]));
+      const tickC = new Map(cabOrder.map((c) => [c.id, !c.label]));
+      const spot = new Map();      // speakers: a position instead of a number
+      const compute = () => {
+        const taken = gearOrder.filter((g) => !tick.get(g.id)).map((g) => g.name), out = new Map();
+        gearOrder.forEach((g) => { if (!tick.get(g.id)) return; const n = Tags.suggest(g.kind, taken, { person: g.kind === 'txmic' || g.kind === 'bodypack' ? g.person : '', model: g.model, position: spot.get(g.id) || '' }); taken.push(n); out.set(g.id, n); });
+        const ct = cabOrder.filter((c) => !tickC.get(c.id)).map((c) => c.label || ''), outC = new Map();
+        cabOrder.forEach((c) => { if (!tickC.get(c.id)) return; const n = Tags.cableName(infos.get(c.id), ct); ct.push(n); outC.set(c.id, n); });
+        return { g: out, c: outC };
+      };
+      const cabText = (c) => { const r = P.cableList({ gear: st.doc.gear, cables: [c] })[0]; return r ? r.from + ' → ' + r.to : ''; };
+      modal('<h3>Auto label</h3><p class="note">Tag names for your gear, and one name for each cable that says what it does (IN-A03 plugs into stage box A input 3; SPK, OUT, LNK and NET are numbered), printed the same at both ends. Untick anything that keeps its own name. Undo puts the old names back.</p><form id="alf">' +
+        '<div class="alh"><b>Gear</b><span class="grow"></span><button type="button" class="linkbtn" data-all="g1">All</button> · <button type="button" class="linkbtn" data-all="g0">None</button></div><div class="allist" id="al_g"></div>' +
+        '<label class="tog sm"><input type="checkbox" id="al_dev" checked> Also rename their Gear Locker cards</label>' +
+        '<div class="alh"><b>Cables</b><span class="grow"></span><button type="button" class="linkbtn" data-all="c1">All</button> · <button type="button" class="linkbtn" data-all="c0">None</button></div><div class="allist" id="al_c"></div>' +
+        '<div class="acts"><button type="button" data-close>Cancel</button><button class="primary" id="al_ok">Apply</button></div></form>', (w, close) => {
         w.classList.add('mwide');
-        const ix = P.index(st.doc);
-        const pick = () => {
-          const on = new Set($$('[data-k]', w).filter((x) => x.checked).map((x) => x.dataset.k)), all = $('#pl_all', w).checked;
-          return st.doc.cables.filter((c) => on.has(c.kind) && (all || !c.label)).sort((p, q) => {
-            const A = gearOf(p.a), B = gearOf(q.a);
-            return A.name.localeCompare(B.name) || String(p.ap).localeCompare(String(q.ap), undefined, { numeric: true }) || gearOf(p.b).name.localeCompare(gearOf(q.b).name) || String(p.bp).localeCompare(String(q.bp), undefined, { numeric: true });
-          });
+        const paintL = () => {
+          const r = compute();
+          $('#al_g', w).innerHTML = gearOrder.map((g) => {
+            const on = tick.get(g.id), h = P.hostOf(st.doc, g);
+            const sp = (g.kind === 'speaker' || g.kind === 'wedge') && on ? '<select class="alsp" data-sp="' + g.id + '"><option value="">Numbered</option>' + Tags.POSITIONS.map((p) => '<option' + (spot.get(g.id) === p ? ' selected' : '') + '>' + p + '</option>').join('') + '</select>' : '';
+            return '<label class="alr' + (on ? ' on' : '') + '"><input type="checkbox" data-tg="' + g.id + '"' + (on ? ' checked' : '') + '><span class="alo">' + esc(g.name) + (h ? ' <em>in ' + esc(h.name) + '</em>' : '') + '</span><span class="aln">' + (on ? '→ <b class="mono">' + esc(r.g.get(g.id)) + '</b>' : '<span class="note">keeps its name</span>') + '</span>' + sp + '</label>';
+          }).join('') || '<p class="note">No gear yet.</p>';
+          $('#al_c', w).innerHTML = cabOrder.map((c) => {
+            const on = tickC.get(c.id);
+            return '<label class="alr' + (on ? ' on' : '') + '"><input type="checkbox" data-tc="' + c.id + '"' + (on ? ' checked' : '') + '><span class="alo">' + esc(cabText(c)) + (c.label && !on ? ' <b class="mono">' + esc(c.label) + '</b>' : '') + '</span><span class="aln">' + (on ? '→ <b class="mono">' + esc(r.c.get(c.id)) + '</b>' : '<span class="note">keeps ' + (c.label ? 'its name' : 'no name') + '</span>') + '</span></label>';
+          }).join('') || '<p class="note">No cables yet.</p>';
+          $$('[data-tg]', w).forEach((x) => x.addEventListener('change', () => { tick.set(x.dataset.tg, x.checked); paintL(); }));
+          $$('[data-tc]', w).forEach((x) => x.addEventListener('change', () => { tickC.set(x.dataset.tc, x.checked); paintL(); }));
+          $$('[data-sp]', w).forEach((x) => { x.addEventListener('click', (e) => e.preventDefault()); x.addEventListener('change', () => { if (x.value) spot.set(x.dataset.sp, x.value); else spot.delete(x.dataset.sp); paintL(); }); });
+          const n = r.g.size + r.c.size;
+          $('#al_ok', w).textContent = n ? 'Apply ' + n + ' name' + (n === 1 ? '' : 's') : 'Nothing to change';
+          $('#al_ok', w).disabled = !n;
         };
-        const make = (list) => {
-          const pat = $('#pl_c', w).value, start = Number($('#pl_s', w).value) || 0, dig = Number($('#pl_d', w).value);
-          return list.map((c, i) => {
-            const t = cableTokens(c, ix); t.n = String(start + i).padStart(dig, '0');
-            return { c, label: pat.replace(/\{(\w+)\}/g, (m, k) => (t[k] != null ? String(t[k]) : m)).replace(/\s+/g, ' ').trim().slice(0, 60) };
-          });
-        };
-        const prev = () => {
-          const r = make(pick());
-          $('#pl_v', w).innerHTML = r.length ? '<div class="note">' + r.length + ' cable' + (r.length === 1 ? '' : 's') + '</div><table class="grid prep"><tbody>' + r.slice(0, 8).map((x) => '<tr><td>' + esc(gearOf(x.c.a).name + (x.c.ap === 'link' ? '' : ' ' + gearOf(x.c.a).outs[x.c.ap])) + ' → ' + esc(gearOf(x.c.b).name + (x.c.bp === 'link' ? '' : ' ' + gearOf(x.c.b).ins[x.c.bp])) + '</td><td><b class="mono">' + esc(x.label) + '</b></td></tr>').join('') + '</tbody></table>' + (r.length > 8 ? '<div class="note">and ' + (r.length - 8) + ' more</div>' : '') : '<p class="note">No cables to label' + ($('#pl_all', w).checked ? '.' : ' (every one has a label: tick Replace to change them).') + '</p>';
-        };
-        $('#pl_p', w).addEventListener('change', (e) => { if (e.target.value) $('#pl_c', w).value = e.target.value; else $('#pl_c', w).focus(); prev(); });
-        $$('input, select', w).forEach((x) => x.addEventListener('input', prev));
-        $$('input[type=checkbox]', w).forEach((x) => x.addEventListener('change', prev));
-        prev();
-        $('#pl_clear', w).addEventListener('click', () => { const list = pick(); close(); change(() => list.forEach((c) => { delete st.doc.cables.find((x) => x.id === c.id).label; }), list.length + ' labels cleared'); });
-        $('#plf', w).addEventListener('submit', (e) => {
+        $$('[data-all]', w).forEach((b) => b.addEventListener('click', () => { const v = b.dataset.all[1] === '1'; if (b.dataset.all[0] === 'g') gearOrder.forEach((g) => tick.set(g.id, v)); else cabOrder.forEach((c) => tickC.set(c.id, v)); paintL(); }));
+        paintL();
+        $('#alf', w).addEventListener('submit', async (e) => {
           e.preventDefault();
-          const r = make(pick()); close();
-          change(() => r.forEach((x) => { const c = st.doc.cables.find((y) => y.id === x.c.id); if (x.label) c.label = x.label; else delete c.label; }), r.length + ' cable' + (r.length === 1 ? '' : 's') + ' labelled');
+          const r = compute(), dev = $('#al_dev', w).checked;
+          close();
+          const renamed = [];
+          change(() => {
+            r.g.forEach((n, id) => { const g = gearOf(id); if (g && g.name !== n) { g.name = n; if (g.device_id) renamed.push([g.device_id, n]); } });
+            r.c.forEach((n, id) => { const c = st.doc.cables.find((x) => x.id === id); if (c) c.label = n; });
+          }, (r.g.size ? r.g.size + ' tag name' + (r.g.size === 1 ? '' : 's') : '') + (r.g.size && r.c.size ? ' and ' : '') + (r.c.size ? r.c.size + ' cable' + (r.c.size === 1 ? '' : 's') : '') + ' labelled. Undo puts them back.');
+          if (dev && renamed.length && canEdit) {
+            let bad = 0;
+            for (const [id, n] of renamed) { try { await putDevice(id, { name: n }); } catch (err) { bad++; } }
+            if (bad) toast(bad + ' Gear Locker card' + (bad === 1 ? ' was' : 's were') + ' not renamed (the name is already used there).', 'bad');
+          }
         });
       });
     }
@@ -1314,9 +1728,11 @@ const PatchView = (() => {
 
     // ---------- changes, undo, saving ----------
     function change(fn, msg, keepPane) {
-      st.undo.push(JSON.stringify(st.doc)); if (st.undo.length > 120) st.undo.shift();
+      const before = JSON.stringify(st.doc);
+      st.undo.push(before); if (st.undo.length > 120) st.undo.shift();
       st.redo = [];
       const r = fn();
+      syncNet(JSON.parse(before), st.doc);
       st.cache = null;
       paint(true);
       if (!keepPane) paintPane();
@@ -1324,8 +1740,8 @@ const PatchView = (() => {
       queueSave();
       return r;
     }
-    function undo() { if (!st.undo.length) return; st.redo.push(JSON.stringify(st.doc)); st.doc = JSON.parse(st.undo.pop()); st.cache = null; paint(true); paintPane(); queueSave(); }
-    function redo() { if (!st.redo.length) return; st.undo.push(JSON.stringify(st.doc)); st.doc = JSON.parse(st.redo.pop()); st.cache = null; paint(true); paintPane(); queueSave(); }
+    function undo() { if (!st.undo.length) return; const b = st.doc; st.redo.push(JSON.stringify(st.doc)); st.doc = JSON.parse(st.undo.pop()); syncNet(b, st.doc); st.cache = null; paint(true); paintPane(); queueSave(); }
+    function redo() { if (!st.redo.length) return; const b = st.doc; st.undo.push(JSON.stringify(st.doc)); st.doc = JSON.parse(st.redo.pop()); syncNet(b, st.doc); st.cache = null; paint(true); paintPane(); queueSave(); }
     let saveTimer = null;
     function queueSave() { $('#psave').textContent = 'Saving…'; S.dirty = true; clearTimeout(saveTimer); saveTimer = setTimeout(save, 700); }
     async function save() {
@@ -1334,6 +1750,7 @@ const PatchView = (() => {
       try {
         const r = await call('PUT', '/api/patch', { doc: st.doc, baseVersion: st.version });
         st.version = r.version;
+        if (!st.draft) { st.draft = true; paintRev(); }
         $('#psave').textContent = 'Saved'; S.dirty = false;
       } catch (e) {
         if (e.status === 409) { toast(e.message, 'bad'); const d = await get('/api/patch'); st.doc = d.doc; st.version = d.version; st.undo = []; st.redo = []; S.dirty = false; st.cache = null; paint(true); paintPane(); $('#psave').textContent = 'Reloaded'; }
@@ -1342,8 +1759,41 @@ const PatchView = (() => {
       st.saving = false;
       if (st.dirtySave) { st.dirtySave = false; save(); }
     }
+    /** Wait for any pending autosave, so publishing marks what is on screen. */
+    async function flush() {
+      if (saveTimer && S.dirty) { clearTimeout(saveTimer); saveTimer = null; await save(); }
+      for (let i = 0; i < 100 && st.saving; i++) await new Promise((r) => setTimeout(r, 100));
+    }
+    const bumpRev = (rev, level) => {
+      const m = /^(\d+)\.(\d+)\.(\d+)$/.exec(String(rev || ''));
+      if (!m) return '1.0.0';
+      const [M, n, q] = m.slice(1).map(Number);
+      return level === 'major' ? (M + 1) + '.0.0' : level === 'minor' ? M + '.' + (n + 1) + '.0' : M + '.' + n + '.' + (q + 1);
+    };
+    /** Done with changes: publish them as the next revision (patch, minor or major), or keep them as a draft. */
+    function publishDialog() {
+      const lv = [['patch', 'Patch', 'Small fixes: a renamed cable, a moved card'], ['minor', 'Minor', 'Setup changes: gear added or re-patched'], ['major', 'Major', 'A new layout, like a special service']];
+      const first = !st.rev;
+      modal('<h3>Publish this revision?</h3><p>' + (first ? 'The stage patch has not been published yet. Its first revision is 1.0.0.' : 'Changes since Rev ' + esc(st.rev) + '. Publishing gives them a number for the PDF and the history.') + '</p>' +
+        '<form id="pubf">' + (first ? '' : '<div class="publv">' + lv.map((l, i) => '<label class="publ"><input type="radio" name="lv" value="' + l[0] + '"' + (i === 0 ? ' checked' : '') + '><span><b>' + l[1] + ' · ' + bumpRev(st.rev, l[0]) + '</b><em>' + l[2] + '</em></span></label>').join('') + '</div>') +
+        '<label>Note <span class="note">(optional)</span></label><input id="pubn" maxlength="200" placeholder="What changed, like “Added choir mics”">' +
+        '<div class="acts"><button type="button" data-close>Keep as draft</button><button class="primary" id="pubb">Publish Rev ' + bumpRev(st.rev, 'patch') + '</button></div></form>', (w, close) => {
+        const lvOf = () => { const r = $('input[name=lv]:checked', w); return r ? r.value : 'patch'; };
+        $$('input[name=lv]', w).forEach((r) => r.addEventListener('change', () => { $('#pubb', w).textContent = 'Publish Rev ' + bumpRev(st.rev, lvOf()); }));
+        $('#pubf', w).addEventListener('submit', async (e) => {
+          e.preventDefault();
+          const b = $('#pubb', w); b.disabled = true;
+          try {
+            await flush();
+            const r = await call('POST', '/api/patch/publish', { level: lvOf(), note: $('#pubn', w).value.trim() });
+            st.rev = r.rev; st.draft = false; paintRev(); close(); toast('Published Rev ' + r.rev, 'ok');
+          } catch (err) { toast(err.message, 'bad'); b.disabled = false; }
+        });
+      });
+    }
     document.addEventListener('keydown', function keys(e) {
       if (!svg.isConnected) return document.removeEventListener('keydown', keys);
+      if ((e.key === 'f' || e.key === 'F') && !e.ctrlKey && !e.metaKey && !e.altKey && !/input|textarea|select/i.test(e.target.tagName) && !document.querySelector('.modal')) { e.preventDefault(); fit(e.shiftKey && st.sel.length ? selBox() : null); return; }
       if (!st.edit || /input|textarea|select/i.test(e.target.tagName) || document.querySelector('.modal')) return;
       if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'z') { e.preventDefault(); if (e.shiftKey) redo(); else undo(); }
       else if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'y') { e.preventDefault(); redo(); }
@@ -1351,6 +1801,7 @@ const PatchView = (() => {
       else if (e.key === 'Delete' || e.key === 'Backspace') {
         if (st.selCable) { e.preventDefault(); const id = st.selCable; st.selCable = null; change(() => { st.doc.cables = st.doc.cables.filter((c) => c.id !== id); }, 'Cable removed'); }
         else if (st.sel.length === 1) { e.preventDefault(); removeGear(st.sel[0]); }
+        else if (st.sel.length > 1) { e.preventDefault(); removeSelection(); }
       } else if (e.key.startsWith('Arrow') && st.sel.length) {
         // nudge
         e.preventDefault();
@@ -1374,7 +1825,7 @@ const PatchView = (() => {
         const list = st.sel.map(gearOf).filter(Boolean);
         host.innerHTML = '<div class="pph"><button class="ghost pback" id="pbk2" title="Back">' + icon('x') + '</button><b>' + list.length + ' pieces of gear</b></div>' +
           (st.edit ? '<p class="note">Drag one to move them all, or line them up:</p><div class="palign2">' + [['left', '⇤ Left edges'], ['top', '⤒ Top edges'], ['center', '↔ Centres'], ['vdist', '⇕ Space evenly'], ['hdist', '⇔ Space across']].map(([k, l]) => '<button class="btn" data-al2="' + k + '">' + l + '</button>').join('') + '</div>' : '') +
-          '<div class="plist2">' + list.map((x) => '<button class="prow" data-pick="' + x.id + '"><b>' + esc(x.name) + '</b><span>' + esc([who(x), x.model].filter(Boolean).join(' · ')) + '</span></button>').join('') + '</div>';
+          '<div class="plist2">' + list.map((x) => '<button class="prow" data-pick="' + x.id + '"><b>' + esc(tm(x)) + '</b><span>' + esc([who(x), x.model].filter(Boolean).join(' · ')) + '</span></button>').join('') + '</div>';
         $$('[data-pick]', host).forEach((b) => b.addEventListener('click', () => select({ gear: [b.dataset.pick] })));
         $$('[data-al2]', host).forEach((b) => b.addEventListener('click', () => align(b.dataset.al2)));
         $('#pbk2', host).addEventListener('click', () => { select(null); const m = host.closest('.modal'); if (m) m.remove(); });
@@ -1396,40 +1847,64 @@ const PatchView = (() => {
       receiver: [['nin', 'Channels', 2]], amp: [['nin', 'Channels', 2]],
       processor: [['nin', 'Inputs', 2], ['nout', 'Outputs', 6]], source: [['nout', 'Outputs', 2]],
       computer: [['nin', 'Inputs', 2], ['nout', 'Outputs', 2]], other: [['nin', 'Inputs', 1], ['nout', 'Outputs', 1]],
-      di: [['nout', 'Outputs (1 mono, 2 stereo)', 1]], txmic: [['capsule', 'Capsule', '']], iemtx: [['mode', 'Mode', 'Stereo']]
+      di: [['nout', 'Outputs (1 mono, 2 stereo)', 1]], txmic: [['capsule', 'Capsule', '']], iemtx: [['mode', 'Mode', 'Stereo']], network: [['nports', 'Ports', 8]]
     };
+    /*
+     * Add equipment: find first (your list and the Gear Locker), then Gear Locker cards not on the drawing yet,
+     * grouped by type, then your models; "New gear" (folded) for something you have not added before.
+     */
     function addPane(host) {
       const onPatch = new Set(st.doc.gear.map((g) => g.device_id).filter(Boolean));
-      const devs = ((typeof DEV !== 'undefined' && DEV.list) || []).filter((d) => !onPatch.has(d.id) && d.category === 'audio');
+      const devs = ((typeof DEV !== 'undefined' && DEV.list) || []).filter((d) => !onPatch.has(d.id) && (['audio', 'network', 'computer'].includes(d.category) || P.KINDS[d.kind]));
       const pre = st.prefill || {};
       const kind = pre.kind || st.newKind || 'mic';
       const models = GearModels.all();
-      const byKind = P.KIND_ORDER.map((k) => [k, models.filter((m) => m.kind === k).sort((a, b) => (a.make + a.model).localeCompare(b.make + b.model))]).filter(([, l]) => l.length);
+      const typeOf = (k) => (P.KINDS[k] ? P.KINDS[k].label : 'Not sorted yet');
+      const order = (k) => { const i = P.KIND_ORDER.indexOf(k); return i < 0 ? 99 : i; };
+      const group = (list, kindOf) => { const m = new Map(); list.forEach((x) => { const k = kindOf(x) || ''; if (!m.has(k)) m.set(k, []); m.get(k).push(x); }); return [...m.entries()].sort((a, b) => order(a[0]) - order(b[0])); };
+      const devGroups = group(devs.slice().sort((a, b) => a.name.localeCompare(b.name, undefined, { numeric: true })), (d) => d.kind || (GearModels.find(d.model) || {}).kind);
+      const modGroups = group(models.slice().sort((a, b) => (a.make + a.model).localeCompare(b.make + b.model)), (m) => m.kind);
       const fields = (NEWF[kind] || []).map(([f, label, def]) => {
         const v = pre[f] != null ? pre[f] : def;
         if (f === 'mode') return '<label>' + label + '<select data-nf="mode"><option>Stereo</option><option' + (v === 'Mono' ? ' selected' : '') + '>Mono</option></select></label>';
-        const num = ['nin', 'nout', 'namelen'].includes(f);
-        return '<label>' + label + '<input data-nf="' + f + '"' + (num ? ' type="number" min="0" max="128"' : '') + ' value="' + esc(Array.isArray(v) ? v.join(', ') : v) + '"' + (f === 'colors' ? ' placeholder="Red, Green, Yellow, Blue, Purple, Cyan, White"' : f === 'namelen' ? ' placeholder="no limit"' : '') + '></label>';
+        const num = ['nin', 'nout', 'namelen', 'nports'].includes(f);
+        return '<label' + (f === 'colors' ? ' class="wide"' : '') + '>' + label + '<input data-nf="' + f + '"' + (num ? ' type="number" min="0" max="128"' : '') + ' value="' + esc(Array.isArray(v) ? v.join(', ') : v) + '"' + (f === 'colors' ? ' placeholder="Red, Green, Yellow, Blue, Purple, Cyan, White"' : f === 'namelen' ? ' placeholder="no limit"' : '') + '></label>';
       }).join('');
+      const openNew = !!pre.kind || !!pre.model || (!devs.length && !models.length);
       host.innerHTML = '<div class="pph"><b>Add equipment</b>' + (host.id === 'ppane' ? '<button class="ghost pback" id="pclose" title="Close" style="margin-left:auto">' + icon('x') + '</button>' : '') + '</div>' + (st.placeAt ? '<p class="note">It goes where you right-clicked.</p>' : '') +
-        '<form class="pnew" id="pnew"><div class="pch">New gear' + (pre.device_id ? ' · from the Gear Locker' : '') + '</div>' +
+        '<input type="search" id="pfind" placeholder="Find in your list and Gear Locker" class="pfind" autocomplete="off">' +
+        '<p class="note pnone hide" id="pnone">Nothing matches. Add it as new gear below.</p>' +
+        (devGroups.length ? '<div class="psec"><div class="psech">In the Gear Locker, not on the drawing yet</div>' + devGroups.map(([k, l]) => '<div class="pcat"><div class="pch">' + esc(typeOf(k)) + '</div><div class="pitems">' + l.map((d) => '<button class="pitem cat-' + ((P.KINDS[k] || P.KINDS.other).cat) + '" data-dev="' + d.id + '"><b>' + esc(Tags.withModel(d.name, d.model)) + '</b><span>' + esc([d.make, d.location].filter(Boolean).join(' · ') || 'Gear Locker') + '</span></button>').join('') + '</div></div>').join('') + '</div>' : '') +
+        (modGroups.length ? '<div class="psec"><div class="psech">Your models</div>' + modGroups.map(([k, l]) => '<div class="pcat"><div class="pch">' + esc(typeOf(k)) + '</div><div class="pitems">' + l.map((m) => '<div class="pitemw"><button class="pitem cat-' + (P.KINDS[k] || P.KINDS.other).cat + '" data-mod="' + esc(GearModels.keyOf(m)) + '"><b>' + esc(m.model) + '</b><span>' + esc([m.make, m.nin != null && k !== 'receiver' && k !== 'amp' ? m.nin + ' in' : '', m.nout ? m.nout + ' out' : '', (k === 'receiver' || k === 'amp') && m.nin ? m.nin + ' ch' : '', m.link].filter(Boolean).join(' · ')) + '</span></button><button type="button" class="pforget2" data-forget="' + esc(GearModels.keyOf(m)) + '" title="Take off your list">' + icon('x') + '</button></div>').join('') + '</div></div>').join('') + '</div>'
+          : '<p class="note pempty2">Your list is empty. Each make and model you add as new gear is kept here, so next time it is one tap.</p>') +
+        '<details class="pnewd" id="pnewd"' + (openNew ? ' open' : '') + '><summary>' + icon('plus') + 'New gear' + (pre.device_id ? ' · from the Gear Locker' : '') + '</summary>' +
+        '<form class="pnew" id="pnew">' +
         '<label>Type<select id="pn_k">' + P.KIND_ORDER.map((k) => '<option value="' + k + '"' + (k === kind ? ' selected' : '') + '>' + esc(P.KINDS[k].label) + '</option>').join('') + '</select></label>' +
-        '<div class="two"><label>Make<input id="pn_mk" list="pn_mks" value="' + esc(pre.make || '') + '" placeholder="Manufacturer"></label><label>Model<input id="pn_md" value="' + esc(pre.model || '') + '" placeholder="Model number" required></label></div>' +
+        '<label>Make<input id="pn_mk" list="pn_mks" value="' + esc(pre.make || '') + '" placeholder="Manufacturer" autocomplete="off"></label>' +
+        '<label>Model<input id="pn_md" list="pn_mds" value="' + esc(pre.model || '') + '" placeholder="Model number" autocomplete="off" required></label>' +
+        '<label>Tag name<span class="tagrow"><input id="pn_tag" value="' + esc(pre.name || '') + '" placeholder="Leave empty to use the model"><button type="button" class="btn sm" id="pn_auto">Auto label</button></span></label>' +
+        (pre.device_id ? '' : '<label>How many?<input id="pn_n" type="number" min="1" max="24" value="1" inputmode="numeric"></label>') +
         '<datalist id="pn_mks">' + GearModels.makes().map((m) => '<option value="' + esc(m) + '">').join('') + '</datalist>' +
-        (fields ? '<div class="two pnf">' + fields + '</div>' : '') +
-        '<div class="acts"><span class="note grow">Saved to your list for next time</span>' + (pre.device_id ? '<button type="button" class="ghost" id="pn_x">Cancel</button>' : '') + '<button class="primary">' + icon('plus') + 'Add</button></div></form>' +
-        '<input type="search" id="pfind" placeholder="Find in your list and Gear Locker" class="pfind">' +
-        (devs.length ? '<div class="pcat"><div class="pch">From your Gear Locker</div><div class="pitems">' + devs.map((d) => '<button class="pitem" data-dev="' + d.id + '"><b>' + esc(d.name) + '</b><span>' + esc([d.make, d.model].filter(Boolean).join(' ')) + '</span></button>').join('') + '</div></div>' : '') +
-        (byKind.length ? byKind.map(([k, l]) => '<div class="pcat"><div class="pch">' + esc(P.KINDS[k].label) + '</div><div class="pitems">' + l.map((m) => '<div class="pitemw"><button class="pitem cat-' + P.KINDS[k].cat + '" data-mod="' + esc(GearModels.keyOf(m)) + '"><b>' + esc(m.model) + '</b><span>' + esc([m.make, m.nin != null && k !== 'receiver' && k !== 'amp' ? m.nin + ' in' : '', m.nout ? m.nout + ' out' : '', (k === 'receiver' || k === 'amp') && m.nin ? m.nin + ' ch' : '', m.link].filter(Boolean).join(' · ')) + '</span></button><button type="button" class="pforget2" data-forget="' + esc(GearModels.keyOf(m)) + '" title="Take off your list">' + icon('x') + '</button></div>').join('') + '</div></div>').join('')
-          : '<p class="note pempty2">Your list is empty. Each make and model you add above is kept here, so next time it is one tap.</p>');
+        '<datalist id="pn_mds">' + models.filter((m) => m.kind === kind).map((m) => '<option value="' + esc(m.model) + '">' + esc(m.make || '') + '</option>').join('') + '</datalist>' +
+        (fields ? '<div class="pnf">' + fields + '</div>' : '') +
+        '<button class="primary pnadd">' + icon('plus') + 'Add to the drawing</button>' + (pre.device_id ? '<button type="button" class="ghost pnadd" id="pn_x">Cancel</button>' : '') +
+        '<p class="note">The make and model are saved to your list for next time.</p></form></details>';
       const pcl = $('#pclose', host); if (pcl) pcl.addEventListener('click', () => { st.adding = false; st.prefill = null; paintPane(); });
       const find = $('#pfind', host);
       find.addEventListener('input', () => {
         const q = key(find.value);
         $$('.pitem', host).forEach((b) => (b.closest('.pitemw') || b).classList.toggle('hide', !!q && !key(b.textContent).includes(q)));
-        $$('.pcat', host).forEach((c) => c.classList.toggle('hide', !!q && !c.querySelector('.pitem:not(.hide)') && !c.querySelector('.pitemw:not(.hide)')));
+        $$('.pcat', host).forEach((c) => c.classList.toggle('hide', !!q && !c.querySelector('.pitem:not(.hide)') && !c.querySelector('.pitemw:not(.hide) .pitem')));
+        $$('.psec', host).forEach((c) => c.classList.toggle('hide', !!q && !c.querySelector('.pcat:not(.hide)')));
+        const none = !!q && !host.querySelector('.psec:not(.hide)');
+        $('#pnone', host).classList.toggle('hide', !none);
+        if (none) { $('#pnewd', host).open = true; if (!$('#pn_md', host).value) $('#pn_md', host).value = find.value.trim(); }
       });
-      $('#pn_k', host).addEventListener('change', (e) => { st.newKind = e.target.value; st.prefill = { ...(st.prefill || {}), kind: e.target.value, make: $('#pn_mk', host).value, model: $('#pn_md', host).value }; addPane(host); });
+      $('#pn_k', host).addEventListener('change', (e) => { st.newKind = e.target.value; st.prefill = { ...(st.prefill || {}), kind: e.target.value, make: $('#pn_mk', host).value, model: $('#pn_md', host).value, name: $('#pn_tag', host).value }; addPane(host); });
+      $('#pn_md', host).addEventListener('change', () => { const m = GearModels.find($('#pn_md', host).value, $('#pn_k', host).value); if (m && m.make && !$('#pn_mk', host).value) $('#pn_mk', host).value = m.make; });
+      let autoTag = false;
+      $('#pn_auto', host).addEventListener('click', () => { $('#pn_tag', host).value = Tags.suggest($('#pn_k', host).value, allNames(), { model: $('#pn_md', host).value.trim() }); autoTag = true; });
+      $('#pn_tag', host).addEventListener('input', () => { autoTag = false; });
       const px = $('#pn_x', host); if (px) px.addEventListener('click', () => { st.prefill = null; addPane(host); });
       $('#pnew', host).addEventListener('submit', async (e) => {
         e.preventDefault();
@@ -1438,14 +1913,19 @@ const PatchView = (() => {
         const m = { kind: k, make, model };
         $$('[data-nf]', host).forEach((x) => {
           const f = x.dataset.nf, v = x.value.trim();
-          if (['nin', 'nout', 'namelen'].includes(f)) { if (v !== '') m[f] = Math.max(0, Math.min(128, Number(v) || 0)); }
+          if (['nin', 'nout', 'namelen', 'nports'].includes(f)) { if (v !== '') m[f] = Math.max(0, Math.min(128, Number(v) || 0)); }
           else if (f === 'colors') { const c = v.split(',').map((y) => y.trim()).filter(Boolean); if (c.length) m.colors = c; }
           else if (v) m[f] = v;
         });
+        const tag = $('#pn_tag', host).value.trim(), n = Math.max(1, Math.min(24, Number(($('#pn_n', host) || {}).value) || 1));
         const p0 = st.prefill; st.prefill = null; st.newKind = k;
-        await GearModels.add([m]);
-        if (p0 && p0.device_id) placeItem({ ...m, name: p0.name, device_id: p0.device_id }, p0.name);
-        else addItem(m);
+        const toList = { ...m }; delete toList.nports;
+        await GearModels.add([toList]);
+        if (p0 && p0.device_id) { placeItem({ ...m, name: tag || p0.name, device_id: p0.device_id }, tag || p0.name); return; }
+        for (let i = 0; i < n; i++) {
+          const name = i === 0 ? tag : autoTag ? Tags.suggest(k, allNames(), { model }) : tag ? P.uniqueName(st.doc, tag) : '';
+          await addItem({ ...m }, name);
+        }
       });
       $$('[data-mod]', host).forEach((b) => b.addEventListener('click', () => { const m = GearModels.all().find((x) => GearModels.keyOf(x) === b.dataset.mod); if (m) addItem({ ...m }); }));
       $$('[data-forget]', host).forEach((b) => b.addEventListener('click', async () => {
@@ -1454,27 +1934,31 @@ const PatchView = (() => {
       }));
       $$('[data-dev]', host).forEach((b) => b.addEventListener('click', () => { const d = DEV.list.find((x) => x.id === Number(b.dataset.dev)); addDevice(d, host); }));
       if (st.prefill) setTimeout(() => { const f = $('#pn_k', host); if (f) f.focus(); }, 30);
+      else if (wide()) setTimeout(() => { if (document.activeElement === document.body) find.focus(); }, 30);
     }
     /** Where new gear goes: where you right-clicked, else the middle of what you can see, in a free spot. */
     function newSpot(item) {
       const r = cv.getBoundingClientRect();
       const c = st.placeAt || world(r.left + r.width * 0.42, r.top + r.height * 0.3);
       st.placeAt = null;
-      const rects = D ? [...D.models.values()].map((m) => ({ x: m.g.x, y: m.g.y, w: m.w, h: m.h })) : [];
+      const rects = D ? [...D.models.values()].map((m) => outer(m)) : [];
       const h = HEAD + Math.min(6, (item.nin || 1)) * ROW + FOOT;
       return freeSpot(rects, CW, h, c.x, c.y);
     }
     /** A card from the Gear Locker: its model from your list when it is there, else the New gear form asks what it is. */
     function addDevice(d, host) {
       const m = GearModels.find(d.model) || GearModels.find(d.name);
-      if (!m && !d.kind) {
+      if (!m && !(d.kind && P.KINDS[d.kind])) {
         st.prefill = { make: d.make, model: d.model || d.name, name: d.name, device_id: d.id, nin: d.inputs || undefined, nout: d.outputs || undefined };
         if (host) addPane(host); else paintPane();
         toast('What type of gear is ' + d.name + '? Pick it in the form.');
         return;
       }
       const item = { ...(m || { kind: d.kind }), name: d.name, make: d.make || (m && m.make), model: d.model || (m && m.model), device_id: d.id };
+      if (d.kind && P.KINDS[d.kind]) item.kind = d.kind;
       if (!m && d.inputs) item.nin = d.inputs; if (!m && d.outputs) item.nout = d.outputs;
+      if (item.kind === 'network') item.nports = Math.max(d.inputs || 0, d.outputs || 0) || 8;
+      if (item.kind === 'txmic') Object.assign(item, { txtype: d.txtype || undefined, freq: d.freq || undefined, capsule: d.capsule || undefined });
       placeItem(item, d.name);
     }
     function placeItem(item, name) {
@@ -1483,10 +1967,9 @@ const PatchView = (() => {
       select({ gear: [g.id] }, { noSheet: true }); closeSheet();
       focusGear(g.id);
     }
-    async function addItem(it) {
+    async function addItem(it, tag) {
       const k = P.KINDS[it.kind];
-      // a mic or pack goes into the selected wireless system if one is picked
-      const name = P.uniqueName(st.doc, it.model);
+      const name = P.uniqueName(st.doc, tag || it.model);
       let device_id = null;
       if (k.card) {
         // big gear gets a card in the Gear Locker so the rest of LiveGenie (pages, map, IP lists) knows it
@@ -1495,7 +1978,7 @@ const PatchView = (() => {
         if (ex) device_id = ex.id;
         else {
           try {
-            const r = await call('POST', '/api/devices', { name, kind: it.kind, category: 'audio', make: it.make || '', model: it.model, inputs: it.kind === 'receiver' ? 0 : it.nin || 0, outputs: it.kind === 'receiver' ? it.nin || 0 : it.nout || 0 });
+            const r = await call('POST', '/api/devices', { name, kind: it.kind, category: it.kind === 'network' ? 'network' : 'audio', make: it.make || '', model: it.model, inputs: it.kind === 'receiver' ? 0 : it.kind === 'network' ? it.nports || 8 : it.nin || 0, outputs: it.kind === 'receiver' ? it.nin || 0 : it.nout || 0, ...(it.kind === 'network' ? { networked: true } : {}) });
             device_id = r.id; if (typeof forgetDevices === 'function') forgetDevices(); await loadDevices(true);
           } catch (e) { /* the drawing still works without a card */ }
         }
@@ -1517,19 +2000,22 @@ const PatchView = (() => {
       const host2 = P.hostOf(st.doc, g);
       const fld = (f, label, val, extra) => '<label>' + label + '<input data-f="' + f + '" value="' + esc(val == null ? '' : val) + '"' + (ro ? ' disabled' : '') + (extra || '') + '></label>';
       const consoleMixes = () => { const cons = st.doc.gear.filter((x) => x.kind === 'console'); const list = [...new Set(cons.flatMap((c) => c.mixes || P.DEFAULT_MIXES))]; return list.length ? list : P.DEFAULT_MIXES; };
-      const allOuts = () => st.doc.gear.filter((x) => x.id !== g.id && x.outs.length).map((x) => '<optgroup label="' + esc(x.name) + '">' + x.outs.map((p, j) => '<option value="' + x.id + ':' + j + '">' + esc(x.name + ' ' + p) + '</option>').join('') + '</optgroup>').join('');
-      const allIns = () => st.doc.gear.filter((x) => x.id !== g.id && x.ins.length).map((x) => '<optgroup label="' + esc(x.name) + '">' + x.ins.map((p, i) => '<option value="' + x.id + ':' + i + '"' + (ix.into.get(x.id + ':' + i) ? ' class="taken"' : '') + '>' + esc(x.name + ' ' + p) + (ix.into.get(x.id + ':' + i) ? ' (in use)' : '') + '</option>').join('') + '</optgroup>').join('');
+      const allOuts = () => st.doc.gear.filter((x) => x.id !== g.id && x.outs.length && x.kind !== 'txmic' && x.kind !== 'iemtx').map((x) => '<optgroup label="' + esc(tm(x)) + '">' + x.outs.map((p, j) => '<option value="' + x.id + ':' + j + '">' + esc(x.name + ' ' + p) + '</option>').join('') + '</optgroup>').join('');
+      const allIns = () => st.doc.gear.filter((x) => x.id !== g.id && x.ins.length && x.kind !== 'bodypack').map((x) => '<optgroup label="' + esc(tm(x)) + '">' + x.ins.map((p, i) => '<option value="' + x.id + ':' + i + '"' + (ix.into.get(x.id + ':' + i) ? ' class="taken"' : '') + '>' + esc(x.name + ' ' + p) + (ix.into.get(x.id + ':' + i) ? ' (in use)' : '') + '</option>').join('') + '</optgroup>').join('');
       const mem = P.members(st.doc, g);
       const facts = [['Who uses it', g.person], ['Used for', g.use], ['Make', g.make], ['Model', g.model], ['Capsule', g.capsule], ['Frequency', g.freq && g.freq + ' MHz'], ['Mode', g.mode], ['Earphones', g.phones],
         ['In', host2 ? host2.name + (g.kind === 'txmic' ? ' ' + host2.ins[(st.doc.cables.find((c) => c.a === g.id && c.kind === 'rf') || {}).bp] : '') : ''], ['Section', g.group], ['Notes', g.notes]].filter((f) => f[1]);
       let html = '<div class="pph"><button class="ghost pback" id="pbk" title="Back">' + icon('x') + '</button><span class="pkind cat-' + k.cat + '">' + esc(k.label) + '</span>' + (host2 ? '<button class="linkbtn" id="phost">in ' + esc(host2.name) + '</button>' : '') + '</div>' +
-        (ro ? '<h3 class="pname">' + esc(g.name) + '</h3><div class="pfacts">' + facts.map((f) => '<div><span>' + f[0] + '</span><b>' + esc(f[1]) + '</b></div>').join('') + '</div>' : '<div class="pform">' + fld('name', 'Name', g.name) +
+        (ro ? '<h3 class="pname">' + esc(g.name) + '</h3><div class="pfacts">' + facts.map((f) => '<div><span>' + f[0] + '</span><b>' + esc(f[1]) + '</b></div>').join('') + '</div>' : '<div class="pform">' +
+        '<label>Tag name<span class="tagrow"><input data-f="name" value="' + esc(g.name) + '"><button type="button" class="btn sm" id="pautotag" title="Suggest a tag name (RX-1, WMIC-1, PA-AMP1…)">Auto label</button></span></label>' +
+        (g.device_id ? '<label class="tog sm pdevren"><input type="checkbox" id="pdevren" checked> Rename its Gear Locker card too</label>' : '') +
         (k.fields.includes('person') ? fld('person', 'Who uses it', g.person, ' list="pppl" placeholder="Name"') + '<datalist id="pppl">' + peopleList().map((p) => '<option value="' + esc(p) + '">').join('') + '</datalist>' : '') +
         (k.fields.includes('use') ? fld('use', 'Used for', g.use, ' placeholder="Kick, Pastor, Keys L"') : '') +
         (k.fields.includes('txtype') ? '<label>Transmitter type<select data-f="txtype"><option value="">—</option>' + TX_TYPES.map((t) => '<option' + (t === g.txtype ? ' selected' : '') + '>' + t + '</option>').join('') + '</select></label>' : '') +
         fld('make', g.kind === 'txmic' ? 'Transmitter make' : 'Make', g.make) + (k.fields.includes('model') ? fld('model', g.kind === 'txmic' ? 'Transmitter model' : 'Model', g.model) : '') +
         (k.fields.includes('capsule') ? fld('capmake', 'Capsule make', g.capmake) + fld('capsule', 'Capsule or mic', g.capsule, ' placeholder="Capsule model"') : '') +
         (k.fields.includes('freq') ? fld('freq', 'Frequency (MHz)', g.freq, ' inputmode="decimal" placeholder="000.000"') : '') +
+        (g.kind === 'txmic' || g.kind === 'bodypack' ? '<label class="tog sm"><input type="checkbox" data-f="spare"' + (g.spare ? ' checked' : '') + '> Spare <span class="note">kept ready, not counted as in use</span></label>' : '') +
         (k.fields.includes('mode') ? '<label>Mode<select data-f="mode"' + (ro ? ' disabled' : '') + '><option' + (g.mode !== 'Mono' ? ' selected' : '') + '>Stereo</option><option' + (g.mode === 'Mono' ? ' selected' : '') + '>Mono</option></select></label>' : '') +
         (k.fields.includes('phones') ? fld('phones', 'Earphones', g.phones) : '') +
         (k.fields.includes('localstart') ? fld('localstart', 'Channel for local In 1', g.localstart || 1, ' type="number" min="1"') : '') +
@@ -1538,11 +2024,12 @@ const PatchView = (() => {
         (k.counts === 'both' ? '<div class="two">' + fld('nin', 'Inputs', g.ins.length, ' type="number" min="0" max="128"') + fld('nout', 'Outputs', g.outs.length, ' type="number" min="0" max="128"') + '</div>' : '') +
         (k.counts === 'ch' ? fld('nch', 'Channels', g.ins.length, ' type="number" min="1" max="' + (g.kind === 'amp' ? 4 : 16) + '"') : '') +
         (k.counts === 'outs' ? fld('nout', 'Outputs', g.outs.length, ' type="number" min="1" max="' + (g.kind === 'di' ? 2 : 16) + '"') : '') +
+        (k.counts === 'ports' ? fld('nports', 'Ports', g.nports || 8, ' type="number" min="1" max="128"') : '') +
         fld('group', 'Section', g.group, ' placeholder="Drums, Wireless, Band IEMs" list="pgrp"') + '<datalist id="pgrp">' + [...new Set(st.doc.gear.map((x) => x.group).filter(Boolean))].map((x) => '<option value="' + esc(x) + '">').join('') + '</datalist>' +
         '<label>Notes<textarea data-f="notes" rows="2"' + (ro ? ' disabled' : '') + '>' + esc(g.notes || '') + '</textarea></label></div>');
       // the Gear Locker card
       const dev = g.device_id && typeof DEV !== 'undefined' && DEV.list ? DEV.list.find((d) => d.id === g.device_id) : null;
-      html += '<div class="pdev">' + (dev ? '<a class="btn abtn" href="#/d/' + dev.id + '">' + icon('box') + 'Gear card: ' + esc(dev.name) + '</a>' : st.edit && k.card ? '<button class="btn" id="pmkdev">' + icon('box') + 'Add to the Gear Locker</button>' : '') +
+      html += '<div class="pdev">' + (dev ? '<a class="btn abtn" href="#/d/' + dev.id + '">' + icon('box') + 'Gear card: ' + esc(Tags.withModel(dev.name, dev.model)) + '</a>' : st.edit && k.card ? '<button class="btn" id="pmkdev">' + icon('box') + 'Add to the Gear Locker</button>' : '') +
         (dev && dev.files ? '<a class="btn abtn" href="#/d/' + dev.id + '">' + icon('pdf') + dev.files + ' manual' + (dev.files === 1 ? '' : 's') + '</a>' : '') +
         (!st.edit ? '<button class="btn ghost" id="prep">' + icon('alert') + 'Report a problem</button>' : '') + '</div>';
       // a wireless system: its mics or packs
@@ -1590,7 +2077,12 @@ const PatchView = (() => {
         if (k.link) {
           const ls = (ix.links.get(g.id) || []);
           html += '<div class="psk"><b>Link</b><span>' + (ls.map(({ c, other }) => esc((ix.G.get(other) || {}).name || '') + (c.label ? ' (' + esc(c.label) + ')' : '') + (st.edit ? ' <button class="ghost xs" data-unlink="' + c.id + '">' + icon('x') + '</button>' : '')).join(', ') || '<span class="note">not linked</span>') + '</span>' +
-            (st.edit ? '<select data-link><option value="">Link to…</option>' + st.doc.gear.filter((x) => x.id !== g.id && P.KINDS[x.kind].link).map((x) => '<option value="' + x.id + '">' + esc(x.name) + '</option>').join('') + '</select>' : '') + '</div>';
+            (st.edit ? '<select data-link><option value="">Link to…</option>' + st.doc.gear.filter((x) => x.id !== g.id && P.KINDS[x.kind].link).map((x) => '<option value="' + x.id + '">' + esc(tm(x)) + '</option>').join('') + '</select>' : '') + '</div>';
+          }
+          if (hasNet(st.doc, g) && g.kind !== 'network') {
+            const nc = P.netOf(st.doc, g), sw = nc && gearOf(nc.b), sws = st.doc.gear.filter((x) => x.kind === 'network' && x.id !== g.id);
+            html += '<div class="psk"><b>Network</b><span>' + (sw ? esc(sw.name + (nc.port ? ' port ' + nc.port : '')) + (st.edit ? ' <button class="ghost xs" data-cut="' + nc.id + '" title="Unplug">' + icon('x') + '</button>' : '') : '<span class="note">not plugged in</span>') + '</span>' +
+              (st.edit && sws.length ? '<select data-netto><option value="">Plug into…</option>' + sws.map((x) => '<option value="' + x.id + '">' + esc(tm(x)) + '</option>').join('') + '</select>' : '') + '</div>';
         }
         if (g.kind !== 'receiver') g.ins.forEach((p, i) => {
           const c = ix.into.get(g.id + ':' + i);
@@ -1612,7 +2104,7 @@ const PatchView = (() => {
       $('#pbk', host).addEventListener('click', () => { select(null); const m = host.closest('.modal'); if (m) m.remove(); });
       const ph2 = $('#phost', host); if (ph2) ph2.addEventListener('click', () => select({ gear: [host2.id] }));
       $$('[data-sel]', host).forEach((b) => b.addEventListener('click', () => select({ gear: [b.dataset.sel] })));
-      const pr = $('#prep', host); if (pr) pr.addEventListener('click', () => reportProblem(g.name + (g.use ? ' (' + g.use + ')' : ''), { gear: g.id, device_id: g.device_id || undefined }));
+      const pr = $('#prep', host); if (pr) pr.addEventListener('click', () => reportProblem(g.name, { gear: g.id, device_id: g.device_id || undefined, model: g.model || undefined }));
       const pn = $('#pnames', host); if (pn) pn.addEventListener('click', () => namesDialog(live()));
       if (!st.edit) return;
       $$('[data-addm]', host).forEach((b) => b.addEventListener('click', () => {
@@ -1632,13 +2124,23 @@ const PatchView = (() => {
           else if (f === 'mode') { g.mode = v; P.resize(st.doc, g, null, null); }
           else if (f === 'mixes') g.mixes = v.split(',').map((x) => x.trim()).filter(Boolean);
           else if (f === 'open') { if (inp.checked) g.open = true; else delete g.open; }
+          else if (f === 'spare') { if (inp.checked) g.spare = true; else delete g.spare; }
           else if (f === 'localstart') g[f] = Math.max(1, Number(v) || 1);
           else if (f === 'namelen') { if (Number(v) >= 1) g.namelen = Math.min(64, Math.floor(Number(v))); else delete g.namelen; }
           else if (f === 'colors') { const c = v.split(',').map((x) => x.trim()).filter(Boolean); if (c.length) g.colors = c; else delete g.colors; }
+          else if (f === 'nports') { g.nports = Math.max(1, Math.min(128, Math.floor(Number(v)) || 8)); st.doc.cables = st.doc.cables.filter((c) => !(c.ap === 'net' && c.b === g.id && c.port > g.nports)); }
           else if (f === 'name') g.name = v.trim() || g.name;
           else { if (v.trim()) g[f] = v.trim(); else delete g[f]; }
-        }, null, !['nin', 'nout', 'nch', 'mode'].includes(f));
+        }, null, !['nin', 'nout', 'nch', 'mode', 'nports', 'spare'].includes(f));
+        // a new tag name goes to its Gear Locker card too (when ticked)
+        if (f === 'name' && g.device_id && v.trim() && canEdit) { const rn = $('#pdevren', host); if (!rn || rn.checked) putDevice(g.device_id, { name: v.trim() }).catch((e) => toast('Gear Locker card not renamed: ' + e.message, 'bad')); }
       }));
+      const pat = $('#pautotag', host);
+      if (pat) pat.addEventListener('click', () => {
+        const g = live(); const inp = $('[data-f=name]', host);
+        inp.value = Tags.suggest(g.kind, allNames(g.id), { person: g.kind === 'txmic' || g.kind === 'bodypack' ? g.person : '', model: g.model });
+        inp.dispatchEvent(new Event('change'));
+      });
       $$('[data-in]', host).forEach((sel) => sel.addEventListener('change', () => {
         const i = Number(sel.dataset.in), v = sel.value; if (!v) return;
         if (v === '-') return change(() => { st.doc.cables = st.doc.cables.filter((c) => !(c.b === gid && c.bp === i)); }, 'Disconnected');
@@ -1653,6 +2155,7 @@ const PatchView = (() => {
       $$('[data-feed]', host).forEach((sel) => sel.addEventListener('change', () => { const j = Number(sel.dataset.feed); change(() => { const g = live(); g.feeds = g.feeds || {}; if (sel.value) g.feeds[j] = sel.value; else delete g.feeds[j]; }, null, true); }));
       $$('[data-cut]', host).forEach((b) => b.addEventListener('click', () => change(() => { st.doc.cables = st.doc.cables.filter((c) => c.id !== b.dataset.cut); }, 'Disconnected')));
       $$('[data-unlink]', host).forEach((b) => b.addEventListener('click', () => change(() => { st.doc.cables = st.doc.cables.filter((c) => c.id !== b.dataset.unlink); }, 'Unlinked')));
+      const nt = $('[data-netto]', host); if (nt) nt.addEventListener('change', () => { const sw = gearOf(nt.value); if (sw) netDialog(live(), sw, null); });
       const lk = $('[data-link]', host);
       if (lk) lk.addEventListener('change', () => { const b = gearOf(lk.value); if (b) picker(live(), b, { linkOnly: !(b.kind === 'console' || b.kind === 'stagebox') }); });
       const md = $('#pmkdev', host);
@@ -1667,11 +2170,24 @@ const PatchView = (() => {
       });
       $('#pdel', host).addEventListener('click', () => removeGear(gid));
       const pd = $('#pdup', host); if (pd) pd.addEventListener('click', () => duplicate(live()));
-      const po = $('#pout', host); if (po) po.addEventListener('click', () => change(() => { st.doc.cables = st.doc.cables.filter((c) => !((c.a === gid || c.b === gid) && c.kind === 'rf')); }, g.name + ' is on its own now'));
+      const po = $('#pout', host); if (po) po.addEventListener('click', () => takeOut(live(), host2));
+    }
+    /** A mic or pack out of its receiver or transmitter; asks whether the Gear Locker should forget the pairing too. */
+    function takeOut(g, host) {
+      change(() => { st.doc.cables = st.doc.cables.filter((c) => !((c.a === g.id || c.b === g.id) && c.kind === 'rf')); const x = gearOf(g.id); delete x.x; delete x.y; }, g.name + ' is on its own now');
+      askUnpair(g, host);
+    }
+    async function askUnpair(g, host) {
+      const dev = devOf(g);
+      if (!dev || !host || !host.device_id || dev.pair_id !== host.device_id || !canEdit) return;
+      if (!await confirmBox('Unpair in the Gear Locker too?', esc(dev.name) + ' is paired with ' + esc(host.name) + ' on its Gear Locker card. Unpair it there as well?', 'Unpair')) return;
+      try { await putDevice(dev.id, { pair_id: null }); toast(dev.name + ' unpaired in the Gear Locker'); } catch (e) { toast(e.message, 'bad'); }
     }
     function removeGear(id) {
       const g = gearOf(id);
       if (!g) return;
+      const host0 = P.hostOf(st.doc, g);
+      if (host0) setTimeout(() => askUnpair(g, host0), 300);
       const mem = P.members(st.doc, g);
       const n = st.doc.cables.filter((c) => (c.a === id || c.b === id) && c.kind !== 'rf').length;
       st.sel = [];
@@ -1681,18 +2197,28 @@ const PatchView = (() => {
     function cablePane(host, c) {
       const a = gearOf(c.a), b = gearOf(c.b);
       const ro = !st.edit;
-      host.innerHTML = '<div class="pph"><button class="ghost pback" id="pbk">' + icon('x') + '</button><span class="pkind">' + (c.ap === 'link' ? 'Link' : 'Cable') + '</span></div>' +
-        '<p class="pcab"><b>' + esc(a.name + (c.ap === 'link' ? '' : ' ' + a.outs[c.ap])) + '</b><br>→ <b>' + esc(b.name + (c.bp === 'link' ? '' : ' ' + b.ins[c.bp])) + '</b></p><div class="pform">' +
-        '<label>Type<select data-c="kind"' + (ro ? ' disabled' : '') + '>' + Object.entries(KIND_STYLE).map(([k, v]) => '<option value="' + k + '"' + (c.kind === k ? ' selected' : '') + '>' + v + '</option>').join('') + '</select></label>' +
-        '<label>' + (c.ap === 'link' ? 'Link name (SLink, AES50, Dante)' : 'Label') + '<input data-c="label" value="' + esc(c.label || '') + '"' + (ro ? ' disabled' : '') + '></label>' +
+      const net = c.ap === 'net', link = c.ap === 'link';
+      const kinds = Object.entries(KIND_STYLE).filter(([k]) => net ? k === 'net' : link ? (k === 'link' || k === 'dante') : (k !== 'net' && k !== 'link'));
+      host.innerHTML = '<div class="pph"><button class="ghost pback" id="pbk">' + icon('x') + '</button><span class="pkind">' + (link ? 'Link' : net ? 'Network cable' : 'Cable') + '</span></div>' +
+        '<p class="pcab"><b>' + esc(tm(a) + (link || net ? (net ? ' · network' : '') : ' ' + a.outs[c.ap])) + '</b><br>→ <b>' + esc(tm(b) + (link ? '' : net ? (c.port ? ' · port ' + c.port : '') : ' ' + b.ins[c.bp])) + '</b></p><div class="pform">' +
+        (kinds.length > 1 ? '<label>Type<select data-c="kind"' + (ro ? ' disabled' : '') + '>' + kinds.map(([k, v]) => '<option value="' + k + '"' + (c.kind === k ? ' selected' : '') + '>' + v + '</option>').join('') + '</select></label>' : '') +
+        (net ? '<label>Switch port<select data-c="port"' + (ro ? ' disabled' : '') + '><option value="">Not set</option>' + Array.from({ length: b.nports || 8 }, (_, i) => i + 1).map((n) => { const o = st.doc.cables.find((x) => x.ap === 'net' && x.b === b.id && x.port === n && x.id !== c.id); return '<option value="' + n + '"' + (c.port === n ? ' selected' : '') + (o ? ' disabled' : '') + '>Port ' + n + (o ? ' · ' + esc(gearOf(o.a).name) : '') + '</option>'; }).join('') + '</select></label>' : '') +
+        (link ? '<label>Link name (SLink, AES50, Dante)<input data-c="label" value="' + esc(c.label || '') + '"' + (ro ? ' disabled' : '') + '></label>'
+          : '<label>Tag name<span class="tagrow"><input data-c="label" value="' + esc(c.label || '') + '" placeholder="C-001"' + (ro ? ' disabled' : '') + '>' + (ro ? '' : '<button type="button" class="btn sm" id="pcauto" title="The next free cable number">Auto label</button>') + '</span></label>') +
         '<label>Length<input data-c="length" value="' + esc(c.length || '') + '" placeholder="25 ft"' + (ro ? ' disabled' : '') + '></label>' +
         '<label>Notes<textarea data-c="notes" rows="2"' + (ro ? ' disabled' : '') + '>' + esc(c.notes || '') + '</textarea></label></div>' +
-        (st.edit && c.ap === 'link' && (a.kind === 'stagebox' || b.kind === 'stagebox') ? '<button class="btn" id="pchan2">' + icon('list') + 'Assign console channels</button>' : '') +
-        (st.edit ? '<div class="pacts"><span class="grow"></span><button class="ghost danger" id="pcdel">' + icon('trash') + 'Remove ' + (c.ap === 'link' ? 'link' : 'cable') + '</button></div>' : '');
+        (st.edit && link && (a.kind === 'stagebox' || b.kind === 'stagebox') ? '<button class="btn" id="pchan2">' + icon('list') + 'Assign console channels</button>' : '') +
+        (st.edit ? '<div class="pacts"><span class="grow"></span><button class="ghost danger" id="pcdel">' + icon('trash') + 'Remove ' + (link ? 'link' : 'cable') + '</button></div>' : '');
       $('#pbk', host).addEventListener('click', () => { select(null); const m = host.closest('.modal'); if (m) m.remove(); });
       if (!st.edit) return;
       const pc = $('#pchan2', host); if (pc) pc.addEventListener('click', () => channelDialog(a.kind === 'stagebox' ? a : b));
-      $$('[data-c]', host).forEach((inp) => inp.addEventListener('change', () => change(() => { const cc = st.doc.cables.find((x) => x.id === c.id); if (inp.value.trim()) cc[inp.dataset.c] = inp.value.trim(); else delete cc[inp.dataset.c]; }, null, true)));
+      $$('[data-c]', host).forEach((inp) => inp.addEventListener('change', () => change(() => {
+        const cc = st.doc.cables.find((x) => x.id === c.id); const f = inp.dataset.c;
+        if (f === 'port') { if (Number(inp.value)) cc.port = Number(inp.value); else delete cc.port; return; }
+        if (inp.value.trim()) cc[f] = inp.value.trim(); else delete cc[f];
+      }, null, true)));
+      const au = $('#pcauto', host);
+      if (au) au.addEventListener('click', () => { const inp = $('[data-c=label]', host); inp.value = Tags.cableName(cableInfos(st.doc).get(c.id) || { type: 'out' }, st.doc.cables.filter((x) => x.id !== c.id).map((x) => x.label || '')); inp.dispatchEvent(new Event('change')); });
       $('#pcdel', host).addEventListener('click', () => { st.selCable = null; change(() => { st.doc.cables = st.doc.cables.filter((x) => x.id !== c.id); }, 'Cable removed'); closeSheet(); });
     }
     /** Phone: details and quick edits slide up from the bottom. */
@@ -1718,38 +2244,166 @@ const PatchView = (() => {
     const saveSnap = () => { try { localStorage.setItem('lg-psnap', st.snap ? '1' : '0'); } catch (e) { /* private mode */ } };
     $('#psnap').addEventListener('change', (e) => { st.snap = e.target.checked; saveSnap(); });
     $('#ptidy').addEventListener('click', tidy);
-    $('#plabels').addEventListener('click', labelsDialog);
+    $('#pfitb').addEventListener('click', () => fit());
+    const selT = $('#pselt');
+    selT.addEventListener('click', () => { st.selTool = !st.selTool; selT.classList.toggle('on', st.selTool); selT.setAttribute('aria-pressed', String(st.selTool)); svg.classList.toggle('selecting', st.selTool); toast(st.selTool ? 'Drag a box around the cards to pick them' : 'Back to moving around'); });
+    $('#plabels').addEventListener('click', autoLabelDialog);
     $('#paddb').addEventListener('click', () => { if (!wide()) return sheet(true); st.adding = !st.adding || !!st.sel.length; select(null); });
     $$('[data-al]').forEach((b) => b.addEventListener('click', () => align(b.dataset.al)));
     const pe = $('#pedit');
     const setEdit = (on) => {
       st.edit = on;
+      if (!on && st.selTool) { st.selTool = false; selT.classList.remove('on'); selT.setAttribute('aria-pressed', 'false'); svg.classList.remove('selecting'); }
       document.body.classList.toggle('patchedit', on);
       if (pe) { pe.classList.toggle('primary', on); pe.querySelector('span').textContent = on ? 'Done' : 'Edit'; }
       $('#ptools').classList.toggle('hide', !on);
       $('#padd').classList.toggle('hide', !on);
       paintTitle(); paint(true); paintPane(); paintAlign();
     };
-    if (pe) pe.addEventListener('click', () => setEdit(!st.edit));
+    if (pe) pe.addEventListener('click', async () => {
+      const leaving = st.edit;
+      setEdit(!st.edit);
+      if (leaving) { await flush(); if (st.draft) publishDialog(); }
+    });
     $('#pun').addEventListener('click', undo); $('#pre').addEventListener('click', redo);
     $('#padd').addEventListener('click', () => sheet(true));
-    $('#ppdf').addEventListener('click', () => {
+    // ---------- the PDF: a report with a title page, contents, the drawing (landscape) and the lists ----------
+    /** The report as HTML. The drawing itself is the live SVG, moved into its page while printing. */
+    /** A cable style's colour and dashes, read from the drawing's own CSS (the report's key sits outside the drawing). */
+    function lineStyle(k) {
+      const g = document.createElementNS('http://www.w3.org/2000/svg', 'g');
+      g.setAttribute('class', 'pe pe-' + k); g.innerHTML = '<path class="ln" d="M0 0h1"/>';
+      vp.appendChild(g);
+      const cs = getComputedStyle(g.firstChild);
+      const out = 'stroke:' + cs.stroke + ';stroke-width:' + (parseFloat(cs.strokeWidth) || 2) + 'px;stroke-dasharray:' + (cs.strokeDasharray || 'none');
+      g.remove();
+      return out;
+    }
+    function reportDoc() {
+      const doc = st.doc, org = (S.state && S.state.org) || {}, me = (S.state && S.state.user && S.state.user.name) || '';
+      const tm = (g) => (g ? (typeof Tags !== 'undefined' ? Tags.withModel(g.name, g.model) : g.name) : '');
+      const today = new Date().toLocaleDateString([], { year: 'numeric', month: 'long', day: 'numeric' });
+      const rev = st.rev ? 'Revision ' + st.rev + (st.draft ? ' (draft)' : '') : 'Draft (not published yet)';
+      const T = (heads, rows, empty) => rows.length ? '<table class="rt"><thead><tr>' + heads.map((h) => '<th>' + h + '</th>').join('') + '</tr></thead><tbody>' + rows.map((r) => '<tr>' + r.map((c) => '<td>' + (c == null || c === '' ? '<span class="rd">—</span>' : c) + '</td>').join('') + '</tr>').join('') + '</tbody></table>' : '<p class="rnone">' + empty + '</p>';
+      const sections = [];
+      const add = (id, title, html, cls) => sections.push({ id, title, html, cls });
+      // microphones
+      const spareTag = (g) => (g.spare ? ' <span class="rspare">Spare</span>' : '');
+      const dotOf = (f) => { const n = P.mhz(f); return n == null ? '' : '<i class="rband" style="background:' + P.bandColor(n) + '"></i>'; };
+      const wl = P.wireless(doc).sort((p, q) => !!p.tx.spare - !!q.tx.spare).map((r) => [
+        '<b>' + esc(r.tx.name) + '</b>' + spareTag(r.tx), esc(r.tx.model || ''), r.rx ? esc(tm(r.rx)) + ' · ' + esc(r.rxch) : '', esc(r.tx.capsule || ''), r.tx.freq ? dotOf(r.tx.freq) + esc(r.tx.freq) + ' MHz' : '',
+        esc([r.tx.person, r.tx.use].filter(Boolean).join(' · ')), r.land && r.land.console ? esc(r.land.console.name) + ' ch ' + r.land.ch + '<div class="rs">' + esc(r.land.via) + '</div>' : r.land ? esc(r.land.via) : '']);
+      const wired = doc.gear.filter((g) => ['mic', 'di', 'source'].includes(g.kind)).map((g) => {
+        const l = P.landing(doc, g);
+        return ['<b>' + esc(g.name) + '</b>', esc(g.model || P.KINDS[g.kind].label), esc([g.person, g.use].filter(Boolean).join(' · ')),
+          esc(l.map((r) => r.via.kind === 'console' ? r.port : r.via.name + ' ' + r.port).join(', ')), esc(l.map((r) => (r.console ? r.console.name + ' ' : '') + (r.ch == null ? '' : 'ch ' + r.ch)).join(', ')), esc(g.chname || '')];
+      });
+      add('mics', 'Microphones', '<h3>Wireless mics</h3>' + T(['Tag', 'Model', 'Receiver', 'Capsule', 'Frequency', 'Person / use', 'Console input'], wl, 'No wireless mics.') +
+        '<h3>Wired mics, DIs and sources</h3>' + T(['Tag', 'Model', 'Person / use', 'Stage box input', 'Console channel', 'Channel name'], wired, 'No wired mics or DIs.'));
+      // in-ears
+      const ie = P.inears(doc).map((r) => {
+        const packs = (P.members(doc, r.tx).map((m) => m.g).concat(r.packs || [])).filter((g, k, a) => g && a.indexOf(g) === k);
+        return ['<b>' + esc(tm(r.tx)) + '</b>', esc(r.tx.mode || ''), r.tx.freq ? dotOf(r.tx.freq) + esc(r.tx.freq) + ' MHz' : '', esc(r.mix || ''), esc(r.feeds.filter(Boolean).map((x) => x.from.name + ' ' + x.socket).join(', ')),
+          packs.map((g) => esc([tm(g), g.person || g.use, g.freq && g.freq + ' MHz'].filter(Boolean).join(' · ')) + spareTag(g)).join('<br>')];
+      });
+      if (ie.length) add('iem', 'In-ear monitors', T(['Transmitter', 'Mode', 'Frequency', 'Mix', 'Fed from', 'Packs'], ie, ''));
+      // equipment by group
+      const ix = P.index(doc);
+      const G = new Map(doc.gear.map((g) => [g.id, g]));
+      const names = (ids) => [...new Set(ids)].map((id) => G.get(id)).filter(Boolean).map((g) => esc(g.name));
+      const conn = (g) => {
+        const ins = doc.cables.filter((c) => c.b === g.id && c.kind !== 'rf' && c.ap !== 'net').map((c) => c.a);
+        const outs = doc.cables.filter((c) => c.a === g.id && c.kind !== 'rf' && c.ap !== 'net').map((c) => c.b);
+        const parts = [];
+        if (ins.length) parts.push('From ' + names(ins).join(', '));
+        if (outs.length) parts.push('To ' + names(outs).join(', '));
+        const m = P.members(doc, g); if (m.length) parts.push(m.length + (g.kind === 'receiver' ? ' wireless mic' : ' pack') + (m.length === 1 ? '' : 's'));
+        return parts.join('<br>');
+      };
+      const net = (g) => {
+        const dev = devOf(g);
+        const c = doc.cables.find((x) => x.ap === 'net' && x.a === g.id);
+        const sw = c ? G.get(c.b) : dev && dev.uplink_id ? (DEV.list || []).find((d) => d.id === dev.uplink_id) : null;
+        const port = c ? c.port : dev && dev.uplink_port;
+        const ips = dev ? (dev.ips || []) : [];
+        if (!ips.length && !sw) return '';
+        return (ips.length ? '<span class="mono">' + ips.map(esc).join('<br>') + '</span>' : '') + (sw ? '<div class="rs">into ' + esc(sw.name) + (port ? ' port ' + esc(port) : '') + '</div>' : '');
+      };
+      const GROUPS = [['Console', ['console']], ['Stage I/O', ['stagebox']], ['Wireless receivers', ['receiver']], ['In-ears', ['iemtx', 'headamp']], ['Processing', ['processor']], ['Amplifiers', ['amp']], ['Speakers and monitors', ['speaker', 'wedge']], ['Network', ['network', 'computer']], ['Other', ['other']]];
+      const eq = GROUPS.map(([title, kinds]) => {
+        const list = doc.gear.filter((g) => kinds.includes(g.kind));
+        if (!list.length) return '';
+        return '<h3>' + title + '</h3>' + T(['Tag', 'Make', 'Model', 'Location', 'Connections', 'Network'], list.map((g) => { const dev = devOf(g); return ['<b>' + esc(g.name) + '</b>', esc(g.make || (dev && dev.make) || ''), esc(g.model || (dev && dev.model) || ''), esc((dev && dev.location) || ''), conn(g), net(g)]; }), '');
+      }).join('');
+      add('gear', 'Equipment', eq || '<p class="rnone">No equipment yet.</p>');
+      // cables
+      const cl = P.cableList(doc).filter((r) => r.a && r.b && r.c.kind !== 'rf').sort((p, q) => String(p.c.label || '~').localeCompare(String(q.c.label || '~'), undefined, { numeric: true }))
+        .map((r) => ['<b>' + esc(r.c.label || '') + '</b>', esc(r.from), esc(r.to), esc(KIND_STYLE[r.c.kind] || r.c.kind || ''), esc(r.c.length || '')]);
+      add('cables', 'Cables', T(['Name', 'From', 'To', 'Type', 'Length'], cl, 'No cables.'));
+      // things to check (frequencies first)
+      const ck = P.checks(doc).slice().sort((p, q) => !!q.rf - !!p.rf || ({ bad: 0, warn: 1, note: 2 }[p.level] - { bad: 0, warn: 1, note: 2 }[q.level]));
+      if (ck.length) add('checks', 'Things to check', T(['', 'What'], ck.map((c) => ['<span class="rlv ' + c.level + '">' + (c.level === 'bad' ? 'Clash' : c.level === 'warn' ? 'Check' : 'Note') + '</span>', esc(c.text)]), ''));
+      // the key for the drawing page
+      const cats = Object.entries(P.CATS).filter(([k]) => D.key.cats.includes(k));
+      const kinds = Object.entries(KIND_STYLE).filter(([k]) => D.key.kinds.includes(k));
+      const key = cats.length || kinds.length || D.key.wireless ? '<div class="rkey">' + cats.map(([, v]) => '<span><i style="background:' + v.color + '"></i>' + esc(v.label) + '</span>').join('') +
+        kinds.map(([k, v]) => '<span><svg width="30" height="10"><path d="M1 5h27" fill="none" style="' + lineStyle(k) + '"/></svg>' + esc(v) + '</span>').join('') +
+        (D.key.wireless ? '<span><svg width="30" height="12"><rect x="1" y="1" width="28" height="10" rx="3" fill="none" stroke="#8a95a3" stroke-dasharray="3 2"/><path d="M6 6h18" stroke="#c0398b" stroke-dasharray="3 2"/></svg>Wireless system · RF</span>' : '') + '</div>' : '';
+      const all = [{ id: 'drawing', title: 'Signal flow drawing' }].concat(sections);
+      const head = [org.name, doc.title || 'Stage patch', st.rev ? 'Rev ' + st.rev + (st.draft ? ' draft' : '') : 'Draft'].filter(Boolean).join(' · ');
+      const css = '@page { @top-left { content: "' + head.replace(/["\\]/g, '') + '"; font: 9px system-ui, sans-serif; color: #4d5866; } @bottom-left { content: "Printed ' + today.replace(/["\\]/g, '') + '"; font: 9px system-ui, sans-serif; color: #4d5866; } @bottom-right { content: "Page " counter(page) " of " counter(pages); font: 9px system-ui, sans-serif; color: #4d5866; } }' +
+        '@page :first { @top-left { content: none; } @bottom-left { content: none; } @bottom-right { content: none; } }';
+      return '<style>' + css + '</style>' +
+        '<section class="rcover">' + (org.logo ? '<img class="rlogo" src="/api/org/logo" alt="">' : '<img class="rlogo" src="/icons/livegenie-mark.svg" alt="">') +
+          (org.name ? '<div class="rorg">' + esc(org.name) + '</div>' : '') + '<div class="rkick">Stage patch</div><h1>' + esc(doc.title || 'Stage patch') + '</h1>' + (doc.subtitle ? '<p class="rsub">' + esc(doc.subtitle) + '</p>' : '') +
+          '<dl class="rmeta"><dt>Revision</dt><dd>' + esc(rev) + '</dd><dt>Date</dt><dd>' + esc(today) + '</dd>' + (me ? '<dt>Prepared by</dt><dd>' + esc(me) + '</dd>' : '') + (st.revNote ? '<dt>Notes</dt><dd>' + esc(st.revNote) + '</dd>' : '') +
+          '<dt>Contents</dt><dd>' + doc.gear.length + ' pieces of gear · ' + doc.cables.filter((c) => c.kind !== 'rf').length + ' cables</dd></dl>' +
+          '<div class="rfoot">Made with LiveGenie</div></section>' +
+        '<section class="rtoc"><h2>Contents</h2><ol>' + all.map((x) => '<li><span>' + esc(x.title) + '</span></li>').join('') + '</ol></section>' +
+        '<section class="rdraw"><h2>1. Signal flow drawing</h2><div class="rsvg" id="rsvg"></div>' + key + '</section>' +
+        sections.map((x, k) => '<section class="rsec"><h2>' + (k + 2) + '. ' + esc(x.title) + '</h2>' + x.html + '</section>').join('');
+    }
+    $('#ppdf').addEventListener('click', async () => {
       select(null);
-      const before = st.tf; const b = D.bbox;
+      // the note of the published revision, for the title page
+      if (st.rev && st.revNote === undefined) { try { const v = (await get('/api/patch/versions')).versions.find((x) => x.rev === st.rev); st.revNote = v ? v.note || '' : ''; } catch (e) { st.revNote = ''; } }
+      const box = document.createElement('div');
+      box.id = 'preport'; box.innerHTML = reportDoc();
+      document.body.appendChild(box); document.body.classList.add('printreport');
+      // the live drawing moves into its page, framed to the whole drawing
+      const before = st.tf, b = D.bbox, home = svg.parentNode, next = svg.nextSibling;
       svg.setAttribute('viewBox', b.x0 + ' ' + b.y0 + ' ' + (b.x1 - b.x0) + ' ' + (b.y1 - b.y0)); vp.removeAttribute('transform'); svg.classList.add('printing');
-      const after = () => { svg.removeAttribute('viewBox'); svg.classList.remove('printing'); st.tf = before; apply(); window.removeEventListener('afterprint', after); };
+      $('#rsvg', box).appendChild(svg);
+      let done = false;
+      const after = () => {
+        if (done) return; done = true;
+        home.insertBefore(svg, next); svg.removeAttribute('viewBox'); svg.classList.remove('printing'); st.tf = before; apply();
+        box.remove(); document.body.classList.remove('printreport'); window.removeEventListener('afterprint', after);
+      };
       window.addEventListener('afterprint', after);
-      exportPdf(st.doc.title);
+      st.printDone = after;
+      exportPdf((st.doc.title || 'Stage Patch') + (st.rev ? '' : ' Draft'), st.rev ? st.rev + (st.draft ? ' draft' : '') : '');
       setTimeout(after, 60000);
     });
     const ph = $('#phist');
     if (ph) ph.addEventListener('click', async () => {
-      const v = await get('/api/patch/versions');
-      modal('<h3>Stage patch versions</h3><p>Every save is kept (the newest 200). Restoring makes it the current version; nothing is lost.</p><div class="plist2" style="max-height:50vh;overflow:auto">' +
-        v.versions.map((x) => '<div class="prow"><b>Version ' + x.version + '</b><span>' + esc(ago(x.saved_at)) + (x.saved_by ? ' · ' + esc(x.saved_by) : '') + (x.note ? ' · ' + esc(x.note) : '') + '</span>' + (x.version !== st.version ? '<button class="btn" data-rv="' + x.version + '">' + icon('restore') + 'Restore</button>' : '<span class="chip ok">Current</span>') + '</div>').join('') +
-        '</div><div class="acts"><button class="primary" data-close>Close</button></div>', (w, close) => {
+      await flush();
+      const v = (await get('/api/patch/versions')).versions;
+      const pub = v.filter((x) => x.kind !== 'auto');
+      const top = v[0] && v[0].kind === 'auto' ? v[0] : null;
+      const autos = v.filter((x) => x.kind === 'auto' && x !== top);
+      const who = (x) => esc(ago(x.saved_at)) + (x.saved_by ? ' · ' + esc(x.saved_by) : '');
+      const row = (x, title, cur) => '<div class="rrow' + (cur ? ' cur' : '') + '"><div class="rt"><b>' + title + '</b><span>' + (x.note && x.kind !== 'auto' ? esc(x.note) + ' · ' : x.note ? esc(x.note) + ' · ' : '') + who(x) + '</span></div>' +
+        (cur ? '<span class="chip ok">Current</span>' : '<button class="btn sm" data-rv="' + x.version + '" data-rl="' + esc(x.rev ? 'Rev ' + x.rev : 'that save') + '">' + icon('restore') + 'Restore</button>') + '</div>';
+      const curV = st.version;
+      modal('<h3>Stage patch revisions</h3><p>Published revisions are kept for good. Changes in between are a draft until you publish them (tap Done after editing). Restoring brings one back as a new draft; nothing is lost.</p><div class="rlist">' +
+        (top ? row(top, 'Draft' + (st.rev ? ' after Rev ' + esc(st.rev) : ''), top.version === curV) : '') +
+        (pub.length ? pub.map((x) => row(x, 'Rev ' + esc(x.rev), x.version === curV)).join('') : '<div class="note" style="padding:8px 2px">Nothing published yet.</div>') +
+        (autos.length ? '<details class="rautos"><summary>Show ' + autos.length + ' autosave' + (autos.length === 1 ? '' : 's') + '</summary>' + autos.map((x) => row(x, 'Autosave', x.version === curV)).join('') + '</details>' : '') +
+        '</div><div class="acts">' + (st.draft ? '<button id="rpub">Publish…</button>' : '') + '<button class="primary" data-close>Close</button></div>', (w, close) => {
+        const pb = $('#rpub', w); if (pb) pb.addEventListener('click', () => { close(); publishDialog(); });
         $$('[data-rv]', w).forEach((b) => b.addEventListener('click', async () => {
-          try { const r = await call('POST', '/api/patch/versions/' + b.dataset.rv + '/restore'); st.doc = r.doc; st.version = r.version; st.undo = []; st.redo = []; st.cache = null; close(); paint(true); paintPane(); toast('Restored version ' + b.dataset.rv, 'ok'); }
+          try { const r = await call('POST', '/api/patch/versions/' + b.dataset.rv + '/restore'); st.doc = r.doc; st.version = r.version; st.draft = true; st.undo = []; st.redo = []; st.cache = null; close(); paint(true); paintPane(); paintTitle(); toast('Restored ' + b.dataset.rl + ' as a new draft', 'ok'); }
           catch (e) { toast(e.message, 'bad'); }
         }));
       });
@@ -1759,6 +2413,7 @@ const PatchView = (() => {
     if (canEdit && !S.people) get('/api/users').then((r) => { S.people = (r.users || []).map((u) => u.name); }).catch(() => { S.people = []; });
 
     paintTitle();
+    if (await syncFromLocker()) st.cache = null;
     paint(false);
     paintPane();
     if (qs && qs.get('g')) { select({ gear: [qs.get('g')] }, { noSheet: true }); focusGear(qs.get('g')); }

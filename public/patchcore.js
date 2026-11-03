@@ -6,8 +6,9 @@
  *            localstart, mixes, x, y, open, order, notes, ins: [names], outs: [names], feeds: { outIndex: mix },
  *            chmap: { inIndex: console channel } (stage boxes: which console channel each input lands on, set by hand) }
  *   x, y  where the card sits in the drawing (missing: placed automatically); open: card shows every socket
- *   cable  { id, a, ap, b, bp, kind, label, length, notes }
- *          from gear a output ap (index, or 'link') to gear b input bp (index, or 'link')
+ *   cable  { id, a, ap, b, bp, kind, label, length, notes, port }
+ *          from gear a output ap (index, or 'link') to gear b input bp (index, or 'link');
+ *          a network cable: ap = bp = 'net', b is the switch, port = the switch port it plugs into (1, 2…)
  * Everything else (input list, output list, wireless, in-ears, cable list, checks) is worked out from it.
  */
 (function (root, factory) {
@@ -29,7 +30,7 @@
   };
   const CABLES = {
     xlr: { label: 'Analog · XLR' }, link: { label: 'Digital snake · SLink, AES50' }, dante: { label: 'Dante · Cat6' }, aes: { label: 'AES3 · 110 Ω' },
-    speaker: { label: 'Speaker · NL4' }, wiem: { label: 'Wired IEM' }, rf: { label: 'Wireless · RF' }
+    speaker: { label: 'Speaker · NL4' }, wiem: { label: 'Wired IEM' }, rf: { label: 'Wireless · RF' }, net: { label: 'Network · Cat6' }
   };
   const nums = (prefix, k) => Array.from({ length: Math.max(0, Math.min(128, Number(k) || 0)) }, (_, i) => prefix + (i + 1));
   const DEFAULT_MIXES = ['LR', 'Mix 1', 'Mix 2', 'Mix 3', 'Mix 4', 'Mix 5', 'Mix 6', 'Mix 7', 'Mix 8', 'Mix 9', 'Mix 10', 'Mix 11', 'Mix 12'];
@@ -46,7 +47,7 @@
     txmic: { label: 'Wireless mic', col: 0, cat: 'source', ports: () => ({ ins: [], outs: ['RF'] }), fields: ['use', 'person', 'txtype', 'model', 'capsule', 'freq'], counts: false, member: 'receiver' },
     receiver: { label: 'Wireless receiver', col: 1, cat: 'io', ports: (g) => ({ ins: nums('Ch ', g.nin || 2), outs: nums('Out ', g.nin || 2) }), fields: ['model'], counts: 'ch', pass: 'same', card: true },
     stagebox: { label: 'Stage box', col: 2, cat: 'io', ports: (g) => ({ ins: nums('In ', g.nin || 16), outs: nums('Out ', g.nout || 8) }), fields: ['model'], counts: 'both', link: true, card: true },
-    network: { label: 'Dante network', col: 3, cat: 'net', ports: () => ({ ins: [], outs: [] }), fields: ['model'], counts: false, link: true },
+    network: { label: 'Network switch', col: 3, cat: 'net', ports: () => ({ ins: [], outs: [] }), fields: ['model'], counts: 'ports', link: true, card: true },
     console: { label: 'Console', col: 4, cat: 'console', ports: (g) => ({ ins: nums('In ', g.nin || 16), outs: nums('Out ', g.nout || 12) }), fields: ['model', 'localstart', 'mixes'], counts: 'both', link: true, card: true },
     computer: { label: 'Computer · recorder', col: 4, cat: 'computer', ports: (g) => ({ ins: nums('In ', g.nin || 2), outs: nums('Out ', g.nout || 2) }), fields: ['model', 'use'], counts: 'both', link: true },
     processor: { label: 'Speaker processor', col: 5, cat: 'pa', ports: (g) => ({ ins: g.nin === 1 ? ['In'] : Array.from({ length: Math.min(8, g.nin || 2) }, (_, i) => 'In ' + 'ABCDEFGH'[i]), outs: nums('Out ', g.nout || 6) }), fields: ['model'], counts: 'both', pass: 'all', card: true },
@@ -60,11 +61,21 @@
   };
   const FIELD_LABELS = { use: 'Used for', person: 'Who uses it', txtype: 'Transmitter type', capmake: 'Capsule make', model: 'Model', capsule: 'Capsule', freq: 'Frequency', mode: 'Mode', phones: 'Earphones', start: 'Console input for In 1', localstart: 'Channel for local In 1', mixes: 'Mixes' };
 
+  /**
+   * The signal stage each kind sits in, left to right: sources, stage I/O, console, processing, amps, outputs.
+   * Network gear (switches, computers) has its own lane ('net').
+   */
+  const STAGES = ['Sources', 'Stage I/O', 'Console', 'Processing', 'Amps', 'Outputs'];
+  const STAGE_OF = { mic: 0, di: 0, source: 0, txmic: 0, receiver: 0, stagebox: 1, console: 2, processor: 3, other: 3, amp: 4, headamp: 4, speaker: 5, wedge: 5, iemtx: 5, bodypack: 5, network: 'net', computer: 'net' };
+  const stageOf = (g) => (STAGE_OF[g && g.kind] != null ? STAGE_OF[g.kind] : 3);
+
   /** Kinds in the order the "New gear" form offers them. Makes and models come from the team's own list (it starts empty). */
   const KIND_ORDER = ['console', 'stagebox', 'receiver', 'txmic', 'mic', 'di', 'source', 'iemtx', 'bodypack', 'headamp', 'processor', 'amp', 'speaker', 'wedge', 'network', 'computer', 'other'];
 
   const str = (v, n) => String(v == null ? '' : v).slice(0, n || 200);
   const key = (v) => String(v || '').trim().toLowerCase();
+  /** Names compared the way people read them: case, spaces, dashes and dots do not count (same as Tags.norm). */
+  const tagKey = (s) => String(s || '').toLowerCase().replace(/[\s\-_.·/]+/g, '');
 
   /** Make the sockets for a gear from its kind and counts. */
   function portsFor(g) {
@@ -89,11 +100,15 @@
       if (g0.kind === 'stagebox' && Number(g0.start) >= 1 && !(g0.chmap && Object.keys(g0.chmap).length)) g._start = Math.min(512, Math.floor(Number(g0.start)));   // older drawings: becomes a channel map below
       for (const f of ['x', 'y']) if (g0[f] != null && g0[f] !== '' && Number.isFinite(Number(g0[f]))) g[f] = Math.round(Math.max(-20000, Math.min(20000, Number(g0[f]))));
       if (g0.open) g.open = true;
+      // a wireless mic or pack kept as a spare (drawn greyed, not counted as in use), and a wireless system shown folded
+      if (g0.spare && (g0.kind === 'txmic' || g0.kind === 'bodypack')) g.spare = true;
+      if (g0.wlshut && (g0.kind === 'receiver' || g0.kind === 'iemtx')) g.wlshut = true;
       // the console channel this source is on: its name and colour on the desk (WMIC-1, Kyle; Red)
       if (str(g0.chname, 32).trim()) g.chname = str(g0.chname, 32).trim();
       if (str(g0.chcolor, 24).trim()) g.chcolor = str(g0.chcolor, 24).trim();
       // a console: how long a channel name can be, and the colours it has (set when it was added)
       if (Number(g0.namelen) >= 1) g.namelen = Math.min(64, Math.floor(Number(g0.namelen)));
+      if (g0.kind === 'network') g.nports = Math.max(1, Math.min(128, Math.floor(Number(g0.nports)) || 8));
       if (Array.isArray(g0.colors)) { const c = g0.colors.map((x) => str(x, 24).trim()).filter(Boolean).slice(0, 32); if (c.length) g.colors = c; }
       g.order = Number.isFinite(Number(g0.order)) ? Number(g0.order) : 0;
       if (Array.isArray(g0.mixes)) g.mixes = g0.mixes.map((x) => str(x, 40).trim()).filter(Boolean).slice(0, 96);
@@ -109,21 +124,39 @@
     }
     const byId = new Map(out.gear.map((g) => [g.id, g]));
     const cids = new Set();
-    const taken = new Set();
+    const taken = new Set(), netUsed = new Set();
     for (const c0 of Array.isArray(doc.cables) ? doc.cables.slice(0, 3000) : []) {
       if (!c0) continue;
-      const a = byId.get(c0.a), b = byId.get(c0.b);
+      let a = byId.get(c0.a), b = byId.get(c0.b);
       if (!a || !b || a === b) continue;
+      if (c0.ap === 'net' || c0.bp === 'net') {
+        // a network cable: from a piece of gear's network socket to a switch port (the switch is always b)
+        if (a.kind === 'network' && b.kind !== 'network') [a, b] = [b, a];
+        if (b.kind !== 'network') continue;
+        const port = Number(c0.port) >= 1 && Number(c0.port) <= (b.nports || 8) ? Math.floor(Number(c0.port)) : null;
+        if (netUsed.has(a.id) || (port && netUsed.has(b.id + ':' + port))) continue;
+        netUsed.add(a.id); if (port) netUsed.add(b.id + ':' + port);
+        let nid = str(c0.id, 24).replace(/[^\w-]/g, '');
+        if (!nid || cids.has(nid)) nid = 'c' + Math.random().toString(36).slice(2, 9);
+        cids.add(nid);
+        const nc = { id: nid, a: a.id, ap: 'net', b: b.id, bp: 'net', kind: 'net' };
+        if (port) nc.port = port;
+        for (const f of ['label', 'length', 'notes']) if (c0[f] != null && String(c0[f]).trim()) nc[f] = str(c0[f], f === 'notes' ? 500 : 60).trim();
+        out.cables.push(nc);
+        continue;
+      }
       const ap = c0.ap === 'link' ? 'link' : Number(c0.ap), bp = c0.bp === 'link' ? 'link' : Number(c0.bp);
       if (ap === 'link' ? !(KINDS[a.kind].link) : !(ap >= 0 && ap < a.outs.length)) continue;
       if (bp === 'link' ? !(KINDS[b.kind].link) : !(bp >= 0 && bp < b.ins.length)) continue;
       const slot = b.id + ':' + bp;
-      if (bp !== 'link' && taken.has(slot)) continue;        // an input socket takes one cable
-      taken.add(slot);
+      // an input socket takes one cable; a spare wireless mic can sit on a receiver channel next to the live one
+      const spareRf = a.spare && (c0.kind === 'rf' || b.kind === 'receiver');
+      if (bp !== 'link' && taken.has(slot) && !spareRf) continue;
+      if (!spareRf) taken.add(slot);
       let id = str(c0.id, 24).replace(/[^\w-]/g, '');
       if (!id || cids.has(id)) id = 'c' + Math.random().toString(36).slice(2, 9);
       cids.add(id);
-      const c = { id, a: a.id, ap, b: b.id, bp, kind: CABLES[c0.kind] ? c0.kind : guessCable(a, ap, b, bp) };
+      const c = { id, a: a.id, ap, b: b.id, bp, kind: CABLES[c0.kind] && c0.kind !== 'net' ? c0.kind : guessCable(a, ap, b, bp) };
       for (const f of ['label', 'length', 'notes']) if (c0[f] != null && String(c0[f]).trim()) c[f] = str(c0[f], f === 'notes' ? 500 : 60).trim();
       out.cables.push(c);
     }
@@ -157,8 +190,10 @@
     const g = { id: uid('g'), kind, name: uniqueName(doc, String(item.name || item.model || KINDS[kind].label).trim()) };
     for (const f of ['make', 'model', 'group', 'use', 'person', 'txtype', 'capsule', 'capmake', 'freq', 'mode', 'phones', 'notes', 'localstart', 'device_id', 'x', 'y', 'chname', 'chcolor', 'namelen']) if (item[f] != null && item[f] !== '') g[f] = item[f];
     if (Array.isArray(item.colors) && item.colors.length) g.colors = item.colors.slice();
+    if (item.spare && (kind === 'txmic' || kind === 'bodypack')) g.spare = true;
     if (kind === 'console') g.mixes = (item.mixes || DEFAULT_MIXES).slice();
     if (kind === 'iemtx' && !g.mode) g.mode = 'Stereo';
+    if (kind === 'network') g.nports = Math.max(1, Math.min(128, Math.floor(Number(item.nports)) || 8));
     const p = portsFor({ ...g, nin: item.nin, nout: item.nout });
     g.ins = item.ins || p.ins; g.outs = item.outs || p.outs; g.feeds = {};
     // a stage box's inputs reach console channels only when someone assigns them (start: assign the whole box from that channel)
@@ -205,7 +240,7 @@
   /** Put a new handheld or bodypack on a receiver channel (the first free one, or ch), or a new pack on an IEM transmitter. */
   function addMember(doc, host, item, ch) {
     if (host.kind === 'receiver') {
-      const used = new Set(members(doc, host).map((m) => m.port));
+      const used = new Set(members(doc, host).filter((m) => !m.g.spare).map((m) => m.port));
       const port = ch != null ? ch : host.ins.findIndex((_, i) => !used.has(i));
       if (port < 0) return null;
       const g = addGear(doc, { kind: 'txmic', model: 'Handheld', ...item, name: item.name || (item.person ? item.person + ' mic' : host.name + ' ' + host.ins[port] + ' mic') });
@@ -233,13 +268,28 @@
   /** Connect an output (or link) to an input (or link). An input takes one cable: an old one there is replaced. */
   function connect(doc, a, ap, b, bp, extra) {
     if (!a || !b || a === b) return null;
-    if (bp !== 'link') doc.cables = doc.cables.filter((c) => !(c.b === b.id && c.bp === bp));
+    // an input takes one cable (a spare wireless mic shares its channel with the live one)
+    const G0 = new Map(doc.gear.map((g) => [g.id, g]));
+    if (bp !== 'link') doc.cables = doc.cables.filter((c) => !(c.b === b.id && c.bp === bp && !(a.spare || (G0.get(c.a) || {}).spare)));
     else doc.cables = doc.cables.filter((c) => !(c.a === a.id && c.b === b.id && c.ap === 'link' && c.bp === 'link'));
     const c = { id: uid('c'), a: a.id, ap, b: b.id, bp, kind: (extra && extra.kind) || guessCable(a, ap, b, bp) };
     if (extra) for (const f of ['label', 'length', 'notes']) if (extra[f]) c[f] = extra[f];
     doc.cables.push(c);
     return c;
   }
+  /** A network cable from gear's network socket to a switch port (port 1, 2…; null = not set). One per gear, one per port. */
+  function connectNet(doc, g, sw, port) {
+    if (!g || !sw || g === sw) return null;
+    if (g.kind === 'network' && sw.kind !== 'network') [g, sw] = [sw, g];
+    if (sw.kind !== 'network') return null;
+    doc.cables = doc.cables.filter((c) => !(c.ap === 'net' && (c.a === g.id || (port && c.b === sw.id && c.port === port))));
+    const c = { id: uid('c'), a: g.id, ap: 'net', b: sw.id, bp: 'net', kind: 'net' };
+    if (port) c.port = port;
+    doc.cables.push(c);
+    return c;
+  }
+  /** The network cable on a piece of gear's network socket (it plugs into a switch). */
+  const netOf = (doc, g) => doc.cables.find((c) => c.ap === 'net' && c.a === g.id) || null;
   const gearBy = (doc) => new Map(doc.gear.map((g) => [g.id, g]));
   const findGear = (doc, name) => doc.gear.find((g) => key(g.name) === key(name));
   const freeIn = (doc, g, from) => { for (let i = from || 0; i < g.ins.length; i++) if (!doc.cables.some((c) => c.b === g.id && c.bp === i)) return i; return -1; };
@@ -249,12 +299,15 @@
     const G = gearBy(doc);
     const into = new Map(), from = new Map(), links = new Map();
     for (const c of doc.cables) {
+      if (c.ap === 'net') continue;          // network cables carry no audio
       if (c.ap === 'link' || c.bp === 'link') {
         if (!links.has(c.a)) links.set(c.a, []); if (!links.has(c.b)) links.set(c.b, []);
         links.get(c.a).push({ c, other: c.b }); links.get(c.b).push({ c, other: c.a });
         continue;
       }
-      into.set(c.b + ':' + c.bp, c);
+      // a spare on a receiver channel never stands in for the live mic
+      const ik = c.b + ':' + c.bp, cur = into.get(ik);
+      if (!cur || ((G.get(cur.a) || {}).spare && !(G.get(c.a) || {}).spare)) into.set(ik, c);
       const k = c.a + ':' + c.ap;
       if (!from.has(k)) from.set(k, []);
       from.get(k).push(c);
@@ -400,23 +453,69 @@
     const G = gearBy(doc);
     return doc.cables.map((c) => {
       const a = G.get(c.a), b = G.get(c.b);
+      if (c.ap === 'net') return { c, a, b, from: a.name + ' network', to: b.name + (c.port ? ' port ' + c.port : '') };
       return { c, a, b, from: a.name + (c.ap === 'link' ? '' : ' ' + a.outs[c.ap]), to: b.name + (c.bp === 'link' ? '' : ' ' + b.ins[c.bp]) };
     });
+  }
+
+  // ---------- radio frequencies ----------
+  /** A frequency in MHz from what was typed ("518.2", "518.200 MHz"), or null. */
+  const mhz = (v) => { const m = /(\d{2,4}(?:\.\d+)?)/.exec(String(v || '')); return m ? Number(m[1]) : null; };
+  /** The 6 MHz TV channel band a frequency is in: same band, same colour dot on the drawing. */
+  const band = (f) => (f == null ? null : Math.floor(f / 6));
+  const bandColor = (f) => { const b = band(f); return b == null ? '' : 'hsl(' + ((b * 67) % 360) + ',72%,52%)'; };
+  /**
+   * Every transmitter on the air: wireless mics (each on its own frequency) and in-ear transmitters (their packs listen on the same one).
+   * Two on one frequency are a clash; closer than 0.4 MHz is a warning. A spare is not on the air with the live mic on its channel,
+   * and a pack is expected to match its own transmitter.
+   */
+  const CLOSE = 0.4;
+  function rfChecks(doc) {
+    const out = [], G = gearBy(doc);
+    const on = [];
+    for (const g of doc.gear) {
+      const f = mhz(g.freq);
+      if (f == null) continue;
+      if (g.kind === 'txmic') { const h = hostOf(doc, g); const m = h ? members(doc, h).find((x) => x.g.id === g.id) : null; on.push({ g, f, grp: h && m ? 'rx:' + h.id + ':' + m.port : 'tx:' + g.id, spare: !!g.spare }); }
+      else if (g.kind === 'iemtx') on.push({ g, f, grp: 'iem:' + g.id });
+      else if (g.kind === 'bodypack') { const h = hostOf(doc, g); on.push({ g, f, grp: h ? 'iem:' + h.id : 'pk:' + g.id, pack: true }); }
+    }
+    const fmt = (f) => String(Math.round(f * 1000) / 1000);
+    const seen = new Set();
+    for (let i = 0; i < on.length; i++) for (let j = i + 1; j < on.length; j++) {
+      const a = on[i], b = on[j];
+      if (a.grp === b.grp) continue;                              // a spare and the live mic on one channel; a pack and its transmitter
+      if (a.pack && b.pack && a.grp === b.grp) continue;
+      const d = Math.abs(a.f - b.f);
+      if (d >= CLOSE - 1e-6) continue;
+      const k = [a.g.id, b.g.id].sort().join('|'); if (seen.has(k)) continue; seen.add(k);
+      if (d < 0.0005) out.push({ level: 'bad', text: a.g.name + ' and ' + b.g.name + ' are both on ' + fmt(a.f) + ' MHz', gear: [a.g.id, b.g.id], rf: true });
+      else out.push({ level: 'warn', text: a.g.name + ' (' + fmt(a.f) + ') and ' + b.g.name + ' (' + fmt(b.f) + ' MHz) are only ' + fmt(d) + ' MHz apart; keep at least ' + CLOSE + ' MHz', gear: [a.g.id, b.g.id], rf: true });
+    }
+    // a pack set to a different frequency from its transmitter will not hear it
+    for (const p of on.filter((x) => x.pack)) {
+      const h = hostOf(doc, p.g), hf = h ? mhz(h.freq) : null;
+      if (hf != null && Math.abs(hf - p.f) >= 0.0005) out.push({ level: 'warn', text: p.g.name + ' is set to ' + fmt(p.f) + ' MHz but ' + h.name + ' sends on ' + fmt(hf) + ' MHz', gear: [p.g.id, h.id], rf: true });
+    }
+    return out;
   }
 
   /** Things that look wrong. */
   function checks(doc) {
     const out = [];
     const ix = index(doc);
-    const fq = new Map();
-    doc.gear.filter((g) => (g.kind === 'txmic' || g.kind === 'iemtx') && g.freq).forEach((g) => {
-      const m = /(\d+(?:\.\d+)?)/.exec(g.freq); const k = m ? String(Number(m[1])) : key(g.freq);
-      if (!fq.has(k)) fq.set(k, []); fq.get(k).push(g);
-    });
-    for (const [k, list] of fq) if (list.length > 1) out.push({ level: 'bad', text: list.map((g) => g.name).join(' and ') + ' are both on ' + k + ' MHz', gear: list.map((g) => g.id) });
+    out.push(...rfChecks(doc));
+    // a cable name is printed on the cable: two cables with one name get mixed up
+    const cn = new Map();
+    doc.cables.filter((c) => c.kind !== 'rf' && c.label).forEach((c) => { const k = tagKey(c.label); if (!cn.has(k)) cn.set(k, []); cn.get(k).push(c); });
+    for (const [, list] of cn) if (list.length > 1) { const G = gearBy(doc); out.push({ level: 'warn', text: list.length + ' cables are named ' + list[0].label + '. Give each its own name (Auto label numbers them).', gear: [...new Set(list.flatMap((c) => [c.a, c.b]))].filter((id) => G.has(id)), cables: list.map((c) => c.id) }); }
     const names = new Map();
-    doc.gear.forEach((g) => { const k = key(g.name); if (!names.has(k)) names.set(k, []); names.get(k).push(g); });
-    for (const [, list] of names) if (list.length > 1) out.push({ level: 'warn', text: list.length + ' pieces of gear are called ' + list[0].name + '. Rename one (' + list[0].name + ' #2).', gear: list.map((g) => g.id) });
+    doc.gear.forEach((g) => { const k = tagKey(g.name); if (!names.has(k)) names.set(k, []); names.get(k).push(g); });
+    for (const [, list] of names) if (list.length > 1) {
+      const same = list.every((g) => g.name === list[0].name);
+      out.push({ level: 'warn', text: same ? list.length + ' pieces of gear are called ' + list[0].name + '. Give each its own tag name (Auto label numbers them).' : list.map((g) => '“' + g.name + '”').join(' and ') + ' look like the same name. If they are the same gear, remove one; if not, give each its own tag name.', gear: list.map((g) => g.id) });
+    }
+    doc.cables.filter((c) => c.ap === 'net' && !c.port).forEach((c) => { const a = gearBy(doc).get(c.a), b = gearBy(doc).get(c.b); if (a && b) out.push({ level: 'note', text: a.name + ' plugs into ' + b.name + ': which port? Set it on the cable.', gear: [a.id, b.id] }); });
     const chans = new Map();
     const ins = inputs(doc);
     ins.filter((r) => r.used && r.ch != null).forEach((r) => { const k = r.console.id + ':' + r.ch; if (!chans.has(k)) chans.set(k, []); chans.get(k).push(r); });
@@ -437,5 +536,5 @@
   /** Short text for search and the device "used on" list. */
   function searchText(g) { return [g.name, g.use, g.person, g.chname, g.model, g.make, g.capsule, g.freq, g.group, g.phones, g.notes].filter(Boolean).join(' '); }
 
-  return { COLS, CATS, CABLES, KINDS, KIND_ORDER, FIELD_LABELS, DEFAULT_MIXES, clean, portsFor, addGear, resize, removeGear, connect, members, hostOf, addMember, assignChannels, chanOf, landing, suggestNames, guessCable, findGear, freeIn, uniqueName, index, upstream, downstream, chainText, inputs, outputs, wireless, inears, cableList, checks, searchText, colOf: (g) => (KINDS[g.kind] || KINDS.other).col };
+  return { COLS, CATS, CABLES, KINDS, KIND_ORDER, FIELD_LABELS, DEFAULT_MIXES, STAGES, STAGE_OF, stageOf, tagKey, clean, portsFor, addGear, resize, removeGear, connect, connectNet, netOf, members, hostOf, addMember, assignChannels, chanOf, landing, suggestNames, guessCable, findGear, freeIn, uniqueName, index, upstream, downstream, chainText, inputs, outputs, wireless, inears, cableList, checks, rfChecks, mhz, band, bandColor, searchText, colOf: (g) => (KINDS[g.kind] || KINDS.other).col };
 });

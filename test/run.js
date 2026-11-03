@@ -882,6 +882,19 @@ test('stage patch 0.23: signal stages and network cables to switch ports', async
   const c2 = P.clean(JSON.parse(JSON.stringify(d)));
   assert.strictEqual(c2.cables.filter((c) => c.ap === 'net').length, 2, 'network cables survive a save');
   assert.strictEqual(P.connectNet(d, mic, amp, 1), null, 'only a switch takes a network cable');
+  // wireless: same frequency is a problem, too close a warning; a spare on the live mic's channel is fine; folded systems and spares survive a save
+  const w = P.clean({});
+  const rx = P.addGear(w, { kind: 'receiver', name: 'RX-1', nin: 2 });
+  const m1 = P.addMember(w, rx, { name: 'WMIC-1', freq: '518.200' }), m2 = P.addMember(w, rx, { name: 'WMIC-2', freq: '518.200' });
+  assert.ok(P.rfChecks(w).some((i) => i.level === 'bad'), 'two mics on one frequency');
+  m2.freq = '518.400';
+  assert.ok(P.rfChecks(w).some((i) => i.level === 'warn') && !P.rfChecks(w).some((i) => i.level === 'bad'), 'closer than 0.4 MHz warns');
+  m2.freq = '530.000';
+  assert.strictEqual(P.rfChecks(w).length, 0);
+  rx.wlshut = true; m2.spare = true;
+  const w2 = P.clean(JSON.parse(JSON.stringify(w)));
+  assert.ok(w2.gear.find((g) => g.id === rx.id).wlshut && w2.gear.find((g) => g.id === m2.id).spare, 'folded and spare are kept');
+  assert.ok(m1);
 });
 
 test('checklists that were on pages move to To do, keeping their ticks and log', async () => {

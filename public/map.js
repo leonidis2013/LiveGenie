@@ -49,6 +49,18 @@ function layered(ids, edges) {
       if (indeg.get(c) <= 0 && !seen.has(c)) queue.push(c);
     }
   }
+  // signal stages, left to right, as on the stage patch: sources → stage I/O → console → processing → amps → outputs.
+  // A box whose kind is known always sits in its stage; the rest go by the cables (longest path, loops cut).
+  const kindOf = (id) => { const d = typeof DEV !== 'undefined' && DEV.list ? DEV.list.find((x) => x.id === id) : null; return d && d.kind; };
+  if (typeof PatchCore !== 'undefined') ids.forEach((id) => {
+    const k = kindOf(id);
+    const s0 = k ? PatchCore.stageOf({ kind: k }) : null;
+    if (s0 === 'net') layer.set(id, 6);
+    else if (k === 'txmic') layer.set(id, -1);           // a wireless mic just left of its receiver
+    else if (k === 'bodypack') layer.set(id, 5.5);       // an in-ear pack just right of its transmitter
+    else if (s0 != null) layer.set(id, s0);
+    else layer.set(id, Math.min(5, layer.get(id) || 0));
+  });
   // a loop (a stage box that feeds the console and is fed by it) can skip a column: close the gaps
   const used = [...new Set(ids.map((id) => layer.get(id) || 0))].sort((a, b) => a - b);
   const squeeze = new Map(used.map((l, i) => [l, i]));

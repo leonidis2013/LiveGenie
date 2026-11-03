@@ -1211,8 +1211,13 @@ async function tabProblems(pane, status) {
 
 /** Report a problem (anyone signed in). where = what it is about; ctx = { page_id, device_id, gear }. */
 function reportProblem(where, ctx = {}) {
+  // gear shows as its tag name with the model: "RX-1 (SLXD4D)"
+  const dev = ctx.device_id && typeof DEV !== 'undefined' ? (DEV.list || []).find((x) => String(x.id) === String(ctx.device_id)) : null;
+  const model = (dev && dev.model) || ctx.model || '';
+  if (model && typeof Tags !== 'undefined') where = Tags.withModel(where, model);
+  delete ctx.model;
   modal('<h3>Report a problem</h3><p>Tell the admins what is wrong. They see it in Admin › Problems.</p><form id="rpf"><label>About</label><input id="rpw" value="' + esc(where || '') + '">' +
-    '<label>What is wrong?</label><textarea id="rpt" rows="4" placeholder="Pastor lav cuts out when he turns his head"></textarea><div class="err" id="rpe"></div>' +
+    '<label>What is wrong?</label><textarea id="rpt" rows="4" placeholder="What happened, when, and what you already tried"></textarea><div class="err" id="rpe"></div>' +
     '<div class="acts"><button type="button" data-close>Cancel</button><button class="primary">Send</button></div></form>', (w, close) => {
     setTimeout(() => $('#rpt', w).focus(), 40);
     $('#rpf', w).addEventListener('submit', async (e) => {

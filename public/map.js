@@ -49,8 +49,12 @@ function layered(ids, edges) {
       if (indeg.get(c) <= 0 && !seen.has(c)) queue.push(c);
     }
   }
+  // a loop (a stage box that feeds the console and is fed by it) can skip a column: close the gaps
+  const used = [...new Set(ids.map((id) => layer.get(id) || 0))].sort((a, b) => a - b);
+  const squeeze = new Map(used.map((l, i) => [l, i]));
+  ids.forEach((id) => layer.set(id, squeeze.get(layer.get(id) || 0)));
   const cols = [];
-  ids.forEach((id) => { const l = layer.get(id) || 0; (cols[l] = cols[l] || []).push(id); });
+  ids.forEach((id) => { const l = layer.get(id); (cols[l] = cols[l] || []).push(id); });
   const yIdx = new Map();
   cols.forEach((col, l) => {
     if (l) col.sort((a, b) => avg(inc.get(a)) - avg(inc.get(b)));

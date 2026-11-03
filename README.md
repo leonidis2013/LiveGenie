@@ -4,7 +4,7 @@
 
 The Rolling Hills Community Church AVL knowledge base: one web app where volunteers find how our system works, how to run a service and how to fix what broke. Part of the Live series (LiveMic, LiveCompanion, LivePi, LiveVoice).
 
-Version 0.22.2 · © 2026 Jerod Ulicki
+Version 0.22.3 · © 2026 Jerod Ulicki
 
 ## What it does
 
@@ -118,7 +118,8 @@ Run it on the TrueNAS host and reach it from the AVL and office VLANs through th
 | 0.11.0 | Phone layout (bottom tabs, + button, bottom sheets, To do screen) and desktop layout (sidebar with spaces and pages, On this page outline) |
 | 0.12.0 | Phone sign in: tap your name, PIN pad, and QR code sign in from a signed-in computer |
 | 0.13.0 | Stage patch: one visual signal-flow drawing for the whole system (equipment pane, drag to connect, follow a signal, overview and sockets, cable styles, checks), with the input, output, wireless, in-ear and cable lists and the PDF made from it; old patch lists moved onto it |
-| 0.22.2 | A wireless mic's **Capsule** is picked from the capsule cards in the Gear Locker, or **+ New capsule…** makes one right there; swapping it onto another mic takes it off the old one; the mic card links its capsule (a typed capsule still works) (this release) |
+| 0.22.3 | System map no longer fails to open when gear feeds each other in a loop (a stage box that feeds the console and is fed by it) (this release) |
+| 0.22.2 | A wireless mic's **Capsule** is picked from the capsule cards in the Gear Locker, or **+ New capsule…** makes one right there; swapping it onto another mic takes it off the old one; the mic card links its capsule (a typed capsule still works) |
 | 0.22.1 | Home's Get started card: each step drops off once it is done (spaces, equipment setup, people, church name and logo), shows how many are done, and goes away when all are, or with Hide |
 | 0.22.0 | Gear knows what it is: a "What is it?" pick on every card (mic, wireless mic, capsule, receiver, speaker…) sorts it into the right bucket; wireless mics pair with their receiver (type, capsule, frequency) and capsules with their mic, listed on the receiver card with an Add button; "How many?" adds several numbered mics at once; the Speakers bucket (was Speakers & monitors); gear already on your model list learns its kind; manuals and the manufacturer's page in one place on the card and in Edit; the guided equipment setup runs once, then lives under Admin › Equipment setup |
 | 0.21.1 | Opening LiveGenie (or signing in) on an old link to a page or gear that is gone goes to Home instead of "Page not found"; a clearer message with Home and Search when you follow one inside the app |

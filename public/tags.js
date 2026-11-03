@@ -58,6 +58,28 @@
     return 'C-' + Date.now() % 10000;
   }
 
+  /**
+   * A cable name that says what the cable does.
+   *   in:  the input it plugs into — IN-A12 (stage box A input 12), IN-L03 (console local input 3), IN-M03 (a second console);
+   *        cables further back in a chain (instrument → DI → box) add .1, .2…: IN-A12.1
+   *   out / spk / lnk / net: counted per prefix — OUT-001, SPK-002, LNK-001, NET-004.
+   * info: { type: 'in'|'out'|'spk'|'lnk'|'net', at: 'A' | 'L' | 'M'…, input: 12, back: 0 }. Never returns a name in taken.
+   */
+  const CABLE_PREFIX = { in: 'IN-', out: 'OUT-', spk: 'SPK-', lnk: 'LNK-', net: 'NET-' };
+  function cableName(info, taken) {
+    const t = takenSet(taken);
+    const type = CABLE_PREFIX[info && info.type] ? info.type : 'out';
+    if (type === 'in' && info.at && Number(info.input) > 0) {
+      let base = 'IN-' + String(info.at).toUpperCase() + String(Number(info.input)).padStart(2, '0');
+      if (info.back > 0) base += '.' + info.back;
+      if (!t.has(norm(base))) return base;
+      for (let n = 2; n < 100; n++) if (!t.has(norm(base + '-' + n))) return base + '-' + n;   // only when someone already used it by hand
+    }
+    const pre = type === 'in' ? 'IN-' : CABLE_PREFIX[type];
+    for (let n = 1; n < 10000; n++) { const s = pre + String(n).padStart(3, '0'); if (!t.has(norm(s))) return s; }
+    return pre + Date.now() % 10000;
+  }
+
   /** "RX-1 (SLXD4D)": the tag name with the model after it, unless the name already says the model. */
   function withModel(name, model) {
     name = String(name || '').trim(); model = String(model || '').trim();
@@ -82,7 +104,7 @@
     return out;
   }
 
-  const api = { CODES, POSITIONS, norm, suggest, cable, withModel, nearDupes };
+  const api = { CODES, POSITIONS, CABLE_PREFIX, norm, suggest, cable, cableName, withModel, nearDupes };
   if (typeof module !== 'undefined' && module.exports) module.exports = api;
   else root.Tags = api;
 })(typeof window !== 'undefined' ? window : globalThis);

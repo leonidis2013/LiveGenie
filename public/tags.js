@@ -34,6 +34,10 @@
       if (free(opts.position)) return opts.position;
       for (let n = 2; n < 100; n++) if (free(opts.position + ' ' + n)) return opts.position + ' ' + n;
     }
+    if (c.model && !String(opts.model || '').trim()) {   // a console with no model yet: FOH, then FOH 2…
+      if (free('FOH')) return 'FOH';
+      for (let n = 2; n < 100; n++) if (free('FOH ' + n)) return 'FOH ' + n;
+    }
     if (c.model && opts.model) {
       const base = (c.code + opts.model).trim();
       if (free(base)) return base;

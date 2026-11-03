@@ -676,10 +676,22 @@ function wireBlocks(root, page, live = true) {
   }));
 }
 
-/** Export PDF: the browser's print dialog with a clean layout (Save as PDF). */
-function exportPdf(title) {
+/**
+ * The file name a saved PDF gets (the browser uses the page title): church, what it is, the date and the revision,
+ * like "RHCC Stage Patch 2026-11-02 Rev 14". A long church name shortens to its initials.
+ */
+function pdfName(title, rev) {
+  const org = ((S.state && S.state.org && S.state.org.name) || '').trim();
+  const short = org.length > 16 ? org.split(/\s+/).filter((w) => /^[A-Za-z0-9]/.test(w) && !/^(of|the|and|&)$/i.test(w)).map((w) => w[0].toUpperCase()).join('') : org;
+  const d = new Date(), date = d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-' + String(d.getDate()).padStart(2, '0');
+  const clean = String(title || 'LiveGenie').replace(/[\\/:*?"<>|]+/g, ' ').replace(/,/g, '').replace(/\s+/g, ' ').trim();
+  return [short, clean, date, rev ? 'Rev ' + rev : ''].filter(Boolean).join(' ');
+}
+
+/** Export PDF: the browser's print dialog with a clean layout (Save as PDF), saved under a smart name. */
+function exportPdf(title, rev) {
   const old = document.title;
-  document.title = title;
+  document.title = pdfName(title, rev);
   const after = () => { document.title = old; window.removeEventListener('afterprint', after); };
   window.addEventListener('afterprint', after);
   window.print();
@@ -723,7 +735,7 @@ async function viewPage(id, focusChecklist) {
   if (Shell.outline($('#doc'), $('.outline'))) $('.pagewrap').classList.add('has-outline');
   const hb = $('#hB'); if (hb) hb.addEventListener('click', () => { location.hash = '#/p/' + p.id + '/history'; });
   const rb = $('#rB'); if (rb) rb.addEventListener('click', () => reportProblem(p.title, { page_id: p.id }));
-  $('#pB').addEventListener('click', () => exportPdf(p.title));
+  $('#pB').addEventListener('click', () => exportPdf(p.title, p.version));
   if (focusChecklist) {
     const c = document.getElementById('c-' + focusChecklist) || document.querySelector('[data-pid="' + CSS.escape(focusChecklist) + '"], [data-ipid="' + CSS.escape(focusChecklist) + '"]');
     if (c) setTimeout(() => { c.scrollIntoView({ block: 'start', behavior: 'smooth' }); c.classList.add('flash'); }, 60);

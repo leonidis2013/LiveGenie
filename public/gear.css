@@ -1,1 +1,32 @@
 /* Gear Locker (0.23.0) */
+
+/* tag name with its Auto label button */
+.tagrow { display:flex; gap:8px; align-items:stretch; }
+.tagrow > input { flex:1; min-width:0; }
+.tagrow > .btn { flex:none; white-space:nowrap; }
+.tagrow > .btn .icon { color:var(--acc); }
+
+/* near-duplicates and channel counts that disagree */
+.gwarn { display:flex; gap:10px; align-items:flex-start; margin:6px 0 10px; padding:10px 12px; border-radius:12px;
+  background:color-mix(in srgb, var(--warn) 12%, var(--card)); border:1px solid color-mix(in srgb, var(--warn) 40%, transparent); }
+.gwarn > .icon { flex:none; width:18px; height:18px; color:var(--warn); margin-top:3px; }
+.gwl { flex:1; min-width:0; display:flex; flex-direction:column; gap:6px; }
+.gwr { display:flex; flex-wrap:wrap; align-items:center; gap:6px 12px; font-size:13px; }
+.gwr > span:first-child { flex:1 1 260px; min-width:0; }
+.gwb { display:flex; gap:6px; flex:none; }
+.gwb button.xs { padding:4px 10px; font-size:12px; vertical-align:baseline; }
+
+/* merge: pick the card to keep */
+.mgl { display:flex; flex-direction:column; gap:6px; margin:4px 0 12px; }
+.modal label.mgo { display:flex; margin:0; font-size:14px; color:var(--fg); font-weight:400; }
+.mgo { display:flex; gap:10px; align-items:flex-start; padding:10px 12px; border-radius:10px; background:var(--card2); cursor:pointer; }
+.mgo input { width:auto; margin-top:3px; flex:none; }
+.mgo b { font-size:14px; }
+.mgo span { display:flex; flex-direction:column; gap:2px; min-width:0; }
+.mgo em { font-style:normal; font-size:12px; color:var(--dim); }
+
+/* a long "what it is" line never makes a card wider than the column */
+.dgrid { min-width:0; }
+.dcard { min-width:0; max-width:100%; }
+.dcard .t { min-width:0; overflow:hidden; }
+.dcard .t > span:not(.dmeta) { display:block; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }

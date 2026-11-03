@@ -11,7 +11,7 @@ const DEV = { list: null, at: 0, dm: null, loading: null, buckets: [] };
  * Gear Locker buckets. Gear sorts itself by what it is (its kind on the stage patch, else its model and category);
  * an admin can move a piece to another bucket, rename, reorder or add buckets.
  */
-const AUTO_BUCKETS = ['Mics & wireless', 'In-ears', 'Stage I/O', 'Mixing', 'Processing', 'Amps', 'Speakers', 'Video', 'Lighting', 'Network', 'Computers', 'Power', 'Other'];
+const AUTO_BUCKETS = ['Wired mics', 'Wireless mics', 'Receivers', 'Capsules', 'In-ears', 'Stage I/O', 'Mixing', 'Processing', 'Amps', 'Speakers', 'Video', 'Lighting', 'Network', 'Computers', 'Power', 'Other'];
 /** What a piece of gear is, in the order the "What is it?" list shows them. Same words as the stage patch. */
 const GEAR_KIND = [['mic', 'Microphone'], ['txmic', 'Wireless mic (handheld or pack)'], ['capsule', 'Mic capsule or head'], ['receiver', 'Wireless receiver'], ['di', 'DI box'], ['source', 'Instrument or playback'],
   ['iemtx', 'In-ear transmitter'], ['bodypack', 'In-ear pack'], ['headamp', 'Headphone amp'], ['console', 'Mixer'], ['stagebox', 'Stage box'], ['processor', 'Processor'], ['amp', 'Amplifier'], ['speaker', 'Speaker'], ['wedge', 'Wedge or monitor'],
@@ -21,7 +21,7 @@ const kindLabel = (k) => (GEAR_KIND.find((x) => x[0] === k) || [0, ''])[1];
 const GEAR_PAIR = { txmic: { with: 'receiver', label: 'Receiver', add: 'Add a wireless mic', list: 'Wireless mics' }, capsule: { with: 'txmic', label: 'Fits on', add: 'Add a capsule', list: 'Capsules' }, bodypack: { with: 'iemtx', label: 'Transmitter', add: 'Add an in-ear pack', list: 'In-ear packs' } };
 const PAIR_CHILD = { receiver: 'txmic', iemtx: 'bodypack' };
 const TX_KINDS = ['Handheld', 'Bodypack', 'Headset', 'Lavalier', 'Instrument', 'Other'];
-const BUCKET_OF_KIND = { capsule: 'Mics & wireless', mic: 'Mics & wireless', di: 'Mics & wireless', txmic: 'Mics & wireless', receiver: 'Mics & wireless', source: 'Other', iemtx: 'In-ears', bodypack: 'In-ears', headamp: 'In-ears',
+const BUCKET_OF_KIND = { capsule: 'Capsules', mic: 'Wired mics', di: 'Wired mics', txmic: 'Wireless mics', receiver: 'Receivers', source: 'Other', iemtx: 'In-ears', bodypack: 'In-ears', headamp: 'In-ears',
   stagebox: 'Stage I/O', network: 'Network', console: 'Mixing', computer: 'Computers', processor: 'Processing', amp: 'Amps', speaker: 'Speakers', wedge: 'Speakers' };
 function autoBucket(d) {
   if (d.kind && BUCKET_OF_KIND[d.kind]) return BUCKET_OF_KIND[d.kind];
@@ -29,8 +29,11 @@ function autoBucket(d) {
   const m = typeof GearModels !== 'undefined' ? GearModels.find(d.model) || GearModels.find(d.name) : null;
   if (m && BUCKET_OF_KIND[m.kind]) return BUCKET_OF_KIND[m.kind];
   const t = (d.make + ' ' + d.model + ' ' + d.name).toLowerCase();
-  if (/wireless|receiver|\bmic|microphone|\bdi\b/.test(t)) return 'Mics & wireless';
-  if (/\biem\b|in-?ear/.test(t)) return 'In-ears';
+  if (/\biem\b|in-?ear|bodypack receiver/.test(t)) return 'In-ears';
+  if (/receiver|\brx\b/.test(t)) return 'Receivers';
+  if (/capsule|mic head|cartridge/.test(t)) return 'Capsules';
+  if (/wireless|handheld|bodypack|\bwmic/.test(t)) return 'Wireless mics';
+  if (/\bmic|microphone|\bdi\b|direct box/.test(t)) return 'Wired mics';
   if (/stage ?box|snake|\bi\/o\b/.test(t)) return 'Stage I/O';
   if (/console|mixer|desk/.test(t)) return 'Mixing';
   if (/\bdsp\b|processor|crossover/.test(t)) return 'Processing';
@@ -38,9 +41,9 @@ function autoBucket(d) {
   if (/speaker|\bsub\b|subwoofer|wedge|monitor|column|line ?array|\bpa\b|cabinet/.test(t)) return 'Speakers';
   return { video: 'Video', lighting: 'Lighting', network: 'Network', computer: 'Computers', power: 'Power', audio: 'Other', other: 'Other' }[d.category] || 'Other';
 }
-/** Older names for a bucket, so gear filed under them lands in the new one. */
-const BUCKET_RENAMED = { 'Speakers & monitors': 'Speakers' };
-const bucketOf = (d) => { const b = d.bucket || autoBucket(d); return BUCKET_RENAMED[b] || b; };
+/** Older names for a bucket, so gear filed under them lands in the new one ('' = sort it automatically again). */
+const BUCKET_RENAMED = { 'Speakers & monitors': 'Speakers', 'Mics & wireless': '' };
+const bucketOf = (d) => { let b = d.bucket || ''; if (b in BUCKET_RENAMED) b = BUCKET_RENAMED[b]; return b || autoBucket(d); };
 /** Every location used in the Gear Locker, sorted (plus this one). */
 const gearLocations = (list, extra) => [...new Set(list.map((d) => d.location).concat(extra ? [extra] : []).filter(Boolean))].sort((a, b) => a.localeCompare(b, undefined, { numeric: true }));
 /** Every bucket name in order: the admin's list first, then automatic ones that have gear. */
@@ -55,7 +58,7 @@ async function loadDevices(force) {
   if (!force && DEV.list && Date.now() - DEV.at < 30000) return DEV.list;
   if (DEV.loading) return DEV.loading;
   DEV.loading = get('/api/devices').then((d) => {
-    DEV.list = d.devices; DEV.buckets = [...new Set((d.buckets || []).map((b) => BUCKET_RENAMED[b] || b))]; DEV.at = Date.now();
+    DEV.list = d.devices; DEV.buckets = [...new Set((d.buckets || []).map((b) => (b in BUCKET_RENAMED ? BUCKET_RENAMED[b] : b)).filter(Boolean))]; DEV.dupeSkip = new Set(d.dupeSkip || []); DEV.at = Date.now();
     DEV.dm = DevMatch.build(d.devices);
     return DEV.list;
   }).catch(() => DEV.list || []).finally(() => { DEV.loading = null; });
@@ -159,6 +162,29 @@ function devThumb(d, size) {
 }
 
 // ---------- the Gear Locker ----------
+/** Short words for what a piece of gear is, for card subtitles. */
+const KIND_SHORT = { mic: 'Wired mic', txmic: 'Wireless mic', capsule: 'Capsule', receiver: 'Receiver', di: 'DI', source: 'Source', iemtx: 'In-ear transmitter', bodypack: 'In-ear pack', headamp: 'Headphone amp',
+  console: 'Mixer', stagebox: 'Stage box', processor: 'Processor', amp: 'Amp', speaker: 'Speaker', wedge: 'Wedge', network: 'Network', computer: 'Computer' };
+/** A tag name with its model: "RX-1 (SLXD4D)". */
+const tagModel = (x) => (x ? (typeof Tags !== 'undefined' ? Tags.withModel(x.name, x.model) : x.name) : '');
+/**
+ * One line that says what it is: "Wireless mic · Handheld · Shure SLXD2 · on RX-1 (SLXD4D)", "Receiver · 2 wireless mics".
+ * Only wireless mics, capsules and in-ear packs say what they pair with; a wired mic never does.
+ */
+function gearLine(d, list) {
+  list = list || DEV.list || [];
+  const mm = [d.make, d.model].filter(Boolean).join(' ');
+  const showMm = mm && !(typeof Tags !== 'undefined' && d.model && Tags.norm(d.name).includes(Tags.norm(d.model)));
+  const mate = GEAR_PAIR[d.kind] && d.pair_id ? list.find((x) => x.id === d.pair_id) : null;
+  const kids = PAIR_CHILD[d.kind] ? list.filter((x) => x.kind === PAIR_CHILD[d.kind] && x.pair_id === d.id).length : 0;
+  // most useful first (what it is, what it pairs with), make and model last, since a narrow card cuts the end off
+  const parts = [KIND_SHORT[d.kind] || '', d.kind === 'txmic' ? d.txtype : ''];
+  if (mate) parts.push((d.kind === 'capsule' ? 'in ' : 'on ') + tagModel(mate));
+  if (PAIR_CHILD[d.kind]) parts.push(kids ? kids + ' ' + (d.kind === 'receiver' ? 'wireless mic' : 'pack') + (kids === 1 ? '' : 's') : 'none paired');
+  if (showMm) parts.push(mm);
+  return parts.filter(Boolean).join(' · ') || CAT[d.category] || '';
+}
+
 async function viewDevices(qs) {
   setTitle('Gear Locker');
   // your model list says what each model is (a speaker, a mic), so gear sorts into the right bucket
@@ -183,10 +209,11 @@ async function viewDevices(qs) {
     <div class="bar"><input type="search" id="dq" placeholder="Find gear: name, model, location, IP or who uses it" style="flex:1;min-width:200px">
       <select id="dlf" title="Only gear in one location"><option value="">Every location</option>${gearLocations(list).map((l) => '<option' + (l === lc ? ' selected' : '') + '>' + esc(l) + '</option>').join('')}${list.some((d) => !d.location) ? '<option value="__none">No location set</option>' : ''}</select>
       <div class="seg" id="dgb"><button data-gb="bucket" class="${by === 'bucket' ? 'on' : ''}">By bucket</button><button data-gb="location" class="${by === 'location' ? 'on' : ''}">By location</button></div></div>
+    ${can('admin') ? '<div id="ddup"></div>' : ''}
     <div class="gchips" id="dcat"><button data-b="" class="chipb on">All <em>${list.length}</em></button>${order.filter((b) => list.some((d) => bucketOf(d) === b)).map((b) => '<button class="chipb" data-b="' + esc(b) + '">' + esc(b) + ' <em>' + list.filter((d) => bucketOf(d) === b).length + '</em></button>').join('')}</div>
     <div id="dgrid"></div>`;
   const cardHtml = (d) => '<a class="dcard" href="#/d/' + d.id + '">' + devThumb(d, 46) +
-    '<div class="t"><b>' + esc(d.name) + '</b><span>' + esc([d.make, d.model].filter(Boolean).join(' ') || [d.txtype || kindLabel(d.kind), d.capsule].filter(Boolean).join(' · ') || CAT[d.category]) + (d.pair_id && (DEV.list || []).find((x) => x.id === d.pair_id) ? ' <span class="note">→ ' + esc(DEV.list.find((x) => x.id === d.pair_id).name) + '</span>' : '') + '</span>' +
+    '<div class="t"><b>' + esc(d.name) + '</b><span>' + esc(gearLine(d, list)) + '</span>' +
     '<span class="dmeta">' + [d.location ? icon('pin') + esc(d.location) : '', d.networked && d.ips.length ? '<span class="mono">' + esc(d.ips[0]) + '</span>' + (d.ips.length > 1 ? ' +' + (d.ips.length - 1) : '') : '', users.get(d.id) ? icon('user') + esc(users.get(d.id)) : ''].filter(Boolean).join('<i>·</i>') + '</span></div>' +
     '<div class="dbadges">' + (d.files ? '<span class="badge" title="' + d.files + ' manual' + (d.files === 1 ? '' : 's') + '">' + icon('pdf') + d.files + '</span>' : '') + (d.tech_only ? '<span class="badge tech">Tech only</span>' : '') + '</div></a>';
   const paint = () => {
@@ -215,7 +242,58 @@ async function viewDevices(qs) {
   const nb = $('#newDev'); if (nb) nb.addEventListener('click', () => { location.hash = '#/gear/new' + (bk ? '?b=' + encodeURIComponent(bk) : ''); });
   const ib = $('#imp'); if (ib) ib.addEventListener('click', () => importDialog(sug));
   const gb = $('#gBk'); if (gb) gb.addEventListener('click', () => bucketsDialog(list));
+  if (can('admin')) paintDupes($('#ddup'), list);
   paint();
+}
+
+/**
+ * Admins: gear that looks entered twice (tag names equal once spaces, dashes and capitals are ignored), with Merge… and Not a duplicate,
+ * and cards of the same model that disagree on their channel count. Several of the same model is normal and never flagged.
+ */
+function gearWarnings(list) {
+  const dupes = Tags.nearDupes(list.map((d) => ({ id: d.id, name: d.name })), DEV.dupeSkip || new Set()).map((g) => g.map((x) => list.find((d) => d.id === x.id)));
+  const counts = [];
+  const byModel = new Map();
+  list.filter((d) => ['receiver', 'iemtx', 'stagebox', 'console'].includes(d.kind) && d.model).forEach((d) => {
+    const k = Tags.norm(d.make) + '|' + Tags.norm(d.model); if (!byModel.has(k)) byModel.set(k, []); byModel.get(k).push(d);
+  });
+  for (const g of byModel.values()) {
+    for (const f of ['inputs', 'outputs']) {
+      const vals = [...new Set(g.map((d) => d[f]).filter((n) => n > 0))];
+      if (vals.length > 1) counts.push({ text: g.length + ' ' + g[0].model + ' cards disagree: ' + vals.sort((x, y) => x - y).join(' vs ') + ' ' + f, cards: g.filter((d) => d[f] > 0) });
+    }
+  }
+  return { dupes, counts };
+}
+function paintDupes(host, list) {
+  if (!host) return;
+  const w = gearWarnings(list);
+  if (!w.dupes.length && !w.counts.length) { host.innerHTML = ''; return; }
+  const link = (d) => '<a href="#/d/' + d.id + '">' + esc(tagModel(d)) + '</a>';
+  host.innerHTML = '<div class="gwarn">' + icon('alert') + '<div class="gwl">' +
+    w.dupes.map((g, i) => '<div class="gwr"><span>' + g.map(link).join(' and ') + ' look like the same gear.</span><span class="gwb"><button type="button" class="btn xs" data-merge="' + i + '">Merge…</button><button type="button" class="ghost xs" data-notdup="' + i + '">Not a duplicate</button></span></div>').join('') +
+    w.counts.map((c) => '<div class="gwr"><span>' + esc(c.text) + ': ' + c.cards.map(link).join(', ') + '.</span></div>').join('') + '</div></div>';
+  $$('[data-notdup]', host).forEach((b) => b.addEventListener('click', async () => {
+    const g = w.dupes[Number(b.dataset.notdup)];
+    try { const r = await call('PUT', '/api/devices/dupe-skip', { ids: g.map((d) => d.id) }); DEV.dupeSkip = new Set(r.dupeSkip); paintDupes(host, list); toast('Left alone', 'ok'); } catch (e) { toast(e.message, 'bad'); }
+  }));
+  $$('[data-merge]', host).forEach((b) => b.addEventListener('click', () => mergeDialog(w.dupes[Number(b.dataset.merge)])));
+}
+/** Merge: pick the card to keep; the others' manuals, photo, pairings, nicknames and stage patch place move onto it. */
+function mergeDialog(group) {
+  const line = (d) => esc([d.make, d.model].filter(Boolean).join(' ') || kindLabel(d.kind) || '') + (d.location ? ' · ' + esc(d.location) : '') + (d.files ? ' · ' + d.files + ' manual' + (d.files === 1 ? '' : 's') : '');
+  modal('<h3>Merge into one card</h3><p>Pick the card to keep. The other ' + (group.length > 2 ? 'cards' : 'card') + '’s manuals, photo, pairings, empty details and stage patch place move onto it, and its name becomes a nickname, so pages still link. Then it is removed.</p>' +
+    '<form id="mgf"><div class="mgl">' + group.map((d, i) => '<label class="mgo"><input type="radio" name="keep" value="' + d.id + '"' + (i ? '' : ' checked') + '><span><b>' + esc(d.name) + '</b><em>' + line(d) + '</em></span></label>').join('') + '</div>' +
+    '<div class="acts"><button type="button" data-close>Cancel</button><button class="primary">Merge</button></div></form>', (w, close) => {
+    $('#mgf', w).addEventListener('submit', async (e) => {
+      e.preventDefault();
+      const keep = Number($('input[name=keep]:checked', w).value);
+      try {
+        for (const d of group) if (d.id !== keep) await call('POST', '/api/devices/' + d.id + '/merge', { into: keep });
+        close(); forgetDevices(); toast('Merged', 'ok'); route();
+      } catch (err) { toast(err.message, 'bad'); }
+    });
+  });
 }
 
 /** Admin: rename, reorder, add or remove buckets. */
@@ -281,14 +359,15 @@ async function viewDevice(id) {
     return '<div><a class="mono" href="http://' + esc(ip) + '" target="_blank" rel="noopener">' + esc(ip) + '</a> <span class="note">' + esc(where.join(', ')) + '</span></div>';
   }).join('');
   const L = d.links || {};
-  const dl = (x) => '<a href="#/d/' + x.id + '">' + esc(x.name) + '</a>';
+  // a link to another card: its tag name with its model, "RX-1 (SLXD4D)"
+  const dl = (x) => '<a href="#/d/' + x.id + '">' + esc(tagModel({ name: x.name, model: x.model || ((DEV.list || []).find((y) => y.id === x.id) || {}).model })) + '</a>';
   const all = DEV.list || [];
   const mate = v.pair_id && all.find((x) => x.id === v.pair_id);
   const kids = PAIR_CHILD[v.kind] ? all.filter((x) => x.pair_id === v.id && x.kind === PAIR_CHILD[v.kind]) : [];
   const facts = [
     ['What it is', esc(kindLabel(v.kind) + (v.txtype ? ' · ' + v.txtype : ''))],
     [GEAR_PAIR[v.kind] ? GEAR_PAIR[v.kind].label : '', mate ? dl(mate) : ''],
-    ['Capsule', (() => { const c = v.kind === 'txmic' && all.find((x) => x.kind === 'capsule' && x.pair_id === v.id); return c ? dl(c) + ([c.make, c.model].filter(Boolean).join(' ') && [c.make, c.model].filter(Boolean).join(' ') !== c.name ? ' <span class="note">' + esc([c.make, c.model].filter(Boolean).join(' ')) + '</span>' : '') : esc(v.capsule); })()], ['Frequency', v.freq ? esc(v.freq) + ' MHz' : ''],
+    ['Capsule', (() => { const c = v.kind === 'txmic' && all.find((x) => x.kind === 'capsule' && x.pair_id === v.id); return c ? dl(c) : esc(v.capsule); })()],
     ['Location', esc(v.location)],
     ['Plugged into', v.networked && L.uplink ? dl(L.uplink) + (L.uplink.port ? ' · port <span class="mono">' + esc(L.uplink.port) + '</span>' : '') : ''],
     ['VLAN', !v.networked ? '' : (L.vlans || []).map((x) => '<a class="chip" href="#/map/vlans"><i class="sw" style="background:' + esc(x.color) + '"></i>' + x.vid + ' ' + esc(x.name) + '</a>').join(' ')],
@@ -309,7 +388,7 @@ async function viewDevice(id) {
     ${v.photo ? '<div class="section" style="margin-top:20px" id="dphoto"><div class="hsh"><h2>Photo</h2>' + (can('admin') ? '<button class="btn" id="dmk">' + icon('edit') + (v.marks.length ? 'Edit highlights' : 'Highlight on the photo') + '</button>' : '') + '</div><div id="dmarks"></div></div>' : ''}
     ${PAIR_CHILD[v.kind] ? (() => { const P = GEAR_PAIR[PAIR_CHILD[v.kind]];
       return '<div class="section" style="margin-top:20px"><div class="hsh"><h2>' + P.list + '</h2>' + (can('admin') ? '<a class="btn" href="#/gear/new?kind=' + PAIR_CHILD[v.kind] + '&pair=' + v.id + '">' + icon('plus') + P.add + '</a>' : '') + '</div>' +
-        (kids.length ? '<div class="list pairs">' + kids.map((x) => '<a class="row" href="#/d/' + x.id + '">' + devThumb(x, 36) + '<div class="t"><b>' + esc(x.name) + '</b><span>' + esc([x.txtype, x.capsule, x.freq && x.freq + ' MHz'].filter(Boolean).join(' · ') || [x.make, x.model].filter(Boolean).join(' ')) + '</span></div></a>').join('') + '</div>'
+        (kids.length ? '<div class="list pairs">' + kids.map((x) => '<a class="row" href="#/d/' + x.id + '">' + devThumb(x, 36) + '<div class="t"><b>' + esc(tagModel(x)) + '</b><span>' + esc([x.txtype, x.capsule, x.freq && x.freq + ' MHz'].filter(Boolean).join(' · ') || [x.make, x.model].filter(Boolean).join(' ')) + '</span></div></a>').join('') + '</div>'
           : '<div class="card empty" style="padding:16px">None paired yet.' + (can('admin') ? ' Add one here, or pick this ' + kindLabel(v.kind).toLowerCase() + ' on its card.' : '') + '</div>') + '</div>'; })() : ''}
     <div class="section" style="margin-top:20px"><h2>Manuals and documents</h2><div id="dfiles"></div></div>
     <div class="section" style="margin-top:20px"><h2>Used on</h2>${used.length ? '<div class="list used">' + used.map((u) => {
@@ -450,11 +529,11 @@ async function viewDeviceEdit(id) {
       <div class="dphoto"><div id="dph"></div><input type="file" accept="image/*" class="hide" id="dpf"><div><button type="button" id="dpb">${d.photo ? 'Replace photo' : 'Add photo'}</button>${d.photo ? ' <button type="button" class="ghost danger" id="dpx">Remove</button>' : ''}<div class="note">A photo of the device or its rack position helps volunteers find it.</div></div></div>
       <div class="dform">
         <label class="dfield wide"><span>What is it?</span><select data-k="kind" id="dkind"><option value="">Choose…</option>${GEAR_KIND.map((k) => '<option value="' + k[0] + '"' + (k[0] === d.kind ? ' selected' : '') + '>' + k[1] + '</option>').join('')}</select><em>Sorts it into the right bucket, and lets wireless mics pair with their receiver</em></label>
-        ${f('name', 'Name', 'What your team calls it', { wide: true })}
-        ${id ? '' : '<label class="dfield"><span>How many?</span><input id="dqty" type="number" min="1" max="48" value="1" inputmode="numeric"><em>More than one makes a card for each, numbered (SM58 1, SM58 2…)</em></label>'}
+        <label class="dfield wide"><span>Tag name</span><div class="tagrow"><input data-k="name" value="${esc(d.name)}" placeholder="Like RX-1 or WMIC-1" autocapitalize="characters" spellcheck="false"><button type="button" class="btn" id="dauto" title="Suggest a tag name from what it is">${icon('spark')}Auto label</button></div><em id="dtagnote">What your team calls it; it goes on the label. Auto label suggests one from what it is.</em></label>
+        ${id ? '' : '<label class="dfield"><span>How many?</span><input id="dqty" type="number" min="1" max="48" value="1" inputmode="numeric"><em>More than one makes a card for each, numbered (WMIC-1, WMIC-2… or SM58 1, SM58 2…)</em></label>'}
         <label class="dfield wide"><span>Also called</span><input data-k="aliases" value="${esc(d.aliases.join(', '))}" placeholder="Nicknames, comma between"><em>Other names people type, separated by commas. Each one links to this card.</em></label>
         <label class="dfield"><span>Category</span><select data-k="category">${Object.keys(CAT).map((k) => '<option value="' + k + '"' + (k === d.category ? ' selected' : '') + '>' + CAT[k] + '</option>').join('')}</select></label>
-        <label class="dfield"><span>Bucket</span><select data-k="bucket"><option value="" id="dbauto">Automatic (${esc(autoBucket({ ...d, kind: (DEV.list || []).find((x) => x.id === d.id)?.kind || '' }))})</option>${bucketOrder(DEV.list || []).map((b) => '<option' + (b === d.bucket ? ' selected' : '') + '>' + esc(b) + '</option>').join('')}</select><em>Where it sits in the Gear Locker</em></label>
+        <label class="dfield"><span>Bucket</span><select data-k="bucket"><option value="" id="dbauto">Automatic (${esc(autoBucket({ ...d, kind: d.kind || (DEV.list || []).find((x) => x.id === d.id)?.kind || '' }))})</option>${bucketOrder(DEV.list || []).map((b) => '<option' + (b === d.bucket ? ' selected' : '') + '>' + esc(b) + '</option>').join('')}</select><em>Where it sits in the Gear Locker</em></label>
         ${f('make', 'Make', 'Manufacturer')}<label class="dfield"><span>Model</span><input data-k="model" value="${esc(d.model)}" placeholder="Model number" list="dmodels"><datalist id="dmodels"></datalist></label>
         <div class="dwl wide" id="dwl"></div>
         <label class="dfield"><span>Location</span><select data-k="location" id="dloc"><option value="">Not set</option>${locations.map((l) => '<option' + (l === d.location ? ' selected' : '') + '>' + esc(l) + '</option>').join('')}<option value="__new">+ New location…</option></select><em>Where it lives: a rack, a room, a road case</em></label>
@@ -466,7 +545,7 @@ async function viewDeviceEdit(id) {
         <div class="dnet wide${d.networked ? '' : ' hide'}" id="dnet">
         ${f('ip', 'IP address', '0.0.0.0', { mono: true, mode: 'decimal', hint: 'Addresses in IP lists link here too when the name matches.' })}
         ${f('mac', 'MAC', '', { mono: true })}
-        <label class="dfield"><span>Plugged into</span><select data-k="uplink_id"><option value="">Nothing / not set</option>${(await loadDevices(true)).filter((x) => String(x.id) !== String(id)).map((x) => '<option value="' + x.id + '"' + (String(x.id) === String(d.uplink_id || '') ? ' selected' : '') + '>' + esc(x.name) + '</option>').join('')}</select><em>The switch, router or access point it connects to. Draws the network map.</em></label>
+        <label class="dfield"><span>Plugged into</span><select data-k="uplink_id"><option value="">Nothing / not set</option>${(await loadDevices(true)).filter((x) => String(x.id) !== String(id)).map((x) => '<option value="' + x.id + '"' + (String(x.id) === String(d.uplink_id || '') ? ' selected' : '') + '>' + esc(tagModel(x)) + '</option>').join('')}</select><em>The switch, router or access point it connects to. Draws the network map.</em></label>
         ${f('uplink_port', 'Port', 'Port number', { mode: 'text', hint: 'Port on that switch (optional)' })}
         </div>
         <label class="tog dfield wide ${d.tech_only ? 'on' : ''}"><input type="checkbox" data-k="tech_only" ${d.tech_only ? 'checked' : ''}>Admins only <em>Hidden from users</em></label>
@@ -484,9 +563,9 @@ async function viewDeviceEdit(id) {
   if (d.capsule_id === undefined) d.capsule_id = fitted ? String(fitted.id) : d.capsule ? '__text' : '';
   const capField = (models) => {
     const caps = all.filter((x) => x.kind === 'capsule');
-    const holder = (c) => { const h = c.pair_id && String(c.pair_id) !== String(id) && all.find((x) => x.id === c.pair_id); return h ? ' (now on ' + h.name + ')' : ''; };
+    const holder = (c) => { const h = c.pair_id && String(c.pair_id) !== String(id) && all.find((x) => x.id === c.pair_id); return h ? ' · now on ' + h.name : ''; };
     return '<label class="dfield"><span>Capsule</span><select data-cap>' +
-      '<option value="">None</option>' + caps.map((c) => '<option value="' + c.id + '"' + (String(c.id) === String(d.capsule_id) ? ' selected' : '') + '>' + esc(c.name + ([c.make, c.model].filter(Boolean).join(' ') && [c.make, c.model].filter(Boolean).join(' ') !== c.name ? ' · ' + [c.make, c.model].filter(Boolean).join(' ') : '') + holder(c)) + '</option>').join('') +
+      '<option value="">None</option>' + caps.map((c) => '<option value="' + c.id + '"' + (String(c.id) === String(d.capsule_id) ? ' selected' : '') + '>' + esc(tagModel(c) + holder(c)) + '</option>').join('') +
       '<option value="__new">+ New capsule…</option><option value="__text"' + (d.capsule_id === '__text' ? ' selected' : '') + '>Type it (not a Gear Locker card)</option></select>' +
       '<em>' + (caps.length ? 'The capsule in it now. Pick another when you swap it; it moves off the mic it was on.' : 'Add your capsules here as you go; each gets its own card.') + '</em></label>' +
       (d.capsule_id === '__text' ? '<label class="dfield"><span>Capsule or mic</span><input data-w="capsule" value="' + esc(d.capsule) + '" placeholder="Capsule model, or the lav or headset" list="dcaps"><datalist id="dcaps">' + models.map((m) => '<option value="' + esc(m.model) + '">' + esc(m.make || '') + '</option>').join('') + '</datalist></label>' : '');
@@ -524,7 +603,7 @@ async function viewDeviceEdit(id) {
     const mates = all.filter((x) => x.kind === P.with && String(x.id) !== String(id));
     const capsules = GearModels.all().filter((m) => m.kind === 'capsule' || m.kind === 'mic');
     host.innerHTML = '<div class="dform">' +
-      '<label class="dfield"><span>' + P.label + '</span><select data-w="pair_id"><option value="">Not paired</option>' + mates.map((x) => '<option value="' + x.id + '"' + (String(x.id) === String(d.pair_id || '') ? ' selected' : '') + '>' + esc(x.name) + '</option>').join('') + '</select><em>' +
+      '<label class="dfield"><span>' + P.label + '</span><select data-w="pair_id"><option value="">Not paired</option>' + mates.map((x) => '<option value="' + x.id + '"' + (String(x.id) === String(d.pair_id || '') ? ' selected' : '') + '>' + esc(tagModel(x)) + '</option>').join('') + '</select><em>' +
         (mates.length ? (d.kind === 'capsule' ? 'The wireless mic it goes on (leave empty for a spare)' : 'Its card lists everything paired with it') : 'No ' + kindLabel(P.with).toLowerCase() + ' in the Gear Locker yet') + '</em></label>' +
       (d.kind === 'txmic' ? '<label class="dfield"><span>Type</span><select data-w="txtype"><option value="">—</option>' + TX_KINDS.map((t) => '<option' + (t === d.txtype ? ' selected' : '') + '>' + t + '</option>').join('') + '</select></label>' +
         capField(capsules) : '') +
@@ -539,10 +618,22 @@ async function viewDeviceEdit(id) {
   };
   wireless();
   $('#dkind').addEventListener('change', () => {
+    d.kind = $('#dkind').value;   // this runs before the general field listener, so take the new kind now
     if (['network', 'computer'].includes(d.kind)) { d.category = d.kind; $('[data-k=category]').value = d.kind; } else if (d.kind && d.kind !== 'other') { d.category = 'audio'; $('[data-k=category]').value = 'audio'; }
     wireless();
     $('#dbauto').textContent = 'Automatic (' + autoBucket({ ...d }) + ')';
   });
+  // Auto label: a short code from what it is (RX-1, WMIC-2, PA-AMP1…), never one another card already uses
+  let autoNamed = false;
+  const otherNames = () => all.filter((x) => String(x.id) !== String(id)).flatMap((x) => [x.name, ...(x.aliases || [])]);
+  const suggestTag = (taken) => Tags.suggest(d.kind || 'other', taken || otherNames(), { model: d.model });
+  $('#dauto').addEventListener('click', () => {
+    if (!d.kind) { toast('Pick what it is first, then Auto label', 'bad'); $('#dkind').focus(); return; }
+    const n = $('[data-k=name]');
+    n.value = d.name = suggestTag(); autoNamed = true; dirty();
+    const q = $('#dqty'); if (q && Number(q.value) > 1) $('#dtagnote').textContent = 'Each of the ' + q.value + ' gets its own number when you add them.';
+  });
+  $('[data-k=name]').addEventListener('input', () => { autoNamed = false; });
   // a model already on your list fills in what it is and who makes it
   $('[data-k=model]').addEventListener('change', () => {
     const m = GearModels.find(d.model, d.kind || undefined) || GearModels.find(d.model); if (!m) return;
@@ -597,8 +688,14 @@ async function viewDeviceEdit(id) {
       else {
         const n = Math.max(1, Math.min(48, Number($('#dqty').value) || 1));
         let x;
-        if (n === 1) x = await call('POST', '/api/devices', body());
-        else for (let i = 1; i <= n; i++) { const one = await call('POST', '/api/devices', { ...body(), name: d.name + ' ' + i, aliases: [], ...(i > 1 && d.kind === 'txmic' && d.capsule_id !== '__text' ? { capsule_id: '' } : {}) }); if (i === 1) x = one; }
+        // auto-labelled (or left empty): each one gets its own tag, WMIC-1, WMIC-2…; a typed name is numbered after it
+        const auto = autoNamed || !d.name.trim();
+        const taken = otherNames();
+        const nameFor = (i) => { if (!auto) return n === 1 ? d.name : d.name + ' ' + i; const t = i === 1 && autoNamed && n === 1 ? d.name : suggestTag(taken); taken.push(t); return t; };
+        for (let i = 1; i <= n; i++) {
+          const one = await call('POST', '/api/devices', { ...body(), name: nameFor(i), ...(n > 1 ? { aliases: [] } : {}), ...(i > 1 && d.kind === 'txmic' && d.capsule_id !== '__text' ? { capsule_id: '' } : {}) });
+          if (i === 1) x = one;
+        }
         S.dirty = false; forgetDevices(); toast(n === 1 ? 'Added to the Gear Locker' : n + ' added to the Gear Locker', 'ok');
         location.hash = n === 1 ? '#/d/' + x.id : '#/gear';
       }

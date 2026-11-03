@@ -784,6 +784,66 @@ test('gear knows what it is: wireless mics pair with a receiver, capsules fit a 
   db.close();
 });
 
+test('tag names: Auto label suggests short codes that never repeat; near-duplicates and cable numbers', async () => {
+  const T = require(path.join(ROOT, 'public', 'tags.js'));
+  assert.strictEqual(T.norm('JBL CBT-70J-1'), T.norm('jbl cbt 70j_1'));
+  assert.strictEqual(T.suggest('receiver', []), 'RX-1');
+  assert.strictEqual(T.suggest('txmic', ['WMIC-1 Kyle', 'WMIC-3'], { person: 'Val' }), 'WMIC-2 Val', 'a tag with a person still uses its number');
+  assert.strictEqual(T.suggest('txmic', ['WMIC-10']), 'WMIC-1', 'WMIC-10 does not use WMIC-1');
+  assert.strictEqual(T.suggest('stagebox', ['SB-A']), 'SB-B');
+  assert.strictEqual(T.suggest('console', [], { model: 'SQ-5' }), 'FOH SQ-5');
+  assert.deepStrictEqual([T.suggest('processor', []), T.suggest('processor', ['PA-PROC'])], ['PA-PROC', 'PA-PROC2']);
+  assert.strictEqual(T.suggest('speaker', ['PA-L'], { position: 'PA-L' }), 'PA-L 2');
+  assert.strictEqual(T.suggest('iemtx', ['iem-tx1']), 'IEM-TX2', 'case and dashes do not matter');
+  assert.strictEqual(T.cable(['C-001', 'c 002']), 'C-003');
+  assert.deepStrictEqual([T.withModel('RX-1', 'SLXD4D'), T.withModel('SLXD4D', 'SLXD4D'), T.withModel('Shure SLX-D4D', 'SLXD4D'), T.withModel('RX-1', '')], ['RX-1 (SLXD4D)', 'SLXD4D', 'Shure SLX-D4D', 'RX-1']);
+  const items = [{ id: 1, name: 'JBL CBT-70J-1' }, { id: 2, name: 'JBL CBT 70J-1' }, { id: 3, name: 'PTM-10' }, { id: 4, name: 'PTM-10 #2' }];
+  assert.deepStrictEqual(T.nearDupes(items).map((g) => g.map((x) => x.id)), [[1, 2]], 'only names that match once spaces and dashes are ignored; same model is fine');
+  assert.deepStrictEqual(T.nearDupes(items, new Set(['1|2'])), [], 'Not a duplicate is remembered');
+});
+
+test('merging two cards for the same gear: manuals, nicknames, pairings, plugged into and the stage patch move to the one kept', async () => {
+  const mk = async (b) => (await admin.post('/api/devices', b)).data.id;
+  const keep = await mk({ name: 'JBL CBT 70J-1', kind: 'speaker', make: 'JBL', model: 'CBT 70J-1' });
+  const gone = await mk({ name: 'JBL CBT-70J-1', aliases: 'Left column', location: 'Stage left', notes: 'Fed from amp ch A', networked: true, ip: '10.0.0.77' });
+  const sw = await mk({ name: 'Merge switch', kind: 'network' });
+  const child = await mk({ name: 'Merge child', networked: true, uplink_id: gone });
+  await admin.put('/api/devices/' + gone, { ...(await admin.get('/api/devices/' + gone)).data.device, uplink_id: sw });
+  const pdf = Buffer.from('%PDF-1.4\n1 0 obj<<>>endobj\ntrailer<<>>\n%%EOF');
+  assert.strictEqual((await admin.post('/api/devices/' + gone + '/files', pdf, { raw: true, type: 'application/pdf', headers: { 'x-filename': 'cbt.pdf' } })).status, 200);
+  // a patch card for the one that goes
+  const P = require(path.join(ROOT, 'public', 'patchcore.js'));
+  const cur = (await admin.get('/api/patch')).data;
+  const doc = JSON.parse(JSON.stringify(cur.doc));
+  const g = P.addGear(doc, { kind: 'speaker', name: 'CBT on patch' }); g.device_id = gone;
+  assert.strictEqual((await admin.put('/api/patch', { doc, baseVersion: cur.version })).status, 200);
+  // not for users; not into itself
+  assert.strictEqual((await vol.post('/api/devices/' + gone + '/merge', { into: keep })).status, 403);
+  assert.strictEqual((await admin.post('/api/devices/' + gone + '/merge', { into: gone })).status, 400);
+  assert.strictEqual((await admin.post('/api/devices/' + gone + '/merge', { into: keep })).status, 200);
+  assert.strictEqual((await admin.get('/api/devices/' + gone)).status, 404, 'the duplicate is gone');
+  const k = (await admin.get('/api/devices/' + keep)).data;
+  assert.deepStrictEqual(k.device.aliases, ['JBL CBT-70J-1', 'Left column'], 'its name and nicknames still link here');
+  assert.deepStrictEqual([k.device.location, k.device.ip, k.device.uplink_id, k.device.networked, k.device.kind, k.device.model], ['Stage left', '10.0.0.77', sw, true, 'speaker', 'CBT 70J-1'], 'empty details filled, its own kept');
+  assert.ok(k.device.notes.includes('Fed from amp ch A'));
+  assert.deepStrictEqual(k.files.map((f) => f.name), ['cbt.pdf'], 'the manual came along');
+  assert.strictEqual((await admin.get('/api/devices/' + child)).data.device.uplink_id, keep, 'what was plugged into it is plugged into the keeper');
+  assert.ok((await admin.get('/api/patch')).data.doc.gear.some((x) => x.name === 'CBT on patch' && x.device_id === keep), 'the stage patch points at the keeper');
+  // not a duplicate: admins only, remembered, listed
+  assert.strictEqual((await vol.put('/api/devices/dupe-skip', { ids: [sw, child] })).status, 403);
+  assert.strictEqual((await admin.put('/api/devices/dupe-skip', { ids: [sw] })).status, 400);
+  const r = await admin.put('/api/devices/dupe-skip', { ids: [child, sw] });
+  assert.ok(r.data.dupeSkip.includes([child, sw].map(String).sort().join('|')));
+  assert.ok((await admin.get('/api/devices')).data.dupeSkip.includes([child, sw].map(String).sort().join('|')));
+  assert.deepStrictEqual((await vol.get('/api/devices')).data.dupeSkip, [], 'users do not get it');
+  // tidy up
+  const d2 = (await admin.get('/api/patch')).data;
+  const doc2 = JSON.parse(JSON.stringify(d2.doc)); doc2.gear = doc2.gear.filter((x) => x.name !== 'CBT on patch');
+  await admin.put('/api/patch', { doc: doc2, baseVersion: d2.version });
+  for (const f of k.files) await admin.del('/api/files/' + f.id);
+  for (const id of [keep, sw, child]) await admin.del('/api/devices/' + id);
+});
+
 test('checklists that were on pages move to To do, keeping their ticks and log', async () => {
   const os2 = require('os'), fs2 = require('fs');
   const dir = fs2.mkdtempSync(path.join(os2.tmpdir(), 'lg-todo-'));

@@ -366,13 +366,28 @@ async function api(req, res, url, user, token) {
       const pk = new Map();
       for (const g of patch.get().doc.gear) if (g.device_id) { if (!pk.has(g.device_id)) pk.set(g.device_id, g.kind); }
       let buckets = []; try { buckets = JSON.parse(store.getSetting('gear_buckets', '[]')); } catch (e) { /* default */ }
-      return send(res, 200, { ok: true, categories: Devices.CATEGORIES, buckets, devices: devices.list(user).map((d) => ({
+      const dupeSkip = Auth.atLeast(user, 'admin') ? devices.dupeSkip(store.getSetting) : [];
+      return send(res, 200, { ok: true, categories: Devices.CATEGORIES, buckets, dupeSkip, devices: devices.list(user).map((d) => ({
         id: d.id, name: d.name, aliases: d.aliases, category: d.category, make: d.make, model: d.model, location: d.location, bucket: d.bucket, kind: d.kind || pk.get(d.id) || '', pair_id: d.pair_id, txtype: d.txtype, capsule: d.capsule, freq: d.freq, networked: d.networked,
         ips: d.ips, photo: d.photo, tech_only: d.tech_only, inputs: d.inputs, outputs: d.outputs, files: fileCount.get(d.id) || 0 })) });
     }
     if (m === 'GET' && b === 'models') return send(res, 200, { ok: true, models: devices.models(store.getSetting) });
     if (m === 'POST' && b === 'models') { need(user, 'admin'); const body = await readJson(req); return send(res, 200, { ok: true, models: devices.saveModels(body.add, body.remove, user, store.getSetting, store.setSetting) }); }
     if (m === 'PUT' && b === 'buckets') { need(user, 'admin'); const body = await readJson(req); return send(res, 200, { ok: true, buckets: devices.setBuckets(body.buckets, body.renames, user, store.setSetting) }); }
+    if (m === 'PUT' && b === 'dupe-skip') { need(user, 'admin'); const body = await readJson(req); return send(res, 200, { ok: true, dupeSkip: devices.addDupeSkip(body.ids, user, store.getSetting, store.setSetting) }); }
+    if (m === 'POST' && b && /^\d+$/.test(b) && c === 'merge') {
+      need(user, 'admin');
+      const into = Number((await readJson(req)).into);
+      const gone = devices.merge(b, into, user);
+      // the stage patch points at the card that is kept now
+      const cur = patch.get();
+      if (cur.doc.gear.some((g) => g.device_id === Number(b))) {
+        const doc = JSON.parse(JSON.stringify(cur.doc));
+        doc.gear.forEach((g) => { if (g.device_id === Number(b)) g.device_id = into; });
+        patch.save(doc, user, null, 'Merged ' + gone + ' into another card');
+      }
+      return send(res, 200, { ok: true, id: into });
+    }
     if (m === 'GET' && b === 'suggestions') { need(user, 'admin'); return send(res, 200, { ok: true, suggestions: devices.suggestions(user) }); }
     if (m === 'POST' && b === 'import') { need(user, 'admin'); const body = await readJson(req); return send(res, 200, { ok: true, made: devices.importFromLists(body.names, user) }); }
     if (m === 'POST' && !b) { need(user, 'admin'); return send(res, 200, { ok: true, id: devices.add(await readJson(req), user, uploadExists) }); }

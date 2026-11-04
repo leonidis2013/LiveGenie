@@ -139,81 +139,143 @@ const PatchView = (() => {
    * Network gear (switches, computers) gets a lane under the signal flow; gear with no cables goes in a
    * "Not connected" row along the bottom.
    */
+  /**
+   * Auto-arrange, one time (undoable). Reads like a stage plot, left to right:
+   *   inputs (sources, then stage boxes) → console → each thing the console feeds, in its own band.
+   * Each output branch (in-ears, a sub off the stage box, processor → amps → speakers…) starts right next to the console
+   * and is stacked under the one before, so the drawing stays compact instead of one long line.
+   * Network gear sits in a lane underneath; gear with no cables goes in a "Not connected" row at the bottom.
+   */
   function autoArrange(doc) {
     const ix = P.index(doc);
     const list = cardGear(doc);
     const models = new Map(list.map((g) => [g.id, cardModel(doc, ix, g)]));
     const ids = [...models.keys()];
-    const nb = new Map(ids.map((id) => [id, new Set()]));
     const cardIdOf = (id) => { const g = ix.G.get(id); const h = g && P.hostOf(doc, g); return h ? h.id : id; };
+    const nb = new Map(ids.map((id) => [id, new Set()]));
+    const down = new Map(ids.map((id) => [id, []]));          // signal a → b, with the output socket it leaves from
     const wired = new Set();
     for (const c of doc.cables) {
+      if (c.ap === 'net') continue;
       const a = cardIdOf(c.a), b = cardIdOf(c.b);
       if (a === b || !nb.has(a) || !nb.has(b)) continue;      // a mic inside its receiver
       nb.get(a).add(b); nb.get(b).add(a); wired.add(a); wired.add(b);
+      down.get(a).push({ to: b, port: typeof c.ap === 'number' ? c.ap : -1 });
     }
-    const stage = (id) => P.stageOf(models.get(id).g);
+    doc.cables.filter((c) => c.ap === 'net').forEach((c) => { wired.add(cardIdOf(c.a)); wired.add(cardIdOf(c.b)); });
+    const g = (id) => models.get(id).g;
+    const stage = (id) => P.stageOf(g(id));
+    const kindRank = (id) => P.KIND_ORDER.indexOf(g(id).kind);
     const loose = ids.filter((id) => !wired.has(id));
     const netIds = ids.filter((id) => wired.has(id) && stage(id) === 'net');
     const flow = ids.filter((id) => wired.has(id) && stage(id) !== 'net');
-    const used = [...new Set(flow.map(stage))].sort((a, b) => a - b);
-    const cols = used.map((st0) => flow.filter((id) => stage(id) === st0));
-    const kindRank = (id) => P.KIND_ORDER.indexOf(models.get(id).g.kind);
-    cols.forEach((col) => col.sort((a, b) => kindRank(a) - kindRank(b) || (models.get(a).g.order || 0) - (models.get(b).g.order || 0)));
-    // order within a stage: next to what it connects to in the stages either side
-    const colOf = new Map(); cols.forEach((col, ci) => col.forEach((id) => colOf.set(id, ci)));
-    const rank = new Map(); const setRank = () => cols.forEach((col) => col.forEach((id, i) => rank.set(id, i)));
-    setRank();
-    const bary = (id, side) => {
-      const l = [...nb.get(id)].filter((x) => colOf.has(x) && (side < 0 ? colOf.get(x) < colOf.get(id) : colOf.get(x) > colOf.get(id))).map((x) => rank.get(x));
-      return l.length ? l.reduce((s1, v) => s1 + v, 0) / l.length : null;
-    };
-    for (let sweep = 0; sweep < 8; sweep++) {
-      const side = sweep % 2 ? 1 : -1;
-      const seq = side < 0 ? cols.map((_, i) => i) : cols.map((_, i) => cols.length - 1 - i);
-      seq.forEach((ci) => {
-        const col = cols[ci];
-        const keyOf = new Map(col.map((id, i) => { const b = bary(id, side); return [id, b == null ? i : b]; }));
-        col.sort((a, b) => keyOf.get(a) - keyOf.get(b) || rank.get(a) - rank.get(b));
-        col.forEach((id, i) => rank.set(id, i));
+    const STEP = CW + COLGAP + 20;
+    const out = new Map();
+    const box = (id, p) => outer(models.get(id), p || { x: 0, y: 0 });
+
+    // ---- input side: sources | stage I/O | console
+    const inSide = flow.filter((id) => stage(id) <= 2);
+    const outSide = flow.filter((id) => stage(id) > 2);
+    const hasSrc = inSide.some((id) => stage(id) === 0), hasBox = inSide.some((id) => stage(id) === 1);
+    const colIn = (id) => (stage(id) === 0 ? 0 : stage(id) === 1 ? (hasSrc ? 1 : 0) : (hasSrc ? 1 : 0) + (hasBox ? 1 : 0));
+    const CON = inSide.length ? Math.max(...inSide.map(colIn)) : 0;
+    const inCols = []; inSide.forEach((id) => { (inCols[colIn(id)] = inCols[colIn(id)] || []).push(id); });
+    for (let k = 0; k < inCols.length; k++) inCols[k] = inCols[k] || [];
+    inCols.forEach((col) => col.sort((a, b) => kindRank(a) - kindRank(b) || (g(a).order || 0) - (g(b).order || 0)));
+    // order: next to what each card connects to in the column beside it (a few sweeps)
+    const rank = new Map(); inCols.forEach((col) => col.forEach((id, k) => rank.set(id, k)));
+    const ciOf = new Map(); inCols.forEach((col, k) => col.forEach((id) => ciOf.set(id, k)));
+    for (let sweep = 0; sweep < 6; sweep++) {
+      const right = sweep % 2 === 0;
+      const seq = right ? inCols.map((_, k) => inCols.length - 1 - k) : inCols.map((_, k) => k);
+      seq.forEach((k) => {
+        const col = inCols[k];
+        const key = new Map(col.map((id, n) => {
+          const l = [...nb.get(id)].filter((x) => ciOf.has(x) && (right ? ciOf.get(x) > k : ciOf.get(x) < k)).map((x) => rank.get(x));
+          return [id, l.length ? l.reduce((s1, v) => s1 + v, 0) / l.length : n];
+        }));
+        col.sort((a, b) => key.get(a) - key.get(b) || rank.get(a) - rank.get(b));
+        col.forEach((id, n) => rank.set(id, n));
       });
     }
-    // places: each card level with what feeds it from the left, as far as its column allows
-    const out = new Map();
-    const STEP = CW + COLGAP + 20;
-    cols.forEach((col, ci) => {
+    // the console column first (top), then each column to its left lines up with what it feeds
+    const stack = (col, k, wantOf) => {
       let y = 0;
       col.forEach((id) => {
-        const m = models.get(id);
-        const ps = [...nb.get(id)].filter((p) => out.has(p) && colOf.get(p) < ci).map((p) => out.get(p).y);
-        const want = ps.length ? ps.reduce((s1, v) => s1 + v, 0) / ps.length : 0;
-        const o = outer(m, { x: 0, y: 0 });
-        const yy = snap(Math.max(y - o.y, want));
-        out.set(id, { x: ci * STEP, y: yy });
+        const o = box(id);
+        const want = wantOf ? wantOf(id) : null;
+        const yy = snap(Math.max(y - o.y, want == null ? -Infinity : want));
+        out.set(id, { x: k * STEP, y: yy });
         y = snap(yy + o.y + o.h + VGAP);
       });
-    });
-    const bottom = () => Math.max(0, ...[...out.entries()].map(([id, p]) => { const o = outer(models.get(id), p); return o.y + o.h; }));
-    // the network lane: under the flow, from the console's column on
-    const row = (list, y0, x0) => {
-      const perRow = Math.max(2, cols.length || 4);
-      let x = x0, y = y0, h = 0, n = 0;
-      list.forEach((id) => {
-        const m = models.get(id);
-        const o = outer(m, { x: 0, y: 0 });
-        if (n && n % perRow === 0) { x = x0; y = snap(y + h + VGAP); h = 0; }
-        out.set(id, { x: x - o.x - 8, y: y - o.y }); x += Math.max(STEP, snap(o.w + COLGAP)); h = Math.max(h, o.h); n++;
-      });
-      return list.length ? y + h : y0;
     };
-    if (netIds.length) {
-      const ci = used.indexOf(2);
-      row(netIds.sort((a, b) => kindRank(a) - kindRank(b)), snap(bottom() + 90), Math.max(0, ci) * STEP);
+    if (inCols[CON]) stack(inCols[CON], CON);
+    for (let k = CON - 1; k >= 0; k--) {
+      stack(inCols[k], k, (id) => { const ps = [...nb.get(id)].filter((x) => out.has(x) && ciOf.get(x) > k).map((x) => out.get(x).y); return ps.length ? Math.min(...ps) : null; });
     }
-    // gear with no cables: a row along the bottom, in stage order
+
+    // ---- output side: how far each card is from the console (the stage box's outputs count as the console's)
+    const roots = inSide.filter((id) => stage(id) >= 1);
+    const depth = new Map();
+    const q = [];
+    roots.forEach((r) => down.get(r).forEach((e) => { if (outSide.includes(e.to)) { if (!depth.has(e.to)) { depth.set(e.to, 1); q.push(e.to); } } }));
+    for (let n = 0; n < q.length && n < 2000; n++) {
+      const id = q[n];
+      down.get(id).forEach((e) => { if (outSide.includes(e.to) && (depth.get(e.to) || 0) < depth.get(id) + 1 && depth.get(id) < 12) { depth.set(e.to, depth.get(id) + 1); q.push(e.to); } });
+    }
+    outSide.forEach((id) => { if (!depth.has(id)) depth.set(id, 1); });
+    // branches: groups of output gear joined to each other; ordered by the console output that feeds them
+    const seen = new Set(), branches = [];
+    outSide.forEach((id) => {
+      if (seen.has(id)) return;
+      const part = [], st0 = [id]; seen.add(id);
+      while (st0.length) { const x = st0.pop(); part.push(x); nb.get(x).forEach((y) => { if (outSide.includes(y) && !seen.has(y)) { seen.add(y); st0.push(y); } }); }
+      const feeds = [];
+      part.forEach((x) => roots.forEach((r) => down.get(r).forEach((e) => { if (e.to === x) feeds.push((stage(r) === 2 ? 0 : 1000) + (e.port < 0 ? 999 : e.port)); })));
+      branches.push({ part, key: feeds.length ? Math.min(...feeds) : 1e6 });
+    });
+    branches.sort((a, b) => a.key - b.key);
+    let bandY = 0;
+    branches.forEach((br) => {
+      const cols = new Map();
+      br.part.forEach((id) => { const k = depth.get(id); if (!cols.has(k)) cols.set(k, []); cols.get(k).push(id); });
+      const ks = [...cols.keys()].sort((a, b) => a - b);
+      let bottom = bandY;
+      ks.forEach((k) => {
+        const col = cols.get(k);
+        // in feed order: what sits higher on its feeder comes first
+        const key = (id) => { const ps = [...nb.get(id)].filter((x) => out.has(x)).map((x) => out.get(x).y); return ps.length ? Math.min(...ps) : 0; };
+        col.sort((a, b) => key(a) - key(b) || kindRank(a) - kindRank(b));
+        let y = bandY;
+        col.forEach((id) => {
+          const o = box(id);
+          const ps = [...nb.get(id)].filter((x) => out.has(x) && depth.has(x) && depth.get(x) < k).map((x) => out.get(x).y);
+          const want = ps.length ? Math.min(...ps) : bandY;
+          const yy = snap(Math.max(y - o.y, want));
+          out.set(id, { x: (CON + k) * STEP, y: yy });
+          y = snap(yy + o.y + o.h + VGAP);
+          bottom = Math.max(bottom, yy + o.y + o.h);
+        });
+      });
+      bandY = snap(bottom + VGAP + 20);
+    });
+
+    const bottom = () => Math.max(0, ...[...out.entries()].map(([id, p]) => { const o = box(id, p); return o.y + o.h; }));
+    // a row of cards from x0, wrapping
+    const row = (list2, y0, x0, perRow) => {
+      let x = x0, y = y0, h = 0, n = 0;
+      list2.forEach((id) => {
+        const o = box(id);
+        if (n && n % perRow === 0) { x = x0; y = snap(y + h + VGAP); h = 0; }
+        out.set(id, { x: snap(x - o.x), y: snap(y - o.y) }); x += Math.max(STEP, snap(o.w + COLGAP)); h = Math.max(h, o.h); n++;
+      });
+      return list2.length ? y + h : y0;
+    };
+    const width = Math.max(3, CON + 1 + Math.max(0, ...outSide.map((id) => depth.get(id))));
+    if (netIds.length) row(netIds.sort((a, b) => kindRank(a) - kindRank(b)), snap(bottom() + 90), CON * STEP, Math.max(2, width - CON));
     if (loose.length) {
       const order = (id) => { const s0 = stage(id); return s0 === 'net' ? 6 : s0; };
-      row(loose.sort((a, b) => order(a) - order(b) || kindRank(a) - kindRank(b) || (models.get(a).g.order || 0) - (models.get(b).g.order || 0)), snap((out.size ? bottom() : 0) + (out.size ? 110 : 0)), 0);
+      row(loose.sort((a, b) => order(a) - order(b) || kindRank(a) - kindRank(b) || (g(a).order || 0) - (g(b).order || 0)), snap((out.size ? bottom() : 0) + (out.size ? 110 : 0)), 0, width);
     }
     return out;
   }

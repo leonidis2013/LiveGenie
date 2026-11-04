@@ -402,10 +402,10 @@ async function viewDevice(id) {
   linkDevices($('#dnotes'));
   paintFiles($('#dfiles'), v, d.files || []);
   if (v.photo) {
-    $('#dmarks').innerHTML = marksView(v.photo, v.marks);
+    $('#dmarks').innerHTML = marksView(v.photo, v.marks, v);
     wireMarksView($('#dmarks'));
     $('#dpa').addEventListener('click', (e) => { e.preventDefault(); $('#dphoto').scrollIntoView({ behavior: 'smooth', block: 'start' }); });
-    const mk = $('#dmk'); if (mk) mk.addEventListener('click', () => marksEditor(v, (marks) => { v.marks = marks; $('#dmarks').innerHTML = marksView(v.photo, marks); wireMarksView($('#dmarks')); mk.lastChild.textContent = marks.length ? 'Edit highlights' : 'Highlight on the photo'; }));
+    const mk = $('#dmk'); if (mk) mk.addEventListener('click', () => marksEditor(v, (marks) => { v.marks = marks; $('#dmarks').innerHTML = marksView(v.photo, marks, v); wireMarksView($('#dmarks')); mk.lastChild.textContent = marks.length ? 'Edit highlights' : 'Highlight on the photo'; }));
   }
   const rd = $('#rD'); if (rd) rd.addEventListener('click', () => reportProblem(v.name, { device_id: v.id }));
   if (can('admin')) {
@@ -420,19 +420,50 @@ async function viewDevice(id) {
 // ---------- highlight boxes on the gear photo ----------
 const MARK_COLORS = { yellow: '#facc15', red: '#ef4444', green: '#22c55e', blue: '#3b82f6', purple: '#a855f7' };
 const markBox = (m, i, cls) => '<div class="hmk ' + (cls || '') + '" data-mi="' + i + '" style="left:' + (m.x * 100) + '%;top:' + (m.y * 100) + '%;width:' + (m.w * 100) + '%;height:' + (m.h * 100) + '%;--mc:' + MARK_COLORS[m.color || 'yellow'] + '"' + (m.label ? ' title="' + esc(m.label) + '"' : '') + '><b>' + (i + 1) + '</b>' + (m.label ? '<span>' + esc(m.label) + '</span>' : '') + '</div>';
-/** The photo with its highlight boxes, numbered, and the list of what each one is. */
-function marksView(photo, marks) {
-  return '<div class="mkwrap"><div class="mkpic"><img src="/uploads/' + esc(photo) + '" alt="">' + marks.map((m, i) => markBox(m, i)).join('') + '</div>' +
-    (marks.length ? '<ol class="mklist">' + marks.map((m, i) => '<li data-mi="' + i + '" style="--mc:' + MARK_COLORS[m.color || 'yellow'] + '"><b>' + (i + 1) + '</b><span>' + esc(m.label || 'Highlight ' + (i + 1)) + '</span></li>').join('') + '</ol>' : '') + '</div>';
+/**
+ * The photo with its highlights, shown like a spotlight: the picture is dimmed except the highlight in focus,
+ * which glows in its colour with its tag on it, and a caption beside it (where the gear lives, a title, a line about it).
+ * More than one highlight: step through them (arrows, the list, or a tap on a box).
+ */
+function marksView(photo, marks, v) {
+  v = v || {};
+  if (!marks.length) return '<div class="mkwrap"><div class="mkpic"><img src="/uploads/' + esc(photo) + '" alt=""></div></div>';
+  const where = String(v.location || '').toUpperCase();
+  const fallback = [v.make, v.model].filter(Boolean).join(' ') || v.name || '';
+  const boxes = marks.map((m, i) => '<div class="spk" data-mi="' + i + '" style="left:' + (m.x * 100) + '%;top:' + (m.y * 100) + '%;width:' + (m.w * 100) + '%;height:' + (m.h * 100) + '%;--mc:' + MARK_COLORS[m.color || 'blue'] + '">' +
+    (m.tag ? '<em class="sptag">' + esc(m.tag) + '</em>' : '') + '</div>').join('');
+  const caps = marks.map((m, i) => {
+    const below = m.y + m.h < 0.62, right = m.x + m.w / 2 > 0.5;
+    const style = (below ? 'top:calc(' + ((m.y + m.h) * 100) + '% + 12px);' : 'bottom:calc(' + ((1 - m.y) * 100) + '% + 12px);') + (right ? 'right:' + Math.max(2, (1 - m.x - m.w) * 100) + '%;' : 'left:' + Math.max(2, m.x * 100) + '%;');
+    return '<div class="spcap" data-cap="' + i + '" style="' + style + '--mc:' + MARK_COLORS[m.color || 'blue'] + '">' + (where ? '<span class="spwhere">' + esc(where) + '</span>' : '') +
+      '<b class="sptitle">' + esc(m.label || fallback || 'Highlight ' + (i + 1)) + '</b>' + (m.note ? '<p>' + esc(m.note) + '</p>' : '') + '</div>';
+  }).join('');
+  // the captions sit outside the dimmed photo so they are never cut off; on a phone they drop below it
+  return '<div class="mkwrap spot"><div class="spstage"><div class="mkpic spotpic"><img src="/uploads/' + esc(photo) + '" alt="">' + boxes +
+    (marks.length > 1 ? '<div class="spnav"><button type="button" class="ghost" data-step="-1" aria-label="Previous">‹</button><span class="spn"></span><button type="button" class="ghost" data-step="1" aria-label="Next">›</button></div>' : '') + '</div>' + caps + '</div>' +
+    (marks.length > 1 ? '<ol class="mklist">' + marks.map((m, i) => '<li data-mi="' + i + '" style="--mc:' + MARK_COLORS[m.color || 'blue'] + '"><b>' + (i + 1) + '</b><span>' + esc(m.label || m.tag || 'Highlight ' + (i + 1)) + '</span></li>').join('') + '</ol>' : '') + '</div>';
 }
 function wireMarksView(host) {
-  const hi = (i, on) => $$('[data-mi="' + i + '"]', host).forEach((x) => x.classList.toggle('hot', on));
-  $$('[data-mi]', host).forEach((x) => { x.addEventListener('mouseenter', () => hi(x.dataset.mi, true)); x.addEventListener('mouseleave', () => hi(x.dataset.mi, false)); x.addEventListener('click', () => { const on = !x.classList.contains('hot'); $$('.hot', host).forEach((y) => y.classList.remove('hot')); hi(x.dataset.mi, on); }); });
+  const all = $$('.spk', host);
+  if (!all.length) return;
+  let cur = 0;
+  const show = (i) => {
+    cur = (i + all.length) % all.length;
+    $$('[data-mi]', host).forEach((x) => x.classList.toggle('on', Number(x.dataset.mi) === cur));
+    $$('[data-cap]', host).forEach((x) => x.classList.toggle('on', Number(x.dataset.cap) === cur));
+    const n = $('.spn', host); if (n) n.textContent = (cur + 1) + ' of ' + all.length;
+  };
+  $$('[data-mi]', host).forEach((x) => x.addEventListener('click', () => show(Number(x.dataset.mi))));
+  $$('[data-step]', host).forEach((b) => b.addEventListener('click', () => show(cur + Number(b.dataset.step))));
+  const pic = $('.spotpic', host);
+  pic.tabIndex = 0;
+  pic.addEventListener('keydown', (e) => { if (e.key === 'ArrowRight') show(cur + 1); if (e.key === 'ArrowLeft') show(cur - 1); });
+  show(0);
 }
 /** Admin: draw boxes on the photo (drag), move them, resize from the corner, name and colour them. */
 function marksEditor(v, done) {
   const marks = (v.marks || []).map((m) => ({ ...m }));
-  let sel = marks.length ? 0 : -1, color = 'yellow';
+  let sel = marks.length ? 0 : -1, color = 'blue';
   modal('<h3>Highlight on the photo</h3><p class="note">Drag on the picture to draw a box around a switch, a socket or a label. Drag a box to move it, its corner to resize it, and name it on the right.</p>' +
     '<div class="mked"><div class="mkpic edit" id="mkp"><img src="/uploads/' + esc(v.photo) + '" alt="" draggable="false"><div id="mkb"></div></div><div class="mkside" id="mks"></div></div>' +
     '<div class="acts"><span class="grow note" id="mkn"></span><button type="button" data-close>Cancel</button><button class="primary" id="mkok">Save</button></div>', (w, close) => {
@@ -440,11 +471,15 @@ function marksEditor(v, done) {
     const pic = $('#mkp', w), boxes = $('#mkb', w), side = $('#mks', w);
     function paint() {
       boxes.innerHTML = marks.map((m, i) => markBox(m, i, i === sel ? 'sel' : '').replace('</div>', '<i class="mkh" data-h="' + i + '"></i></div>')).join('');
-      side.innerHTML = (marks.length ? marks.map((m, i) => '<div class="mkrow' + (i === sel ? ' sel' : '') + '" data-row="' + i + '"><b style="--mc:' + MARK_COLORS[m.color] + '">' + (i + 1) + '</b><input data-lab="' + i + '" value="' + esc(m.label || '') + '" placeholder="Power switch, Reset, Input 1…" maxlength="80">' +
+      side.innerHTML = (marks.length ? marks.map((m, i) => '<div class="mkrow' + (i === sel ? ' sel' : '') + '" data-row="' + i + '"><b style="--mc:' + MARK_COLORS[m.color] + '">' + (i + 1) + '</b><div class="mkf"><label>Title</label><input data-lab="' + i + '" value="' + esc(m.label || '') + '" placeholder="Title, like Word clock or Power switch" maxlength="80">' +
+          '<label>Tag on the box</label><input data-tag="' + i + '" value="' + esc(m.tag || '') + '" placeholder="Tag on the box (optional), like ' + esc(i === 0 && v.name ? v.name : 'IN-A12') + '" maxlength="24">' +
+          '<label>About it</label><textarea data-note="' + i + '" rows="2" maxlength="300" placeholder="One line about it (optional)">' + esc(m.note || '') + '</textarea></div>' +
         '<div class="mkcol">' + Object.keys(MARK_COLORS).map((c) => '<button type="button" data-col="' + c + '" data-ci="' + i + '" class="' + (m.color === c ? 'on' : '') + '" style="--mc:' + MARK_COLORS[c] + '" title="' + c + '"></button>').join('') + '<button type="button" class="ghost xs danger" data-del="' + i + '" title="Remove">' + icon('trash') + '</button></div></div>').join('')
         : '<p class="note">No highlights yet. Drag on the picture to draw the first one.</p>');
       $('#mkn', w).textContent = marks.length + ' highlight' + (marks.length === 1 ? '' : 's');
       $$('[data-row]', side).forEach((r) => r.addEventListener('click', (e) => { if (e.target.closest('button')) return; sel = Number(r.dataset.row); boxes.querySelectorAll('.hmk').forEach((b) => b.classList.toggle('sel', Number(b.dataset.mi) === sel)); $$('[data-row]', side).forEach((x) => x.classList.toggle('sel', x === r)); }));
+      $$('[data-tag]', side).forEach((x) => x.addEventListener('input', () => { marks[Number(x.dataset.tag)].tag = x.value; }));
+      $$('[data-note]', side).forEach((x) => x.addEventListener('input', () => { marks[Number(x.dataset.note)].note = x.value; }));
       $$('[data-lab]', side).forEach((x) => x.addEventListener('input', () => { marks[Number(x.dataset.lab)].label = x.value; const sp = boxes.querySelector('[data-mi="' + x.dataset.lab + '"] span'); if (sp) sp.textContent = x.value; else paintBoxesOnly(); }));
       $$('[data-col]', side).forEach((x) => x.addEventListener('click', () => { const i = Number(x.dataset.ci); marks[i].color = x.dataset.col; color = x.dataset.col; sel = i; paint(); }));
       $$('[data-del]', side).forEach((x) => x.addEventListener('click', () => { marks.splice(Number(x.dataset.del), 1); sel = Math.min(sel, marks.length - 1); paint(); }));

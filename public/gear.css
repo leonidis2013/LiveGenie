@@ -30,3 +30,37 @@
 .dcard { min-width:0; max-width:100%; }
 .dcard .t { min-width:0; overflow:hidden; }
 .dcard .t > span:not(.dmeta) { display:block; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+
+/* Photo highlights as a spotlight (0.23.2): the photo dims except the highlight in focus, which glows with its tag; a caption sits beside it */
+.mkwrap.spot { align-items:flex-start; }
+.spstage { position:relative; display:inline-block; max-width:min(100%, 760px); }
+.spstage .spotpic { max-width:100%; }
+.spotpic { overflow:hidden; background:#000; border-color:#000; outline:none; }
+.spotpic img { filter:grayscale(.35) brightness(.92); }
+.spk { position:absolute; border-radius:4px; cursor:pointer; transition:box-shadow .25s, border-color .25s, background .25s; border:1px solid transparent; }
+.spk:hover { border-color:color-mix(in srgb, var(--mc) 60%, transparent); }
+.spk.on { border:2px solid var(--mc); background:color-mix(in srgb, var(--mc) 12%, transparent); box-shadow:0 0 0 9999px rgba(0,0,0,.66), 0 0 24px 4px color-mix(in srgb, var(--mc) 70%, transparent), inset 0 0 18px color-mix(in srgb, var(--mc) 45%, transparent); z-index:2; }
+.spk.on::before { content:''; position:absolute; left:-2px; top:-2px; bottom:-2px; width:3px; background:#fff; box-shadow:0 0 10px #fff, 0 0 18px var(--mc); border-radius:2px; }
+.sptag { position:absolute; left:12%; top:10%; font-style:normal; font:800 12px/1 ui-sans-serif, system-ui, sans-serif; letter-spacing:.06em; color:#fff; background:rgba(10,12,16,.82); border:1px solid rgba(255,255,255,.75); padding:4px 7px; border-radius:2px; white-space:nowrap; opacity:0; transition:opacity .2s; }
+.spk.on .sptag { opacity:1; }
+.spcap { position:absolute; z-index:3; max-width:min(60%, 420px); line-height:1.25; opacity:0; transform:translateY(6px); transition:opacity .25s, transform .25s; pointer-events:none; }
+.spcap.on { opacity:1; transform:none; }
+.spwhere { display:inline-block; background:var(--mc); color:#fff; font:800 11px/1 ui-sans-serif, system-ui, sans-serif; letter-spacing:.14em; padding:5px 8px; margin-bottom:6px; }
+.sptitle { display:table; background:#fff; color:#0b0d12; font:900 clamp(16px, 2.6vw, 28px)/1.05 ui-sans-serif, system-ui, sans-serif; letter-spacing:.02em; text-transform:uppercase; padding:6px 10px 5px; }
+.spcap p { margin:8px 0 0; color:#e8ebf1; font-size:clamp(12px, 1.5vw, 15px); line-height:1.4; background:rgba(8,10,14,.55); padding:6px 8px; border-radius:2px; }
+.spnav { position:absolute; right:10px; top:10px; z-index:4; display:flex; align-items:center; gap:4px; background:rgba(10,12,16,.72); border-radius:99px; padding:3px 4px; line-height:1; }
+.spnav button { min-width:30px; height:30px; padding:0; border-radius:99px; color:#fff; font-size:20px; }
+.spn { color:#fff; font-size:12px; font-weight:700; padding:0 4px; }
+.mklist li.on { border-color:var(--mc); box-shadow:0 0 0 2px color-mix(in srgb, var(--mc) 40%, transparent); }
+@media (max-width:600px) {
+  .spstage { display:block; }
+  .spcap { position:static; max-width:none; display:none; transform:none; margin-top:10px; }
+  .spcap.on { display:block; }
+  .spcap p { background:none; padding:0; color:var(--fg); }
+  .sptag { font-size:10px; }
+}
+/* editor: title, tag and a line about it */
+.mkrow .mkf { display:flex; flex-direction:column; gap:5px; flex:1; min-width:0; }
+.mkrow .mkf textarea { resize:vertical; font:inherit; font-size:13px; }
+.mkrow .mkf label { font-size:11px; font-weight:700; color:var(--dim); text-transform:uppercase; letter-spacing:.06em; margin:2px 0 -2px; }
+.mkrow .mkf input, .mkrow .mkf textarea { background:var(--inset); border:1px solid var(--line); border-radius:8px; padding:6px 8px; color:var(--fg); }

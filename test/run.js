@@ -706,7 +706,7 @@ test('highlight boxes on a gear photo: admins draw them, everyone sees them, a n
   assert.strictEqual((await vol.put('/api/devices/' + id + '/marks', { marks: [] })).status, 403, 'users cannot draw them');
   r = await admin.put('/api/devices/' + id + '/marks', { marks: [{ x: 0.1, y: 0.2, w: 0.3, h: 0.25, label: 'Main breaker', color: 'red' }, { x: 0.9, y: 0.9, w: 0.5, h: 0.5, color: 'pink' }, { x: 0.5, y: 0.5, w: 0, h: 0.1 }] });
   assert.strictEqual(r.status, 200);
-  assert.deepStrictEqual(r.data.marks[0], { x: 0.1, y: 0.2, w: 0.3, h: 0.25, label: 'Main breaker', color: 'red' });
+  assert.deepStrictEqual(r.data.marks[0], { x: 0.1, y: 0.2, w: 0.3, h: 0.25, label: 'Main breaker', tag: '', note: '', color: 'red' });
   assert.strictEqual(r.data.marks.length, 2, 'a box with no size is dropped');
   assert.ok(Math.abs(r.data.marks[1].w - 0.1) < 1e-9 && r.data.marks[1].color === 'yellow', 'kept inside the picture; unknown colours become yellow');
   const seen = (await vol.get('/api/devices/' + id)).data.device;

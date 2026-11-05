@@ -1048,7 +1048,7 @@ const PatchView = (() => {
     svg.addEventListener('dblclick', (e) => { if (!e.target.closest('.pcard') && !e.target.closest('.pe')) { e.preventDefault(); fit(); } });
     // rotate the phone or resize the window: fit again, unless someone has panned or zoomed since
     let rsz = null;
-    window.addEventListener('resize', function onResize() { if (!svg.isConnected) return window.removeEventListener('resize', onResize); clearTimeout(rsz); rsz = setTimeout(() => { if (D && !st.userView && !st.drag) fit(); }, 200); });
+    window.addEventListener('resize', function onResize() { if (!svg.isConnected) return window.removeEventListener('resize', onResize); clearTimeout(rsz); rsz = setTimeout(() => { if (D && !st.userView && !st.drag && !document.body.classList.contains('printreport') && cv.getBoundingClientRect().width > 0) fit(); }, 200); });
     $('#pzi').addEventListener('click', () => { const r = svg.getBoundingClientRect(); zoomAt(1.25, r.left + r.width / 2, r.top + r.height / 2); });
     $('#pzo').addEventListener('click', () => { const r = svg.getBoundingClientRect(); zoomAt(0.8, r.left + r.width / 2, r.top + r.height / 2); });
     $('#pzf').addEventListener('click', () => fit());
@@ -2445,27 +2445,43 @@ const PatchView = (() => {
         '<section class="rdraw"><h2>1. Signal flow drawing</h2><div class="rsvg" id="rsvg"></div>' + key + '</section>' +
         sections.map((x, k) => '<section class="rsec"><h2>' + (k + 2) + '. ' + esc(x.title) + '</h2>' + x.html + '</section>').join('');
     }
+    // The PDF: a print-only report built from a still copy of the drawing (the live one is never moved or refitted,
+    // which kept phones busy redrawing while the print sheet was open). Tapping PDF again while one is open does nothing.
+    function dropReport() {
+      const old = document.getElementById('preport'); if (old) old.remove();
+      document.body.classList.remove('printreport');
+      st.printing = false;
+    }
     $('#ppdf').addEventListener('click', async () => {
-      select(null);
-      // the note of the published revision, for the title page
-      if (st.rev && st.revNote === undefined) { try { const v = (await get('/api/patch/versions')).versions.find((x) => x.rev === st.rev); st.revNote = v ? v.note || '' : ''; } catch (e) { st.revNote = ''; } }
-      const box = document.createElement('div');
-      box.id = 'preport'; box.innerHTML = reportDoc();
-      document.body.appendChild(box); document.body.classList.add('printreport');
-      // the live drawing moves into its page, framed to the whole drawing
-      const before = st.tf, b = D.bbox, home = svg.parentNode, next = svg.nextSibling;
-      svg.setAttribute('viewBox', b.x0 + ' ' + b.y0 + ' ' + (b.x1 - b.x0) + ' ' + (b.y1 - b.y0)); vp.removeAttribute('transform'); svg.classList.add('printing');
-      $('#rsvg', box).appendChild(svg);
-      let done = false;
-      const after = () => {
-        if (done) return; done = true;
-        home.insertBefore(svg, next); svg.removeAttribute('viewBox'); svg.classList.remove('printing'); st.tf = before; apply();
-        box.remove(); document.body.classList.remove('printreport'); window.removeEventListener('afterprint', after);
-      };
-      window.addEventListener('afterprint', after);
-      st.printDone = after;
-      exportPdf((st.doc.title || 'Stage Patch') + (st.rev ? '' : ' Draft'), st.rev ? st.rev + (st.draft ? ' draft' : '') : '');
-      setTimeout(after, 60000);
+      if (st.printing) return;
+      st.printing = true;
+      try {
+        select(null);
+        dropReport(); st.printing = true;
+        // the note of the published revision, for the title page
+        if (st.rev && st.revNote === undefined) { try { const v = (await get('/api/patch/versions')).versions.find((x) => x.rev === st.rev); st.revNote = v ? v.note || '' : ''; } catch (e) { st.revNote = ''; } }
+        const box = document.createElement('div');
+        box.id = 'preport'; box.innerHTML = reportDoc();
+        // a still copy of the drawing, framed to the whole of it, without the grid, handles and hit areas
+        const b = D.bbox, copy = svg.cloneNode(true);
+        copy.classList.add('printing');   // keeps id psvg: the drawing's look hangs on it (the live one comes first in the page)
+        copy.setAttribute('viewBox', b.x0 + ' ' + b.y0 + ' ' + (b.x1 - b.x0) + ' ' + (b.y1 - b.y0));
+        copy.setAttribute('preserveAspectRatio', 'xMidYMid meet');
+        const cvp = copy.querySelector('#pvp'); if (cvp) { cvp.removeAttribute('transform'); cvp.removeAttribute('id'); }
+        copy.querySelectorAll('[id]').forEach((el) => { if (!/^(ar|mk|pat|grad|clip)/i.test(el.id)) el.removeAttribute('id'); });
+        copy.querySelectorAll('.pgridbg, .hand, .mkh, #ptmp, #pmq, .ptmp, .pmq, .cadd, .pguide').forEach((el) => el.remove());
+        $('#rsvg', box).appendChild(copy);
+        document.body.appendChild(box); document.body.classList.add('printreport');
+        const started = Date.now();
+        // done printing: tidy up. Some phones say "done" the moment the print sheet opens, so that early signal is ignored;
+        // the copy is hidden on screen anyway and goes when you leave the page or make the next PDF.
+        const after = () => { if (Date.now() - started < 2500) return; window.removeEventListener('afterprint', after); dropReport(); };
+        window.addEventListener('afterprint', after);
+        window.addEventListener('hashchange', function gone() { window.removeEventListener('hashchange', gone); window.removeEventListener('afterprint', after); dropReport(); });
+        exportPdf((st.doc.title || 'Stage Patch') + (st.rev ? '' : ' Draft'), st.rev ? st.rev + (st.draft ? ' draft' : '') : '');
+      } catch (e) { dropReport(); toast('Could not make the PDF: ' + e.message, 'bad'); return; }
+      // the button works again shortly after the print sheet opens (the report stays until it is replaced or you leave)
+      setTimeout(() => { st.printing = false; }, 3000);
     });
     const ph = $('#phist');
     if (ph) ph.addEventListener('click', async () => {

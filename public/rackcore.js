@@ -8,7 +8,8 @@
  * rails: the four inside corners of the rails on the photo, as fractions of the picture: { tl, tr, bl, br } each { x, y }.
  */
 (function (root) {
-  const ITEM_TYPES = { blank: 'Blank panel', vent: 'Vent panel', shelf: 'Shelf', drawer: 'Drawer' };
+  /** Rack-only pieces (not Gear Locker cards). custom: anything else, named by you. */
+  const ITEM_TYPES = { blank: 'Blank panel', vent: 'Vent panel', shelf: 'Shelf', drawer: 'Drawer', patch: 'Patch panel', cable: 'Cable manager', custom: 'Custom item' };
   const MAX_UNITS = 60;
   const int = (v) => { const n = Math.round(Number(v)); return Number.isFinite(n) ? n : null; };
 

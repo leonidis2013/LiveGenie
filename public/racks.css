@@ -111,3 +111,8 @@
   .rkphoto .spcap { max-width:none; }
 }
 .rkcol { min-width:0; }
+
+/* toolbar: rack pieces | new Gear Locker cards (0.25.1) */
+.rktools .rksep { width:1px; height:22px; background:var(--line); margin:0 4px; }
+.ngrow { display:flex; gap:10px; flex-wrap:wrap; }
+.ngrow > div { flex:1; min-width:120px; }

@@ -74,7 +74,7 @@ async function viewRack(id) {
     ${rack.notes ? '<div class="doc rknotes">' + md(rack.notes) + '</div>' : ''}
     <div class="rkmain">
       <div class="rkcol"><div class="rkhd"><h2>Front</h2><span class="note" id="rkst"></span></div>
-        ${admin ? '<div class="rktools" id="rktools"><span class="note">Add:</span>' + Object.entries(RackCore.ITEM_TYPES).map(([k, l]) => '<button class="btn sm" data-add="' + k + '">' + esc(l.replace(' panel', '')) + '</button>').join('') + '</div><div class="rkpend hide" id="rkpend"></div>' : ''}
+        ${admin ? '<div class="rktools" id="rktools"><span class="note">Add:</span>' + Object.entries(RackCore.ITEM_TYPES).map(([k, l]) => '<button class="btn sm" data-add="' + k + '">' + esc(k === 'custom' ? 'Custom…' : l.replace(' panel', '').replace('Patch', 'Patch panel')) + '</button>').join('') + '<span class="rksep"></span><button class="btn sm" data-new="network">' + icon('plus') + 'Network switch</button><button class="btn sm" data-new="power">' + icon('plus') + 'Power strip</button></div><div class="rkpend hide" id="rkpend"></div>' : ''}
         <div class="rkelev" id="rkelev"></div><div id="rksel"></div>
         ${admin ? '<div class="rkside" id="rkside"></div>' : ''}</div>
       <div class="rkcol rkphoto" id="rkphoto"></div>
@@ -237,7 +237,7 @@ async function viewRack(id) {
     } else {
       const it = items.find((x) => x.id === sel.id); if (!it) { sel = null; host.innerHTML = ''; return; }
       host.innerHTML = '<div class="card rkselc"><div class="rkhd"><b>' + esc(RackCore.ITEM_TYPES[it.type]) + '</b></div>' + (admin ? '<div class="rkrow"><label><em>Label</em><input data-il value="' + esc(it.label) + '" placeholder="' + esc(RackCore.ITEM_TYPES[it.type]) + '" maxlength="60"></label>' +
-        '<label><em>Height</em><select data-ih>' + [1, 2, 3, 4, 5, 6].filter((h) => h <= rack.units).map((h) => '<option' + (it.h === h ? ' selected' : '') + '>' + h + '</option>').join('') + '</select></label>' +
+        '<label><em>Height</em><select data-ih>' + [1, 2, 3, 4, 5, 6, 8, 10].filter((h) => h <= rack.units).map((h) => '<option' + (it.h === h ? ' selected' : '') + '>' + h + '</option>').join('') + '</select></label>' +
         '<label><em>&nbsp;</em><button class="ghost danger sm" data-ix>Remove</button></label></div>' + (it.type === 'shelf' ? '<div class="note">Tap a card in the list, then tap this shelf, to sit it on the shelf.</div>' : '') : '') + '</div>';
       if (admin) {
         $('[data-il]', host).addEventListener('change', (e) => attempt(() => { it.label = e.target.value; }));
@@ -383,12 +383,28 @@ async function viewRack(id) {
   }
 
   if (admin) {
-    $$('[data-add]').forEach((b) => b.addEventListener('click', () => {
-      const gp = RackCore.gaps(rack.units, items, gearRows())[0];
-      if (!gp) return toast('The rack is full', 'bad');
+    const placeItem = (type, label, h) => {
+      const gp = RackCore.gaps(rack.units, items, gearRows()).find((x) => x.h >= h) || null;
+      if (!gp) return toast(h > 1 ? 'No ' + h + 'U space free in this rack' : 'The rack is full', 'bad');
       const id = 'i' + Math.random().toString(36).slice(2, 8);
-      attempt(() => { items.push({ id, type: b.dataset.add, u: gp.u, h: 1, label: '' }); sel = { kind: 'item', id }; });
+      attempt(() => { items.push({ id, type, u: gp.u, h, label }); sel = { kind: 'item', id }; });
+    };
+    $$('[data-add]').forEach((b) => b.addEventListener('click', () => {
+      if (b.dataset.add !== 'custom') return placeItem(b.dataset.add, '', 1);
+      // something of your own: a monitor shelf, a light, a label strip…
+      modal('<h3>Custom item</h3><p class="note">Anything in the rack that is not a Gear Locker card: a rack light, a monitor, a label strip. It takes up space and shows in the drawing and the print.</p><form id="rcf"><label>Name</label><input id="rcn" maxlength="60" placeholder="Rack light, Monitor, Keyboard tray…" required>' +
+        '<label>Height</label><select id="rch">' + [1, 2, 3, 4, 5, 6, 8, 10].filter((h) => h <= rack.units).map((h) => '<option value="' + h + '">' + h + 'U</option>').join('') + '</select>' +
+        '<div class="acts"><button type="button" data-close>Cancel</button><button class="primary">Add to the rack</button></div></form>', (w, close) => {
+        $('#rcf', w).addEventListener('submit', (e) => { e.preventDefault(); const n = $('#rcn', w).value.trim(); if (!n) return; close(); placeItem('custom', n, Number($('#rch', w).value)); });
+        $('#rcn', w).focus();
+      });
     }));
+    // a new Gear Locker card made right here (a switch or a power strip), then placed like any other card
+    $$('[data-new]').forEach((b) => b.addEventListener('click', () => newRackGear(b.dataset.new, (d) => {
+      DEV.list = DEV.list || []; DEV.list.push(d);
+      pendH = d.rack_h > 1 ? d.rack_h : 1; pending = { id: d.id }; paintPending(); paintSide();
+      toast(d.name + ' added to the Gear Locker. Tap a slot to place it.', 'ok');
+    })));
     $('#rkEd').addEventListener('click', () => rackDialog(rack));
     $('#rkPh').addEventListener('click', () => rackPhoto(rack, async (pid) => {
       await call('PUT', '/api/racks/' + rack.id, { photo: pid });
@@ -399,6 +415,37 @@ async function viewRack(id) {
   }
   $('#rkPr').addEventListener('click', () => printRack(rack, elevation(true), tableHtml()));
   paintAll();
+}
+
+/**
+ * A new Gear Locker card made from the rack page: a network switch (with its ports) or a power strip (with its outlets).
+ * done(device) gets the new card, ready to place.
+ */
+function newRackGear(kind, done) {
+  const sw = kind === 'network';
+  const taken = (DEV.list || []).map((d) => d.name);
+  const tag = Tags.suggest(kind, taken);
+  modal('<h3>' + (sw ? 'New network switch' : 'New power strip') + '</h3><p class="note">It gets a Gear Locker card' + (sw ? ', and its ports show on the stage patch and the System map.' : '; plug gear into its outlets below the rack.') + '</p><form id="ngf">' +
+    '<label>Tag name</label><input id="ngn" maxlength="60" value="' + esc(tag) + '" required>' +
+    '<div class="ngrow"><div><label>Make</label><input id="ngm" maxlength="60" placeholder="' + (sw ? 'Ubiquiti' : 'Furman') + '" list="ngml"></div><div><label>Model</label><input id="ngd" maxlength="60" placeholder="Model number" list="ngdl"></div></div>' +
+    '<datalist id="ngdl">' + GearModels.all().filter((m) => m.kind === kind).map((m) => '<option value="' + esc(m.model) + '">' + esc(m.make || '') + '</option>').join('') + '</datalist>' +
+    '<div class="ngrow"><div><label>' + (sw ? 'Ports' : 'Outlets') + '</label><input id="ngp" type="number" min="1" max="96" value="' + (sw ? 16 : 8) + '"></div><div><label>Height</label><select id="ngh">' + [1, 2, 3, 4].map((h) => '<option value="' + h + '">' + h + 'U</option>').join('') + '</select></div>' +
+    (sw ? '' : '<div><label>Limit (watts)</label><input id="ngw" type="number" min="0" max="20000" value="1800"></div>') + '</div>' +
+    '<div class="acts"><button type="button" data-close>Cancel</button><button class="primary">Add and place</button></div></form>', (w, close) => {
+    $('#ngd', w).addEventListener('change', () => { const m = GearModels.find($('#ngd', w).value, kind); if (m && m.make && !$('#ngm', w).value) $('#ngm', w).value = m.make; });
+    $('#ngf', w).addEventListener('submit', async (e) => {
+      e.preventDefault();
+      const n = Number($('#ngp', w).value) || (sw ? 16 : 8), make = $('#ngm', w).value.trim(), model = $('#ngd', w).value.trim();
+      const body = { name: $('#ngn', w).value.trim(), kind, make, model, category: sw ? 'network' : 'power', rack_h: Number($('#ngh', w).value) };
+      if (sw) { body.networked = true; body.inputs = n; } else { body.outputs = n; body.power_max = Number(($('#ngw', w) || {}).value) || 0; }
+      try {
+        const r = await call('POST', '/api/devices', body);
+        if (model) GearModels.add([{ kind, make, model }]);
+        forgetDevices(); close();
+        done({ ...body, id: r.id, rack_id: null, qty: 1 });
+      } catch (err) { toast(err.message, 'bad'); }
+    });
+  });
 }
 
 /** Upload a rack photo, or pick one already in LiveGenie. */

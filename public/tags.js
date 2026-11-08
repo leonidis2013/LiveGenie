@@ -8,7 +8,7 @@
   const CODES = {
     mic: { code: 'MIC-' }, txmic: { code: 'WMIC-' }, capsule: { code: 'CAP-' }, receiver: { code: 'RX-' }, di: { code: 'DI-' }, source: { code: 'SRC-' },
     iemtx: { code: 'IEM-TX' }, bodypack: { code: 'IEM-' }, headamp: { code: 'HP-' }, console: { code: 'FOH ', model: true }, stagebox: { code: 'SB-', letter: true },
-    processor: { code: 'PA-PROC' , plain: true }, amp: { code: 'PA-AMP' }, speaker: { code: 'SPK-' }, wedge: { code: 'WEDGE-' }, network: { code: 'SW-' }, computer: { code: 'PC-' }, other: { code: 'GEAR-' }
+    processor: { code: 'PA-PROC' , plain: true }, amp: { code: 'PA-AMP' }, speaker: { code: 'SPK-' }, wedge: { code: 'WEDGE-' }, network: { code: 'SW-' }, power: { code: 'PWR-' }, computer: { code: 'PC-' }, other: { code: 'GEAR-' }
   };
   /** Speaker positions an admin can pick instead of a number. */
   const POSITIONS = ['PA-L', 'PA-R', 'SUB-1', 'SUB-2', 'FILL-L', 'FILL-R', 'DELAY-1'];

@@ -21,6 +21,7 @@ const Network = require('./lib/network');
 const Training = require('./lib/training');
 const Patch = require('./lib/patch');
 const Admin = require('./lib/admin');
+const Racks = require('./lib/racks');
 const PatchConvert = require('./lib/patchconvert');
 const PatchCoreLib = require('./public/patchcore');
 
@@ -40,9 +41,10 @@ const db = DB.open(path.join(DATA, 'livegenie.db'));
 const auth = Auth.create(db);
 const store = Store.create(db, DATA);
 const update = Update.create(pkg.version);
-const devices = Devices.create(db, { UserError: Store.UserError, audit: store.audit });
+const devices = Devices.create(db, { UserError: Store.UserError, audit: store.audit, racks: () => racks });
 const uploadExists = (id) => !!store.upload(id);
 const patch = Patch.create(db, { UserError: Store.UserError, audit: store.audit });
+const racks = Racks.create(db, { UserError: Store.UserError, audit: store.audit, uploadExists: (id) => !!store.upload(id) });
 const adm = Admin.create(db, { UserError: Store.UserError, audit: store.audit, dataDir: DATA, getSetting: store.getSetting, setSetting: store.setSetting });
 const network = Network.create(db, { UserError: Store.UserError, audit: store.audit, devices, getSetting: store.getSetting, setSetting: store.setSetting, patch });
 if (restoreNote) store.audit(null, 'backup.restored', '', restoreNote);
@@ -369,7 +371,8 @@ async function api(req, res, url, user, token) {
       const dupeSkip = Auth.atLeast(user, 'admin') ? devices.dupeSkip(store.getSetting) : [];
       return send(res, 200, { ok: true, categories: Devices.CATEGORIES, buckets, dupeSkip, devices: devices.list(user).map((d) => ({
         id: d.id, name: d.name, aliases: d.aliases, category: d.category, make: d.make, model: d.model, location: d.location, bucket: d.bucket, kind: d.kind || pk.get(d.id) || '', qty: d.qty || 1, pair_id: d.pair_id, txtype: d.txtype, capsule: d.capsule, freq: d.freq, networked: d.networked, uplink_id: d.networked ? d.uplink_id : null, uplink_port: d.networked ? d.uplink_port : '',
-        ips: d.ips, photo: d.photo, tech_only: d.tech_only, inputs: d.inputs, outputs: d.outputs, files: fileCount.get(d.id) || 0 })) });
+        ips: d.ips, photo: d.photo, marks: d.marks, notes: d.notes, tech_only: d.tech_only, inputs: d.inputs, outputs: d.outputs, files: fileCount.get(d.id) || 0,
+        rack_id: d.rack_id, rack_u: d.rack_u, rack_h: d.rack_h, rack_side: d.rack_side, shelf_id: d.shelf_id, power_w: d.power_w, power_pdu: d.power_pdu, power_outlet: d.power_outlet, power_max: d.power_max })) });
     }
     if (m === 'GET' && b === 'models') return send(res, 200, { ok: true, models: devices.models(store.getSetting) });
     if (m === 'POST' && b === 'models') { need(user, 'admin'); const body = await readJson(req); return send(res, 200, { ok: true, models: devices.saveModels(body.add, body.remove, user, store.getSetting, store.setSetting) }); }
@@ -498,7 +501,23 @@ async function api(req, res, url, user, token) {
     }
   }
 
+  // ----- racks -----
+  if (a === 'racks') {
+    if (m === 'GET' && !b) return send(res, 200, { ok: true, racks: racks.list(user) });
+    if (m === 'POST' && !b) { need(user, 'admin'); return send(res, 200, { ok: true, id: racks.add(await readJson(req), user) }); }
+    if (b && /^\d+$/.test(b)) {
+      if (m === 'GET' && !c) return send(res, 200, { ok: true, ...racks.get(b, user) });
+      if (m === 'PUT' && !c) { need(user, 'admin'); racks.edit(b, await readJson(req), user); return send(res, 200, { ok: true, ...racks.get(b, user) }); }
+      if (m === 'DELETE' && !c) { need(user, 'admin'); racks.remove(b, user); return send(res, 200, { ok: true }); }
+      if (m === 'PUT' && c === 'layout') { need(user, 'admin'); return send(res, 200, { ok: true, ...racks.layout(b, await readJson(req), user) }); }
+      if (m === 'PUT' && c === 'power') { need(user, 'admin'); return send(res, 200, { ok: true, ...racks.setPower(b, (await readJson(req)).plugs, user) }); }
+    }
+  }
+
   // ----- pictures -----
+  if (m === 'GET' && a === 'uploads' && !b) { need(user, 'admin'); return send(res, 200, { ok: true, uploads: store.uploads() }); }
+  if (m === 'GET' && a === 'admin' && b === 'storage') { need(user, 'admin'); return send(res, 200, { ok: true, ...store.storage() }); }
+  if (m === 'POST' && a === 'admin' && b === 'storage' && c === 'clean') { need(user, 'admin'); return send(res, 200, { ok: true, ...store.removeUnused((await readJson(req)).ids, user) }); }
   if (m === 'POST' && a === 'uploads') {
     need(user, 'admin');
     const buf = await readBody(req, Store.MAX_IMAGE + 1024);

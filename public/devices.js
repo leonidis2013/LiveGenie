@@ -15,7 +15,7 @@ const AUTO_BUCKETS = ['Wired mics', 'Wireless mics', 'Receivers', 'Capsules', 'I
 /** What a piece of gear is, in the order the "What is it?" list shows them. Same words as the stage patch. */
 const GEAR_KIND = [['mic', 'Microphone'], ['txmic', 'Wireless mic (handheld or pack)'], ['capsule', 'Mic capsule or head'], ['receiver', 'Wireless receiver'], ['di', 'DI box'], ['source', 'Instrument or playback'],
   ['iemtx', 'In-ear transmitter'], ['bodypack', 'In-ear pack'], ['headamp', 'Headphone amp'], ['console', 'Mixer'], ['stagebox', 'Stage box'], ['processor', 'Processor'], ['amp', 'Amplifier'], ['speaker', 'Speaker'], ['wedge', 'Wedge or monitor'],
-  ['network', 'Network'], ['computer', 'Computer'], ['other', 'Something else']];
+  ['network', 'Network'], ['computer', 'Computer'], ['power', 'Power strip or PDU'], ['other', 'Something else']];
 /** Gear with its own frequency, person or channel: one card each, never a quantity. */
 const ONE_EACH = ['txmic', 'receiver', 'iemtx', 'bodypack'];
 const qtyOf = (d) => (d && !ONE_EACH.includes(d.kind) ? Math.max(1, d.qty || 1) : 1);
@@ -25,7 +25,7 @@ const GEAR_PAIR = { txmic: { with: 'receiver', label: 'Receiver', add: 'Add a wi
 const PAIR_CHILD = { receiver: 'txmic', iemtx: 'bodypack' };
 const TX_KINDS = ['Handheld', 'Bodypack', 'Headset', 'Lavalier', 'Instrument', 'Other'];
 const BUCKET_OF_KIND = { capsule: 'Capsules', mic: 'Wired mics', di: 'Wired mics', txmic: 'Wireless mics', receiver: 'Receivers', source: 'Other', iemtx: 'In-ears', bodypack: 'In-ears', headamp: 'In-ears',
-  stagebox: 'Stage I/O', network: 'Network', console: 'Mixing', computer: 'Computers', processor: 'Processing', amp: 'Amps', speaker: 'Speakers', wedge: 'Speakers' };
+  stagebox: 'Stage I/O', network: 'Network', console: 'Mixing', computer: 'Computers', processor: 'Processing', amp: 'Amps', speaker: 'Speakers', wedge: 'Speakers', power: 'Power' };
 function autoBucket(d) {
   if (d.kind && BUCKET_OF_KIND[d.kind]) return BUCKET_OF_KIND[d.kind];
   // its type on your model list, else plain words in its name
@@ -191,7 +191,8 @@ function gearLine(d, list) {
 async function viewDevices(qs) {
   setTitle('Gear Locker');
   // your model list says what each model is (a speaker, a mic), so gear sorts into the right bucket
-  const [list] = await Promise.all([loadDevices(true), GearModels.load()]);
+  const [list, rackList] = await Promise.all([loadDevices(true), get('/api/racks').then((r) => r.racks).catch(() => []), GearModels.load()]);
+  const rackName = new Map(rackList.map((r) => [r.id, r.name]));
   let bk = qs.get('b') || '';
   let q = '';
   let lc = qs.get('loc') || '';
@@ -212,7 +213,7 @@ async function viewDevices(qs) {
       ${can('admin') ? '<button class="primary btn" id="newDev">' + icon('plus') + 'Add gear</button>' : ''}</div>
     <div class="bar"><input type="search" id="dq" placeholder="Find gear: name, model, location, IP or who uses it" style="flex:1;min-width:200px">
       <select id="dlf" title="Only gear in one location"><option value="">Every location</option>${gearLocations(list).map((l) => '<option' + (l === lc ? ' selected' : '') + '>' + esc(l) + '</option>').join('')}${list.some((d) => !d.location) ? '<option value="__none">No location set</option>' : ''}</select>
-      <div class="seg" id="dgb"><button data-gb="bucket" class="${by === 'bucket' ? 'on' : ''}">By bucket</button><button data-gb="location" class="${by === 'location' ? 'on' : ''}">By location</button></div></div>
+      <div class="seg" id="dgb"><button data-gb="bucket" class="${by === 'bucket' ? 'on' : ''}">By bucket</button><button data-gb="location" class="${by === 'location' ? 'on' : ''}">By location</button>${rackList.length ? '<button data-gb="rack" class="' + (by === 'rack' ? 'on' : '') + '">By rack</button>' : ''}</div></div>
     ${can('admin') ? '<div id="ddup"></div>' : ''}
     <div class="gchips" id="dcat"><button data-b="" class="chipb on">All <em>${list.length}</em></button>${order.filter((b) => list.some((d) => bucketOf(d) === b)).map((b) => '<button class="chipb" data-b="' + esc(b) + '">' + esc(b) + ' <em>' + list.filter((d) => bucketOf(d) === b).length + '</em></button>').join('')}</div>
     <div id="dgrid"></div>`;
@@ -227,10 +228,12 @@ async function viewDevices(qs) {
       $('#dgrid').innerHTML = '<div class="card empty">' + (list.length ? 'No gear matches.' : 'The Gear Locker is empty.' + (can('admin') ? ' Try the <a href="#/gear-setup">guided setup</a> or add your first piece of gear' + (sug.length ? ', or make cards from the names already in your IP lists' : '') + '.' : '')) + '</div>';
       return;
     }
-    const secOf = by === 'location' ? (d) => d.location || 'No location set' : bucketOf;
-    const secs = by === 'location' ? gearLocations(shown).concat(shown.some((d) => !d.location) ? ['No location set'] : []) : order;
+    if (by === 'rack' && !rackList.length) by = 'bucket';
+    const secOf = by === 'location' ? (d) => d.location || 'No location set' : by === 'rack' ? (d) => rackName.get(d.rack_id) || 'Not in a rack' : bucketOf;
+    const secs = by === 'location' ? gearLocations(shown).concat(shown.some((d) => !d.location) ? ['No location set'] : []) : by === 'rack' ? rackList.map((r) => r.name).concat(['Not in a rack']) : order;
     $('#dgrid').innerHTML = secs.map((b) => {
-      const inB = shown.filter((d) => secOf(d) === b);
+      // in a rack: top to bottom, shelf gear last
+      const inB = shown.filter((d) => secOf(d) === b).sort((x, y) => (by === 'rack' ? (x.rack_u || 99) - (y.rack_u || 99) || (x.rack_side || '').localeCompare(y.rack_side || '') : 0));
       if (!inB.length) return '';
       const closed = !bk && !words.length && shut[b];
       return '<section class="gbucket' + (closed ? ' shut' : '') + '"><button type="button" class="gbh" data-shut="' + esc(b) + '"><span>' + esc(b) + '</span><em>' + inB.length + '</em><i>' + (closed ? '▸' : '▾') + '</i></button>' +
@@ -413,6 +416,9 @@ async function viewDevice(id) {
   await loadDevices();
   const v = d.device;
   setTitle(v.name);
+  // in a rack: its spot, and the rack photo when the card has no photo of its own
+  let rack = null;
+  if (v.rack_id) { try { rack = (await get('/api/racks/' + v.rack_id)).rack; } catch (e) { rack = null; } }
   const ipRows = v.ips.map((ip) => {
     const src = v.ipSources.filter((s) => s.ip === ip);
     const where = [...new Set((v.ip === ip ? ['on this card'] : []).concat(src.map((s) => 'IP list ' + s.network + (s.vlan ? ' (VLAN ' + s.vlan + ')' : ''))))];
@@ -430,6 +436,13 @@ async function viewDevice(id) {
     [GEAR_PAIR[v.kind] ? GEAR_PAIR[v.kind].label : '', mate ? dl(mate) : ''],
     ['Capsule', (() => { const c = v.kind === 'txmic' && all.find((x) => x.kind === 'capsule' && x.pair_id === v.id); return c ? dl(c) : esc(v.capsule); })()],
     ['Location', esc(v.location)],
+    ['Rack', rack ? '<a href="#/racks/' + rack.id + '">' + esc(rack.name) + '</a> · ' + esc(rackSpot(v, rack)) : ''],
+    ['Power', (() => {
+      const pdu = v.power_pdu && all.find((x) => x.id === v.power_pdu);
+      const bits = [v.power_w != null ? v.power_w + ' W' + (qtyOf(v) > 1 ? ' each' : '') : '', pdu ? 'plugs into ' + dl(pdu) + (v.power_outlet ? ' outlet ' + v.power_outlet : '') : ''];
+      if (v.kind === 'power') bits.push((v.outputs || 0) + ' outlets' + (v.power_max ? ' · up to ' + v.power_max + ' W' : ''));
+      return bits.filter(Boolean).join(' · ');
+    })()],
     ['Plugged into', v.networked && L.uplink ? dl(L.uplink) + (L.uplink.port ? ' · port <span class="mono">' + esc(L.uplink.port) + '</span>' : '') : ''],
     ['VLAN', !v.networked ? '' : (L.vlans || []).map((x) => '<a class="chip" href="#/map/vlans"><i class="sw" style="background:' + esc(x.color) + '"></i>' + x.vid + ' ' + esc(x.name) + '</a>').join(' ')],
     ['Connected here', (L.children || []).map((x) => '<div>' + (x.port ? '<span class="mono">' + esc(x.port) + '</span> ' : '') + dl(x) + '</div>').join('')],
@@ -438,15 +451,18 @@ async function viewDevice(id) {
     ['Also called', esc(v.aliases.join(', '))]
   ].filter((f) => f[1]);
   const used = d.usedOn;
+  // the photo: its own (with its highlights), or its spot in the rack photo
+  const pic = v.photo ? { photo: v.photo, marks: v.marks, card: v } : rack && rack.photo ? { rack: true, photo: rack.photo, marks: [rackMark(v, rack)], card: { ...v, location: rack.name } } : null;
   app.innerHTML = `<div class="page dev">
     <div class="crumbs"><a href="#/">Home</a><span>/</span><a href="#/gear">Gear Locker</a></div>
-    <div class="devhead">${v.photo ? '<a href="#dphoto" class="devphotoa" id="dpa"><img class="devphoto" src="/uploads/' + esc(v.photo) + '" alt=""></a>' : devThumb(v, 84)}
+    <div class="devhead">${pic ? '<a href="#dphoto" class="devphotoa" id="dpa"><img class="devphoto" src="/uploads/' + esc(pic.photo) + '" alt=""' + (pic.rack ? ' style="object-position:' + Math.round((pic.marks[0].x + pic.marks[0].w / 2) * 100) + '% ' + Math.round((pic.marks[0].y + pic.marks[0].h / 2) * 100) + '%"' : '') + '></a>' : devThumb(v, 84)}
       <div class="grow"><h1 class="title">${esc(v.name)}${qtyOf(v) > 1 ? ' <span class="qtyb big">×' + qtyOf(v) + '</span>' : ''}</h1><div class="meta" style="margin:0">${esc([v.make, v.model].filter(Boolean).join(' '))}
         <span class="chip">${CAT[v.category] || 'Other'}</span>${v.tech_only ? '<span class="badge tech">Tech only</span>' : ''}</div></div>
       <div class="acts-top">${can('admin') ? '<button class="btn" id="eD">' + icon('edit') + 'Edit</button>' + (qtyOf(v) > 1 ? '<button class="btn" id="spD" title="Make a card for each one, to give each its own details">Split into ' + qtyOf(v) + ' cards</button>' : '') + '<button class="ghost danger" id="xD" title="Delete device">' + icon('trash') + '</button>' : '<button class="btn ghost" id="rD">' + icon('alert') + 'Report a problem</button>'}</div></div>
     ${facts.length ? '<div class="card facts">' + facts.map((f) => '<div class="fact"><span>' + f[0] + '</span><div>' + f[1] + '</div></div>').join('') + '</div>' : ''}
     ${v.notes.trim() ? '<div class="doc" id="dnotes">' + md(v.notes) + '</div>' : ''}
-    ${v.photo ? '<div class="section" style="margin-top:20px" id="dphoto"><div class="hsh"><h2>Photo</h2>' + (can('admin') ? '<button class="btn" id="dmk">' + icon('edit') + (v.marks.length ? 'Edit highlights' : 'Highlight on the photo') + '</button>' : '') + '</div><div id="dmarks"></div></div>' : ''}
+    ${pic ? '<div class="section" style="margin-top:20px" id="dphoto"><div class="hsh"><h2>Photo</h2>' + (pic.rack ? '<a class="btn" href="#/racks/' + rack.id + '">' + icon('list') + 'Open ' + esc(rack.name) + '</a>' : '') + '</div><div id="dmarks" class="capped"></div>' +
+      '<div class="note" style="margin-top:6px">' + (pic.rack ? 'Where it sits in ' + esc(rack.name) + '. ' : '') + 'Tap the photo to see it full screen.' + (can('admin') && !pic.rack && !v.marks.length ? ' Admins: Edit, then Highlight on the photo.' : '') + '</div></div>' : ''}
     ${PAIR_CHILD[v.kind] ? (() => { const P = GEAR_PAIR[PAIR_CHILD[v.kind]];
       return '<div class="section" style="margin-top:20px"><div class="hsh"><h2>' + P.list + '</h2>' + (can('admin') ? '<a class="btn" href="#/gear/new?kind=' + PAIR_CHILD[v.kind] + '&pair=' + v.id + '">' + icon('plus') + P.add + '</a>' : '') + '</div>' +
         (kids.length ? '<div class="list pairs">' + kids.map((x) => '<a class="row" href="#/d/' + x.id + '">' + devThumb(x, 36) + '<div class="t"><b>' + esc(tagModel(x)) + '</b><span>' + esc([x.txtype, x.capsule, x.freq && x.freq + ' MHz'].filter(Boolean).join(' · ') || [x.make, x.model].filter(Boolean).join(' ')) + '</span></div></a>').join('') + '</div>'
@@ -462,11 +478,11 @@ async function viewDevice(id) {
   </div>`;
   linkDevices($('#dnotes'));
   paintFiles($('#dfiles'), v, d.files || []);
-  if (v.photo) {
-    $('#dmarks').innerHTML = marksView(v.photo, v.marks, v);
+  if (pic) {
+    $('#dmarks').innerHTML = marksView(pic.photo, pic.marks, pic.card);
     wireMarksView($('#dmarks'));
+    photoLightbox($('#dmarks'), pic.photo, pic.marks, pic.card);
     $('#dpa').addEventListener('click', (e) => { e.preventDefault(); $('#dphoto').scrollIntoView({ behavior: 'smooth', block: 'start' }); });
-    const mk = $('#dmk'); if (mk) mk.addEventListener('click', () => marksEditor(v, (marks) => { v.marks = marks; $('#dmarks').innerHTML = marksView(v.photo, marks, v); wireMarksView($('#dmarks')); mk.lastChild.textContent = marks.length ? 'Edit highlights' : 'Highlight on the photo'; }));
   }
   const rd = $('#rD'); if (rd) rd.addEventListener('click', () => reportProblem(v.name, { device_id: v.id }));
   if (can('admin')) {
@@ -505,9 +521,46 @@ function marksView(photo, marks, v) {
     (marks.length > 1 ? '<div class="spnav"><button type="button" class="ghost" data-step="-1" aria-label="Previous">‹</button><span class="spn"></span><button type="button" class="ghost" data-step="1" aria-label="Next">›</button></div>' : '') + '</div>' + caps + '</div>' +
     (marks.length > 1 ? '<ol class="mklist">' + marks.map((m, i) => '<li data-mi="' + i + '" style="--mc:' + MARK_COLORS[m.color || 'blue'] + '"><b>' + (i + 1) + '</b><span>' + esc(m.label || m.tag || 'Highlight ' + (i + 1)) + '</span></li>').join('') + '</ol>' : '') + '</div>';
 }
+/** "U5–6", "U4 left half", "on the shelf at U8". */
+function rackSpot(v, rack) {
+  if (v.shelf_id) { const sh = ((rack && rack.items) || []).find((x) => x.id === v.shelf_id); return 'on the shelf' + (sh ? ' at U' + sh.u : ''); }
+  if (!v.rack_u) return 'no U set';
+  const h = v.rack_h || 1;
+  return 'U' + v.rack_u + (h > 1 ? '–' + (v.rack_u + h - 1) : '') + (v.rack_side === 'L' ? ' left half' : v.rack_side === 'R' ? ' right half' : '');
+}
+/** A card's spot in its rack photo, as a highlight: glows with its tag, captioned with its tag and model. */
+function rackMark(v, rack) {
+  let u = v.rack_u || 1, h = v.rack_h || 1, side = v.rack_side || '';
+  if (v.shelf_id) { const sh = (rack.items || []).find((x) => x.id === v.shelf_id); if (sh) { u = sh.u; h = sh.h; side = ''; } }
+  const r = RackCore.region(rack.rails, rack.units, u, h, side);
+  return { ...r, color: 'blue', tag: v.name, label: tagModel(v), note: String(v.notes || '').split('\n').map((x) => x.replace(/[#*_`>]/g, '').trim()).find(Boolean) || '' };
+}
+/** Tap the photo: full screen, with its highlights and stepping. Esc, the ✕ or a tap outside the photo closes it. */
+function photoLightbox(host, photo, marks, card) {
+  const pic = $('.mkpic', host); if (!pic) return;
+  pic.style.cursor = 'zoom-in';
+  pic.addEventListener('click', (e) => {
+    if (e.target.closest('button') || e.target.closest('.spk')) return;
+    const box = document.createElement('div');
+    box.className = 'lbox';
+    box.innerHTML = '<button class="lbx" aria-label="Close">✕</button><div class="lbin">' + marksView(photo, marks, card) + '</div>';
+    document.body.appendChild(box);
+    wireMarksView(box);
+    const close = () => { box.remove(); document.removeEventListener('keydown', key); };
+    const key = (k) => { if (k.key === 'Escape') close(); };
+    document.addEventListener('keydown', key);
+    box.addEventListener('click', (k) => { if (k.target === box || k.target.closest('.lbx') || k.target.classList.contains('lbin')) close(); });
+    window.addEventListener('hashchange', close, { once: true });
+  });
+}
 function wireMarksView(host) {
   const all = $$('.spk', host);
   if (!all.length) return;
+  // captions are sized from the photo's own width
+  const stg = $('.spstage', host) || host, im = $('.spotpic img', host);
+  const size = () => { const w = (im && im.getBoundingClientRect().width) || 0; if (w) stg.style.setProperty('--pw', Math.round(w) + 'px'); };
+  if (im) { if (im.complete) size(); im.addEventListener('load', size); }
+  if (typeof ResizeObserver !== 'undefined' && im) new ResizeObserver(size).observe(im);
   let cur = 0;
   const show = (i) => {
     cur = (i + all.length) % all.length;
@@ -523,7 +576,8 @@ function wireMarksView(host) {
   show(0);
 }
 /** Admin: draw boxes on the photo (drag), move them, resize from the corner, name and colour them. */
-function marksEditor(v, done) {
+/** Draw highlights on a photo. opts.local: hand them back to the Edit form, which saves them with the card. */
+function marksEditor(v, done, opts = {}) {
   const marks = (v.marks || []).map((m) => ({ ...m }));
   let sel = marks.length ? 0 : -1, color = 'blue';
   modal('<h3>Highlight on the photo</h3><p class="note">Drag on the picture to draw a box around a switch, a socket or a label. Drag a box to move it, its corner to resize it, and name it on the right.</p>' +
@@ -550,8 +604,9 @@ function marksEditor(v, done) {
     // drawing, moving and resizing, in fractions of the picture
     let drag = null;
     const at = (e) => { const r = pic.getBoundingClientRect(); return { x: Math.max(0, Math.min(1, (e.clientX - r.left) / r.width)), y: Math.max(0, Math.min(1, (e.clientY - r.top) / r.height)) }; };
+    let lastType = 'mouse';
     pic.addEventListener('pointerdown', (e) => {
-      e.preventDefault(); pic.setPointerCapture(e.pointerId);
+      e.preventDefault(); pic.setPointerCapture(e.pointerId); lastType = e.pointerType;
       const p = at(e), h = e.target.closest('.mkh'), b = e.target.closest('.hmk');
       if (h) { sel = Number(h.dataset.h); drag = { mode: 'size', i: sel, p }; }
       else if (b) { sel = Number(b.dataset.mi); const m = marks[sel]; drag = { mode: 'move', i: sel, p, ox: m.x, oy: m.y }; }
@@ -571,10 +626,12 @@ function marksEditor(v, done) {
       const m = marks[drag.i];
       if (drag.mode === 'new' && (m.w < 0.015 || m.h < 0.015)) { marks.splice(drag.i, 1); sel = marks.length - 1; }
       drag = null; paint();
-      if (sel >= 0) { const inp = $('[data-lab="' + sel + '"]', side); if (inp && !inp.value) inp.focus(); }
+      // with a mouse, type its name straight away; on a phone the keyboard would cover the photo, so leave it
+      if (sel >= 0 && lastType === 'mouse') { const inp = $('[data-lab="' + sel + '"]', side); if (inp && !inp.value) inp.focus(); }
     };
     pic.addEventListener('pointerup', end); pic.addEventListener('pointercancel', end);
     $('#mkok', w).addEventListener('click', async () => {
+      if (opts.local) { close(); toast(marks.length ? 'Highlights ready: they are saved with the card' : 'No highlights', 'ok'); done(marks.map((m) => ({ ...m }))); return; }
       try { const r = await call('PUT', '/api/devices/' + v.id + '/marks', { marks }); close(); toast('Highlights saved', 'ok'); done(r.marks); }
       catch (e) { toast(e.message, 'bad'); }
     });
@@ -610,6 +667,85 @@ function paintFiles(host, v, files) {
   });
 }
 
+/** Pick a picture already in LiveGenie (the rack photo, a photo another card uses) instead of uploading it again. Resolves to its id, or null. */
+function choosePhoto() {
+  return new Promise(async (done) => {
+    let list = [];
+    try { list = (await get('/api/uploads')).uploads; } catch (e) { toast(e.message, 'bad'); return done(null); }
+    let picked = null;
+    modal('<h3>Choose a photo</h3><p class="note">Photos already in LiveGenie, newest first. Using one again takes no extra space.</p>' +
+      '<input type="search" id="cpq" placeholder="Filter by where it is used" style="width:100%;margin-bottom:10px">' +
+      '<div class="cpgrid" id="cpg"></div><div class="acts"><button type="button" data-close>Cancel</button><button class="primary" id="cpok" disabled>Use this photo</button></div>', (w, close) => {
+      w.classList.add('mwide');
+      const paint = (q) => {
+        const words = String(q || '').toLowerCase().split(/\s+/).filter(Boolean);
+        const shown = list.filter((u) => words.every((x) => u.uses.join(' ').toLowerCase().includes(x)));
+        $('#cpg', w).innerHTML = shown.length ? shown.map((u) => '<button type="button" class="cpi' + (u.id === picked ? ' on' : '') + '" data-u="' + u.id + '"><img src="/uploads/' + u.id + '" alt="" loading="lazy"><span>' + esc(u.uses[0] || 'Not used yet') + (u.uses.length > 1 ? ' +' + (u.uses.length - 1) : '') + '</span></button>').join('') : '<p class="note">No photos' + (words.length ? ' match' : ' yet') + '.</p>';
+        $$('[data-u]', w).forEach((b) => b.addEventListener('click', () => { picked = b.dataset.u; $$('[data-u]', w).forEach((x) => x.classList.toggle('on', x === b)); $('#cpok', w).disabled = false; }));
+        $$('[data-u]', w).forEach((b) => b.addEventListener('dblclick', () => { picked = b.dataset.u; close(); done(picked); }));
+      };
+      paint('');
+      $('#cpq', w).addEventListener('input', (e) => paint(e.target.value));
+      $('#cpok', w).addEventListener('click', () => { close(); done(picked); });
+      $$('[data-close]', w).forEach((b) => b.addEventListener('click', () => done(null)));
+    });
+  });
+}
+
+/**
+ * The Edit form's rack and power parts: which rack, top U, how tall, full width or a half, or on a shelf;
+ * watts and the power strip outlet it plugs into (a power strip also says how many outlets and its limit).
+ */
+async function paintRackPower(d, id, dirty) {
+  const host = $('#drack'), pw = $('#dpow');
+  let racks = [];
+  try { racks = (await get('/api/racks')).racks; } catch (e) { racks = []; }
+  d.rack_h = d.rack_h || 1;
+  const rackOf = () => racks.find((r) => String(r.id) === String(d.rack_id || ''));
+  const paint = () => {
+    const rk = rackOf();
+    const shelves = rk ? (rk.items || []).filter((x) => x.type === 'shelf') : [];
+    const units = rk ? rk.units : 0;
+    host.innerHTML = '<span>Rack</span>' + (racks.length ? '<div class="rkrow"><label><em>Rack</em><select data-r="rack_id"><option value="">Not in a rack</option>' + racks.map((r) => '<option value="' + r.id + '"' + (String(r.id) === String(d.rack_id || '') ? ' selected' : '') + '>' + esc(r.name) + ' (' + r.units + 'U)</option>').join('') + '</select></label>' +
+      (rk ? '<label><em>Where</em><select data-r="where"><option value="u"' + (d.shelf_id ? '' : ' selected') + '>In the rails</option>' + shelves.map((x) => '<option value="s:' + x.id + '"' + (d.shelf_id === x.id ? ' selected' : '') + '>On the shelf at U' + x.u + (x.label ? ' (' + esc(x.label) + ')' : '') + '</option>').join('') + '</select></label>' +
+        (d.shelf_id ? '' : '<label><em>Top U</em><select data-r="rack_u"><option value="">Choose…</option>' + Array.from({ length: units }, (_, k) => '<option' + (Number(d.rack_u) === k + 1 ? ' selected' : '') + '>' + (k + 1) + '</option>').join('') + '</select></label>' +
+          '<label><em>Height</em><select data-r="rack_h">' + [1, 2, 3, 4, 5, 6, 8, 10].filter((h) => h <= Math.max(units, 1)).map((h) => '<option value="' + h + '"' + (Number(d.rack_h) === h ? ' selected' : '') + '>' + h + 'U</option>').join('') + '</select></label>' +
+          '<label><em>Width</em><select data-r="rack_side"><option value="">Full width</option><option value="L"' + (d.rack_side === 'L' ? ' selected' : '') + '>Left half</option><option value="R"' + (d.rack_side === 'R' ? ' selected' : '') + '>Right half</option></select></label>') : '') + '</div>' +
+      '<em>' + (rk ? 'U1 is the top of the rack. ' + (rk.photo ? 'With no photo of its own, this card shows its spot in the rack photo.' : '') + ' <a href="#/racks/' + rk.id + '">Open the rack</a>' : 'Or place it from the <a href="#/racks">Racks</a> page.') + '</em>'
+      : '<em>No racks yet. <a href="#/racks">Make one on the Racks page</a>, then place gear in it.</em>');
+    const pdus = (DEV.list || []).filter((x) => x.kind === 'power' && String(x.id) !== String(id || ''));
+    const pdu = pdus.find((x) => String(x.id) === String(d.power_pdu || ''));
+    pw.innerHTML = '<span>Power</span><div class="rkrow"><label><em>Draws (watts)</em><input data-p="power_w" type="number" min="0" max="100000" inputmode="numeric" value="' + (d.power_w == null ? '' : esc(d.power_w)) + '" placeholder="Optional"></label>' +
+      (d.kind !== 'power' ? '<label><em>Plugs into</em><select data-p="power_pdu"><option value="">Not set</option>' + pdus.map((x) => '<option value="' + x.id + '"' + (String(x.id) === String(d.power_pdu || '') ? ' selected' : '') + '>' + esc(tagModel(x)) + '</option>').join('') + '</select></label>' +
+        (pdu ? '<label><em>Outlet</em><select data-p="power_outlet"><option value="">Choose…</option>' + Array.from({ length: Math.max(1, pdu.outputs || 8) }, (_, k) => '<option' + (Number(d.power_outlet) === k + 1 ? ' selected' : '') + '>' + (k + 1) + '</option>').join('') + '</select></label>' : '')
+        : '<label><em>Limit (watts)</em><input data-p="power_max" type="number" min="1" max="100000" inputmode="numeric" value="' + (d.power_max == null ? '' : esc(d.power_max)) + '" placeholder="e.g. 1800"></label>') + '</div>' +
+      '<em>' + (d.kind === 'power' ? 'A power strip or PDU: its outlets are its Outputs above. Gear picks the outlet it plugs into.' : pdus.length ? 'What it plugs into, so the Racks page can add up the draw on each strip.' : 'Add a power strip or PDU to the Gear Locker (What is it? Power strip or PDU) to pick its outlets here.') + '</em>';
+    $$('[data-r]', host).forEach((x) => x.addEventListener('change', () => {
+      const k = x.dataset.r;
+      if (k === 'where') { d.shelf_id = x.value.startsWith('s:') ? x.value.slice(2) : ''; }
+      else if (k === 'rack_id') { d.rack_id = x.value; d.shelf_id = ''; d.rackSet = true; }
+      else d[k] = x.value;
+      d.rackSet = true; dirty(); paint();
+    }));
+    $$('[data-p]', pw).forEach((x) => x.addEventListener('change', () => { d[x.dataset.p] = x.value; d.powerSet = true; if (x.dataset.p === 'power_pdu') d.power_outlet = ''; dirty(); paint(); }));
+  };
+  paint();
+  $('#dkind').addEventListener('change', () => setTimeout(paint, 0));
+  d.rackName = () => (rackOf() || {}).name || '';
+}
+/** What the rack and power parts send. Location fills in as "Rack AV-102 · U5–6" unless the card has its own. */
+function rackPowerBody(d) {
+  const b = {};
+  if (d.rackSet) {
+    Object.assign(b, { rack_id: d.rack_id || '', rack_u: d.rack_u || '', rack_h: d.rack_h || 1, rack_side: d.rack_side || '', shelf_id: d.shelf_id || '' });
+    const name = d.rackName ? d.rackName() : '';
+    const auto = /^Rack\b.*·\s*(U\d|on the shelf)|^.+ · U\d+(–\d+)?( (left|right) half)?$/.test(d.location || '');
+    if (name && (!d.location || auto)) b.location = name + ' · ' + rackSpot({ ...d, rack_u: Number(d.rack_u), rack_h: Number(d.rack_h) }, { items: [] });
+  }
+  if (d.powerSet) Object.assign(b, { power_w: d.power_w === '' ? '' : d.power_w, power_pdu: d.power_pdu || '', power_outlet: d.power_outlet || '', power_max: d.power_max === '' ? '' : d.power_max });
+  return b;
+}
+
 async function viewDeviceEdit(id) {
   if (!can('admin')) { app.innerHTML = '<div class="card empty">Admins can add and change devices.</div>'; if (!S.state.user) signInDialog(() => route()); return; }
   await loadDevices();
@@ -623,7 +759,9 @@ async function viewDeviceEdit(id) {
   app.innerHTML = `<div class="ed">
     <div class="crumbs"><a href="#/">Home</a><span>/</span><a href="#/gear">Gear Locker</a><span>/</span><span>${id ? 'Edit' : 'Add gear'}</span></div>
     <div class="card" style="margin-top:8px">
-      <div class="dphoto"><div id="dph"></div><input type="file" accept="image/*" class="hide" id="dpf"><div><button type="button" id="dpb">${d.photo ? 'Replace photo' : 'Add photo'}</button>${d.photo ? ' <button type="button" class="ghost danger" id="dpx">Remove</button>' : ''}<div class="note">A photo of the device or its rack position helps volunteers find it.</div></div></div>
+      <div class="dphoto"><div id="dph"></div><input type="file" accept="image/*" class="hide" id="dpf"><div><div class="dpbtns"><button type="button" id="dpb">${d.photo ? 'Replace photo' : 'Add photo'}</button><button type="button" class="ghost" id="dpc">Choose one already in LiveGenie</button><button type="button" class="ghost danger${d.photo ? '' : ' hide'}" id="dpx">Remove</button></div>
+        <button type="button" class="btn${d.photo ? '' : ' hide'}" id="dmk2">${icon('edit')}<span>${(d.marks || []).length ? 'Edit highlights (' + d.marks.length + ')' : 'Highlight on the photo'}</span></button>
+        <div class="note">A photo of the gear helps volunteers find it. Gear in a rack can use the rack's photo instead: set its rack below.</div></div></div>
       <div class="dform">
         <label class="dfield wide"><span>What is it?</span><select data-k="kind" id="dkind"><option value="">Choose…</option>${GEAR_KIND.map((k) => '<option value="' + k[0] + '"' + (k[0] === d.kind ? ' selected' : '') + '>' + k[1] + '</option>').join('')}</select><em>Sorts it into the right bucket, and lets wireless mics pair with their receiver</em></label>
         <label class="dfield wide"><span>Tag name</span><div class="tagrow"><input data-k="name" value="${esc(d.name)}" placeholder="Like RX-1 or WMIC-1" autocapitalize="characters" spellcheck="false"><button type="button" class="btn" id="dauto" title="Suggest a tag name from what it is">${icon('spark')}Auto label</button></div><em id="dtagnote">What your team calls it; it goes on the label. Auto label suggests one from what it is.</em></label>
@@ -636,6 +774,8 @@ async function viewDeviceEdit(id) {
         <label class="dfield"><span>Location</span><select data-k="location" id="dloc"><option value="">Not set</option>${locations.map((l) => '<option' + (l === d.location ? ' selected' : '') + '>' + esc(l) + '</option>').join('')}<option value="__new">+ New location…</option></select><em>Where it lives: a rack, a room, a road case</em></label>
         <div class="dio wide" id="dio"><label class="dfield"><span>Inputs</span><input data-k="inputs" type="number" min="0" max="512" value="${esc(d.inputs || '')}" placeholder="0"><em>For stage boxes and consoles</em></label>
         <label class="dfield"><span>Outputs</span><input data-k="outputs" type="number" min="0" max="512" value="${esc(d.outputs || '')}" placeholder="0"></label></div>
+        <div class="dfield wide drack" id="drack"></div>
+        <div class="dfield wide dpow" id="dpow"></div>
         <div class="dfield wide dman"><span>Manuals and documents</span>${id ? '<div id="dfiles2"></div>' : '<div class="note">Save it first, then upload manuals here.</div>'}
           <label class="dfield" style="margin-top:8px"><span>Manufacturer's page <span class="note">(optional web address)</span></span><input data-k="manual_url" value="${esc(d.manual_url)}" placeholder="https://…" inputmode="url"></label></div>
         <label class="tog dfield wide ${d.networked ? 'on' : ''}"><input type="checkbox" data-k="networked" ${d.networked ? 'checked' : ''}>On the network <em>Has an IP address, a MAC or plugs into a switch</em></label>
@@ -773,14 +913,26 @@ async function viewDeviceEdit(id) {
   if (id) paintFiles($('#dfiles2'), d, full.files || []);
   const r = Rich.create({ md: d.notes, compact: true, placeholder: 'Settings, quirks, how to reset it, who to call…', onChange: (v) => { d.notes = v; dirty(); } });
   $('#dnotes').appendChild(r.el);
-  const photo = () => { $('#dph').innerHTML = d.photo ? '<img src="/uploads/' + esc(d.photo) + '" alt="">' : devThumb({ name: d.name || '?' }, 84); };
+  // highlights are drawn here, in Edit, and saved with the card
+  d.marks = Array.isArray(d.marks) ? d.marks : [];
+  let marksDirty = false;
+  const photo = () => {
+    $('#dph').innerHTML = d.photo ? '<img src="/uploads/' + esc(d.photo) + '" alt="">' : devThumb({ name: d.name || '?' }, 84);
+    $('#dpx').classList.toggle('hide', !d.photo); $('#dmk2').classList.toggle('hide', !d.photo);
+    $('#dpb').textContent = d.photo ? 'Replace photo' : 'Add photo';
+    $('#dmk2 span').textContent = d.marks.length ? 'Edit highlights (' + d.marks.length + ')' : 'Highlight on the photo';
+  };
+  const newPhoto = (pid) => { if (pid === d.photo) return; d.photo = pid; d.marks = []; marksDirty = true; photo(); dirty(); };
   photo();
   $('#dpb').addEventListener('click', () => $('#dpf').click());
-  const px = $('#dpx'); if (px) px.addEventListener('click', () => { d.photo = ''; photo(); dirty(); px.remove(); });
+  $('#dpx').addEventListener('click', () => newPhoto(''));
+  $('#dpc').addEventListener('click', async () => { const pid = await choosePhoto(); if (pid) newPhoto(pid); });
+  $('#dmk2').addEventListener('click', () => marksEditor({ ...d, name: d.name || 'this gear' }, (marks) => { d.marks = marks; marksDirty = true; photo(); dirty(); }, { local: true }));
+  paintRackPower(d, id, dirty);
   $('#dpf').addEventListener('change', async () => {
     const file = $('#dpf').files[0]; if (!file) return;
     $('#eMsg').textContent = 'Uploading photo…';
-    try { const pic = await shrink(file); const up = await call('POST', '/api/uploads', pic.blob, { raw: true, type: pic.type }); d.photo = up.id; photo(); dirty(); }
+    try { const pic = await shrink(file); const up = await call('POST', '/api/uploads', pic.blob, { raw: true, type: pic.type }); newPhoto(up.id); $('#eMsg').textContent = up.reused ? 'That photo is already in LiveGenie: using the one there' : 'Unsaved changes'; }
     catch (e) { toast(e.message, 'bad'); $('#eMsg').textContent = S.dirty ? 'Unsaved changes' : ''; }
   });
   $('#dCancel').addEventListener('click', () => { location.hash = id ? '#/d/' + id : '#/gear'; });
@@ -790,12 +942,15 @@ async function viewDeviceEdit(id) {
     b.qty = ONE_EACH.includes(d.kind) ? 1 : Math.max(1, Math.min(999, Math.round(Number($('#dqty').value) || 1)));
     if (d.kind === 'txmic') { b.capsule_id = /^\d+$/.test(String(d.capsule_id)) ? d.capsule_id : ''; if (d.capsule_id === '__text') b.capsule_typed = true; else delete b.capsule; }
     else delete b.capsule_id;
+    delete b.marks;
+    Object.assign(b, rackPowerBody(d));
     return b;
   };
+  const saveMarks = async (cardId) => { if (marksDirty && d.photo) await call('PUT', '/api/devices/' + cardId + '/marks', { marks: d.marks }); };
   $('#dSave').addEventListener('click', async () => {
     $('#dSave').disabled = true;
     try {
-      if (id) { await call('PUT', '/api/devices/' + id, body()); S.dirty = false; forgetDevices(); toast('Saved', 'ok'); location.hash = '#/d/' + id; }
+      if (id) { await call('PUT', '/api/devices/' + id, body()); await saveMarks(id); S.dirty = false; forgetDevices(); toast('Saved', 'ok'); location.hash = '#/d/' + id; }
       else {
         // wireless: a card for each; anything else: one card with its quantity
         const n = ONE_EACH.includes(d.kind) ? Math.max(1, Math.min(48, Number($('#dqty').value) || 1)) : 1;
@@ -805,8 +960,8 @@ async function viewDeviceEdit(id) {
         const taken = otherNames();
         const nameFor = (i) => { if (!auto) return n === 1 ? d.name : d.name + ' ' + i; const t = i === 1 && autoNamed && n === 1 ? d.name : suggestTag(taken); taken.push(t); return t; };
         for (let i = 1; i <= n; i++) {
-          const one = await call('POST', '/api/devices', { ...body(), name: nameFor(i), ...(n > 1 ? { aliases: [] } : {}), ...(i > 1 && d.kind === 'txmic' && d.capsule_id !== '__text' ? { capsule_id: '' } : {}) });
-          if (i === 1) x = one;
+          const one = await call('POST', '/api/devices', { ...body(), name: nameFor(i), ...(n > 1 ? { aliases: [] } : {}), ...(i > 1 && d.kind === 'txmic' && d.capsule_id !== '__text' ? { capsule_id: '' } : {}), ...(i > 1 ? { rack_id: '', power_pdu: '' } : {}) });
+          if (i === 1) { x = one; await saveMarks(one.id); }
         }
         S.dirty = false; forgetDevices(); toast(n === 1 ? 'Added to the Gear Locker' : n + ' added to the Gear Locker', 'ok');
         location.hash = n === 1 ? '#/d/' + x.id : '#/gear';

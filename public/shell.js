@@ -19,7 +19,7 @@ const Shell = (() => {
   /** Which tab / sidebar item a route belongs to. */
   function sectionOf(p) {
     if (!p.length) return 'home';
-    return { todo: 'todo', search: 'search', gear: 'devices', devices: 'devices', d: 'devices', 'gear-setup': 'devices', map: 'map', patch: 'patch', settings: 'settings', admin: 'admin', s: 'space', p: 'space', new: 'space' }[p[0]] || 'home';
+    return { todo: 'todo', search: 'search', gear: 'devices', devices: 'devices', d: 'devices', 'gear-setup': 'devices', map: 'map', racks: 'racks', patch: 'patch', settings: 'settings', admin: 'admin', s: 'space', p: 'space', new: 'space' }[p[0]] || 'home';
   }
   const EDITING = (p) => (p[0] === 'p' && (p[2] === 'edit')) || p[0] === 'new' || ((p[0] === 'devices' || p[0] === 'gear') && p[1] === 'new') || (p[0] === 'd' && p[2] === 'edit') || p[0] === 'gear-setup';
 
@@ -57,7 +57,7 @@ const Shell = (() => {
           ai('problems', 'Problems', 'alert', st0.problems ? '<b class="cnt bad" title="Open problem reports">' + st0.problems + '</b>' : '') +
           ai('todo', 'To do lists', 'check') + ai('checklog', 'Checklist log', 'clock') +
           ai('setup', 'Equipment setup', 'spark') +
-          ai('church', 'Church', 'image') + ai('notify', 'Notifications', 'bell') + ai('backups', 'Backups', 'box') +
+          ai('church', 'Church', 'image') + ai('notify', 'Notifications', 'bell') + ai('backups', 'Backups', 'box') + ai('storage', 'Storage', 'image') +
           ai('trash', 'Trash', 'trash') + ai('activity', 'Activity', 'clock') + ai('reset', 'Reset', 'restore') + '</div>');
     }
     nav.innerHTML = item('#/', 'Home', 'home', section === 'home') +
@@ -65,6 +65,7 @@ const Shell = (() => {
       item('#/gear', 'Gear Locker', 'box', section === 'devices' && !location.hash.startsWith('#/gear-setup')) +
       item('#/patch', 'Stage patch', 'grid', section === 'patch') +
       item('#/map', 'System map', 'net', section === 'map') +
+      item('#/racks', 'Racks', 'rack', section === 'racks') +
       adm +
       '<div class="shd">Spaces</div>' +
       list.map((s) => {
@@ -91,7 +92,7 @@ const Shell = (() => {
   function paintTabs() {
     const tabs = $('#tabs');
     if (!tabs || !S.state) return;
-    tabs.querySelectorAll('[data-t]').forEach((t) => t.classList.toggle('on', t.dataset.t === section || (t.dataset.t === 'more' && ['space', 'map', 'patch', 'settings', 'admin'].includes(section))));
+    tabs.querySelectorAll('[data-t]').forEach((t) => t.classList.toggle('on', t.dataset.t === section || (t.dataset.t === 'more' && ['space', 'map', 'racks', 'patch', 'settings', 'admin'].includes(section))));
     const b = tabs.querySelector('[data-t=todo] .cnt'), td = S.state.todo || { open: 0, overdue: 0 };
     const tt = tabs.querySelector('[data-t=todo]'); tt.classList.toggle('glow', td.open > 0); tt.classList.toggle('bad', td.overdue > 0);
     b.textContent = td.overdue || td.open || '';
@@ -121,7 +122,7 @@ const Shell = (() => {
       (upd ? row('#/settings/about', 'download', 'Update available', esc(st.update.latest || '')) : '') +
       (can('admin') ? '<button class="mbtn" id="mNew">' + icon('plus') + 'New page</button>' : '') +
       '<div class="mh">Spaces</div>' + list.map((s) => row('#/s/' + esc(s.slug), 'list', esc(s.name), s.pages + ' page' + (s.pages === 1 ? '' : 's'))).join('') +
-      '<div class="mh">More</div>' + row('#/gear', 'box', 'Gear Locker', 'Every piece of gear, its manuals and IP') + row('#/patch', 'grid', 'Stage patch', 'Mic to speaker, every cable') + row('#/map', 'net', 'System map', 'Signal flow' + (can('admin') ? ', network and VLANs' : '')) +
+      '<div class="mh">More</div>' + row('#/gear', 'box', 'Gear Locker', 'Every piece of gear, its manuals and IP') + row('#/patch', 'grid', 'Stage patch', 'Mic to speaker, every cable') + row('#/map', 'net', 'System map', 'Signal flow' + (can('admin') ? ', network and VLANs' : '')) + row('#/racks', 'rack', 'Racks', 'What sits where in each rack, and power') +
       
       (can('admin') ? '<div class="mh">Admin</div>' + row('#/admin/people', 'users', 'Users', 'Admins and users, PINs, phone sign-in') + row('#/admin/spaces', 'list', 'Spaces', 'Make, colour, order, admins only') +
         row('#/admin/problems', 'alert', 'Problems' + (st.problems ? ' · ' + st.problems + ' open' : ''), 'What users reported') + row('#/admin/todo', 'check', 'To do lists', 'Every checklist, its steps and reset times') + row('#/admin/checklog', 'clock', 'Checklist log', 'Who ran what, when') + row('#/admin/setup', 'spark', 'Equipment setup', 'The guided setup: run it again') +

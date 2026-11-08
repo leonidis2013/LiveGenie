@@ -17,6 +17,9 @@ const ROOT = path.join(__dirname, '..');
 const PORT = 18000 + Math.floor(Math.random() * 2000);
 const BASE = 'http://127.0.0.1:' + PORT;
 const DATA = fs.mkdtempSync(path.join(os.tmpdir(), 'livegenie-test-'));
+/** A different picture each time (pictures with the same bytes are stored once). */
+let pngN = 0;
+const uniqPng = () => Buffer.concat([PNG, Buffer.from('lg' + (++pngN))]);
 const PNG = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==', 'base64');
 
 let proc = null;
@@ -184,12 +187,12 @@ test('saving over someone else\'s change is refused; history and restore work', 
 });
 
 test('pictures upload, show on pages, and odd files are refused', async () => {
-  let r = await editor.post('/api/uploads', PNG, { raw: true, type: 'image/png' });
+  let r = await editor.post('/api/uploads', uniqPng(), { raw: true, type: 'image/png' });
   assert.strictEqual(r.status, 200);
   const id = r.data.id;
   r = await editor.post('/api/uploads', Buffer.from('<svg/>'), { raw: true, type: 'image/svg+xml' });
   assert.strictEqual(r.status, 415, 'SVG refused');
-  r = await vol.post('/api/uploads', PNG, { raw: true, type: 'image/png' });
+  r = await vol.post('/api/uploads', uniqPng(), { raw: true, type: 'image/png' });
   assert.strictEqual(r.status, 403);
   r = await editor.post('/api/pages', { title: 'Rack photo', space: 'video-stream', blocks: [{ type: 'image', upload: id, caption: 'Front AV rack' }] });
   assert.strictEqual(r.status, 200);
@@ -198,7 +201,7 @@ test('pictures upload, show on pages, and odd files are refused', async () => {
   r = await vol.get('/uploads/' + id);
   assert.strictEqual(r.status, 200);
   assert.strictEqual(r.type, 'image/png');
-  assert.ok(Buffer.compare(r.data, PNG) === 0);
+  assert.ok(Buffer.compare(r.data, PNG) === 0 || r.data.subarray(0, PNG.length).equals(PNG));
 });
 
 test('delete moves a page to the trash and it can come back', async () => {
@@ -697,7 +700,7 @@ test('the model list starts empty and grows as gear is added; channel names and 
 });
 
 test('highlight boxes on a gear photo: admins draw them, everyone sees them, a new photo clears them', async () => {
-  const up = (await admin.post('/api/uploads', PNG, { raw: true, type: 'image/png' })).data.id;
+  const up = (await admin.post('/api/uploads', uniqPng(), { raw: true, type: 'image/png' })).data.id;
   let r = await admin.post('/api/devices', { name: 'Rack PDU', category: 'power' });
   const id = r.data.id;
   assert.strictEqual((await admin.put('/api/devices/' + id + '/marks', { marks: [{ x: 0.1, y: 0.1, w: 0.2, h: 0.2 }] })).status, 400, 'needs a photo first');
@@ -714,7 +717,7 @@ test('highlight boxes on a gear photo: admins draw them, everyone sees them, a n
   // editing other fields keeps them; a new photo clears them
   await admin.put('/api/devices/' + id, { ...seen, location: 'Rack' });
   assert.strictEqual((await vol.get('/api/devices/' + id)).data.device.marks.length, 2);
-  const up2 = (await admin.post('/api/uploads', PNG, { raw: true, type: 'image/png' })).data.id;
+  const up2 = (await admin.post('/api/uploads', uniqPng(), { raw: true, type: 'image/png' })).data.id;
   await admin.put('/api/devices/' + id, { ...seen, photo: up2 });
   assert.strictEqual((await vol.get('/api/devices/' + id)).data.device.marks.length, 0);
 });
@@ -822,7 +825,7 @@ test('gear knows what it is: wireless mics pair with a receiver, capsules fit a 
   const dir = fs2.mkdtempSync(path.join(os2.tmpdir(), 'lg-kind-'));
   const DBm = require(path.join(ROOT, 'lib', 'db'));
   const db1 = DBm.open(path.join(dir, 'x.db'));
-  db1.exec('ALTER TABLE devices DROP COLUMN qty; ALTER TABLE patch DROP COLUMN rev; ALTER TABLE patch_versions DROP COLUMN rev; ALTER TABLE patch_versions DROP COLUMN kind'); db1.exec(['kind', 'pair_id', 'txtype', 'capsule', 'freq'].map((c) => 'ALTER TABLE devices DROP COLUMN ' + c).join('; ')); db1.prepare('UPDATE schema_version SET v = 12').run();
+  db1.exec('DROP TABLE racks; DROP INDEX uploads_sha; ALTER TABLE uploads DROP COLUMN sha256; ' + ['rack_id', 'rack_u', 'rack_h', 'rack_side', 'shelf_id', 'power_w', 'power_pdu', 'power_outlet', 'power_max'].map((c) => 'ALTER TABLE devices DROP COLUMN ' + c).join('; ')); db1.exec('ALTER TABLE devices DROP COLUMN qty; ALTER TABLE patch DROP COLUMN rev; ALTER TABLE patch_versions DROP COLUMN rev; ALTER TABLE patch_versions DROP COLUMN kind'); db1.exec(['kind', 'pair_id', 'txtype', 'capsule', 'freq'].map((c) => 'ALTER TABLE devices DROP COLUMN ' + c).join('; ')); db1.prepare('UPDATE schema_version SET v = 12').run();
   db1.prepare("INSERT INTO settings (key, value) VALUES ('gear_models', ?)").run(JSON.stringify([{ kind: 'speaker', make: 'Brand', model: 'Col 70' }]));
   db1.prepare("INSERT INTO devices (name, aliases, category, make, model, location, ip, mac, photo, manual_url, notes, created_at, updated_at) VALUES ('Brand Col 70', '[]', 'audio', 'Brand', 'COL 70', '', '', '', '', '', '', 1, 1)").run();
   db1.close();
@@ -924,13 +927,93 @@ test('stage patch 0.23: signal stages and network cables to switch ports', async
   assert.ok(m1);
 });
 
+test('racks: gear placed by U, half-width side by side, shelves, panels, nothing overlaps; power plugs one per outlet', async () => {
+  const RC = require(path.join(ROOT, 'public', 'rackcore.js'));
+  const r = (await admin.post('/api/racks', { name: 'Test Rack', units: 12, location: 'Booth' })).data.id;
+  assert.ok(r);
+  assert.strictEqual((await admin.post('/api/racks', { name: 'test rack' })).status, 400, 'names are unique');
+  assert.strictEqual((await vol.post('/api/racks', { name: 'Nope' })).status, 403);
+  const mk = async (name, extra) => (await admin.post('/api/devices', { name, category: 'audio', ...extra })).data.id;
+  const sw = await mk('Test SW', { kind: 'network' }), amp = await mk('Test AMP', { kind: 'amp' });
+  const hl = await mk('Test Half L', { kind: 'processor' }), hr = await mk('Test Half R', { kind: 'processor' }), box = await mk('Test Box', { kind: 'other' });
+  const pdu = await mk('Test PDU', { kind: 'power', outputs: 4, power_max: 1800 });
+  const lay = (gear, items) => admin.put('/api/racks/' + r + '/layout', { items: items || [{ id: 'sh1', type: 'shelf', u: 6, h: 1 }, { id: 'b1', type: 'blank', u: 12, h: 1 }], gear });
+  let res = await lay([{ id: sw, u: 1, h: 1 }, { id: amp, u: 2, h: 2 }, { id: hl, u: 4, side: 'L' }, { id: hr, u: 4, side: 'R' }, { id: box, shelf: 'sh1' }, { id: pdu, u: 11 }]);
+  assert.strictEqual(res.status, 200, JSON.stringify(res.data));
+  assert.strictEqual(res.data.used, 7, 'U1, U2–3, U4 (two halves), U6 shelf, U11, U12 blank');
+  assert.strictEqual((await lay([{ id: sw, u: 1 }, { id: amp, u: 1, h: 2 }])).status, 400, 'two full-width items on one U');
+  assert.strictEqual((await lay([{ id: hl, u: 4, side: 'L' }, { id: hr, u: 4, side: 'L' }])).status, 400, 'two on the same half');
+  assert.strictEqual((await lay([{ id: amp, u: 12, h: 2 }], [])).status, 400, 'runs past the bottom');
+  assert.strictEqual((await lay([{ id: box, shelf: 'nope' }])).status, 400, 'a shelf that is not there');
+  assert.strictEqual((await lay([{ id: sw, u: 6 }])).status, 400, 'a panel is in the way');
+  // the Gear Locker form checks a spot too
+  const dev = (await admin.get('/api/devices/' + sw)).data.device;
+  assert.deepStrictEqual([dev.rack_id, dev.rack_u, dev.rack_h], [r, 1, 1]);
+  assert.strictEqual((await admin.put('/api/devices/' + sw, { ...dev, rack_id: r, rack_u: 2, rack_h: 1 })).status, 400, 'the amp is at U2');
+  assert.strictEqual((await admin.get('/api/devices/' + sw)).data.device.rack_u, 1, 'a refused move changes nothing');
+  assert.strictEqual((await admin.put('/api/devices/' + sw, { ...dev, rack_id: r, rack_u: 5, rack_h: 1 })).status, 200);
+  // power: one plug per outlet, only into a power strip, totals and over-limit
+  let p = await admin.put('/api/racks/' + r + '/power', { plugs: [{ id: amp, pdu, outlet: 1, watts: 1500 }, { id: sw, pdu, outlet: 2, watts: 400 }] });
+  assert.strictEqual(p.status, 200, JSON.stringify(p.data));
+  const strip = p.data.power.find((x) => x.id === pdu);
+  assert.deepStrictEqual([strip.watts, strip.max, strip.over, strip.plugs.length], [1900, 1800, true, 2]);
+  assert.strictEqual((await admin.put('/api/racks/' + r + '/power', { plugs: [{ id: box, pdu, outlet: 1 }] })).status, 400, 'outlet 1 is taken');
+  assert.strictEqual((await admin.put('/api/racks/' + r + '/power', { plugs: [{ id: box, pdu, outlet: 9 }] })).status, 400, 'the strip has 4 outlets');
+  assert.strictEqual((await admin.put('/api/racks/' + r + '/power', { plugs: [{ id: box, pdu: amp, outlet: 1 }] })).status, 400, 'an amp is not a power strip');
+  // everyone can see the rack; admin-only gear stays hidden
+  await admin.put('/api/devices/' + box, { ...(await admin.get('/api/devices/' + box)).data.device, tech_only: true });
+  const seen = (await vol.get('/api/racks/' + r)).data;
+  assert.ok(seen.gear.length && !seen.gear.some((g) => g.id === box));
+  assert.ok((await vol.get('/api/racks')).data.racks.some((x) => x.id === r));
+  // where a spot sits on the photo: from the rails
+  const rails = { tl: { x: 0.1, y: 0.1 }, tr: { x: 0.9, y: 0.1 }, bl: { x: 0.1, y: 0.9 }, br: { x: 0.9, y: 0.9 } };
+  const reg = RC.region(rails, 10, 1, 2, 'R');
+  assert.deepStrictEqual([reg.x, reg.y, Math.round(reg.w * 100), Math.round(reg.h * 100)], [0.5, 0.1, 40, 16]);
+  // a smaller rack must still hold its gear; deleting a rack takes the gear out of it
+  assert.strictEqual((await admin.put('/api/racks/' + r, { units: 4 })).status, 400);
+  assert.strictEqual((await admin.del('/api/racks/' + r)).status, 200);
+  assert.strictEqual((await admin.get('/api/devices/' + amp)).data.device.rack_id, null);
+  // deleting a power strip unplugs what was on it
+  await admin.del('/api/devices/' + pdu);
+  assert.strictEqual((await admin.get('/api/devices/' + amp)).data.device.power_pdu, null);
+  for (const id of [sw, amp, hl, hr, box]) await admin.del('/api/devices/' + id);
+});
+
+test('pictures: the same picture uploaded again is stored once; removing unused pictures never touches one in use', async () => {
+  const pic = uniqPng();
+  const a1 = (await admin.post('/api/uploads', pic, { raw: true, type: 'image/png' })).data;
+  const a2 = (await admin.post('/api/uploads', pic, { raw: true, type: 'image/png' })).data;
+  assert.strictEqual(a1.id, a2.id, 'same bytes, same picture');
+  assert.ok(a2.reused);
+  const used = (await admin.post('/api/uploads', uniqPng(), { raw: true, type: 'image/png' })).data.id;
+  const spare = (await admin.post('/api/uploads', uniqPng(), { raw: true, type: 'image/png' })).data.id;
+  const d = (await admin.post('/api/devices', { name: 'Pic Test Gear', photo: used })).data.id;
+  const rk = (await admin.post('/api/racks', { name: 'Pic Test Rack', photo: a1.id })).data.id;
+  const list = (await admin.get('/api/uploads')).data.uploads;
+  assert.ok(list.find((u) => u.id === used).uses.some((x) => /Pic Test Gear/.test(x)));
+  assert.ok(list.find((u) => u.id === a1.id).uses.some((x) => /Pic Test Rack/.test(x)));
+  assert.strictEqual((await vol.get('/api/uploads')).status, 403);
+  const st = (await admin.get('/api/admin/storage')).data;
+  assert.ok(st.unused.list.some((u) => u.id === spare) && !st.unused.list.some((u) => u.id === used || u.id === a1.id));
+  // ask to remove all three: only the spare goes
+  const cl = (await admin.post('/api/admin/storage/clean', { ids: [spare, used, a1.id] })).data;
+  assert.strictEqual(cl.removed, 1);
+  const after = (await admin.get('/api/uploads')).data.uploads.map((u) => u.id);
+  assert.ok(after.includes(used) && after.includes(a1.id) && !after.includes(spare));
+  // pictures on pages and the church logo count as used too
+  const ids = (await admin.get('/api/uploads')).data.uploads.filter((u) => u.uses.some((x) => /^Page: |Church logo|Earlier version/.test(x))).length;
+  assert.ok(ids >= 1, 'pictures on pages are in use');
+  await admin.del('/api/racks/' + rk); await admin.del('/api/devices/' + d);
+  assert.strictEqual((await admin.post('/api/admin/storage/clean', { ids: [used, a1.id] })).data.removed, 2, 'no longer used once the card and rack are gone');
+});
+
 test('checklists that were on pages move to To do, keeping their ticks and log', async () => {
   const os2 = require('os'), fs2 = require('fs');
   const dir = fs2.mkdtempSync(path.join(os2.tmpdir(), 'lg-todo-'));
   const DBm = require(path.join(ROOT, 'lib', 'db'));
   // a database from before 0.20: back to migration 10, then a page with a checklist and a tick
   const db1 = DBm.open(path.join(dir, 'x.db'));
-  db1.exec('ALTER TABLE devices DROP COLUMN qty; ALTER TABLE patch DROP COLUMN rev; ALTER TABLE patch_versions DROP COLUMN rev; ALTER TABLE patch_versions DROP COLUMN kind'); db1.exec('DROP TABLE todo_lists; ALTER TABLE devices DROP COLUMN networked; ' + ['kind', 'pair_id', 'txtype', 'capsule', 'freq'].map((c) => 'ALTER TABLE devices DROP COLUMN ' + c).join('; ')); db1.prepare('UPDATE schema_version SET v = 10').run();
+  db1.exec('DROP TABLE racks; DROP INDEX uploads_sha; ALTER TABLE uploads DROP COLUMN sha256; ' + ['rack_id', 'rack_u', 'rack_h', 'rack_side', 'shelf_id', 'power_w', 'power_pdu', 'power_outlet', 'power_max'].map((c) => 'ALTER TABLE devices DROP COLUMN ' + c).join('; ')); db1.exec('ALTER TABLE devices DROP COLUMN qty; ALTER TABLE patch DROP COLUMN rev; ALTER TABLE patch_versions DROP COLUMN rev; ALTER TABLE patch_versions DROP COLUMN kind'); db1.exec('DROP TABLE todo_lists; ALTER TABLE devices DROP COLUMN networked; ' + ['kind', 'pair_id', 'txtype', 'capsule', 'freq'].map((c) => 'ALTER TABLE devices DROP COLUMN ' + c).join('; ')); db1.prepare('UPDATE schema_version SET v = 10').run();
   db1.prepare("INSERT INTO spaces (slug, name) VALUES ('audio', 'Audio')").run();
   const blocks = [{ type: 'text', md: 'Before' }, { type: 'checklist', id: 'abc12345', title: 'Desk check', items: ['Faders down', 'Scenes loaded'], schedule: [] }];
   db1.prepare("INSERT INTO pages (space_id, title, blocks, version, created_at, updated_at) VALUES (1, 'Sunday desk', ?, 1, 1, 1)").run(JSON.stringify(blocks));
@@ -1064,7 +1147,7 @@ test('spaces belong to the admin: make, rename, admins only, order, remove (movi
 });
 
 test('church name and logo; the logo shows before signing in', async () => {
-  const up = await admin.post('/api/uploads', PNG, { raw: true, type: 'image/png' });
+  const up = await admin.post('/api/uploads', uniqPng(), { raw: true, type: 'image/png' });
   assert.strictEqual((await vol.put('/api/org', { name: 'X' })).status, 403);
   const r = await admin.put('/api/org', { name: 'Rolling Hills Community Church', logo: up.data.id });
   assert.strictEqual(r.data.org.name, 'Rolling Hills Community Church');

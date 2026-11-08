@@ -1945,7 +1945,7 @@ const PatchView = (() => {
      */
     function addPane(host) {
       const onPatch = new Set(((typeof DEV !== 'undefined' && DEV.list) || []).filter((d) => unitsOf(d.id) >= (typeof qtyOf === 'function' ? qtyOf(d) : 1)).map((d) => d.id));
-      const devs = ((typeof DEV !== 'undefined' && DEV.list) || []).filter((d) => !onPatch.has(d.id) && (['audio', 'network', 'computer'].includes(d.category) || P.KINDS[d.kind]));
+      const devs = ((typeof DEV !== 'undefined' && DEV.list) || []).filter((d) => !onPatch.has(d.id) && d.kind !== 'power' && (['audio', 'network', 'computer'].includes(d.category) || P.KINDS[d.kind]));
       const pre = st.prefill || {};
       const kind = pre.kind || st.newKind || 'mic';
       const models = GearModels.all();

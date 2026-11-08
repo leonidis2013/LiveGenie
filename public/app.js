@@ -39,6 +39,8 @@ const ICONS = {
   user: '<circle cx="12" cy="8" r="4"/><path d="M4 21c1-4 4-6 8-6s7 2 8 6"/>',
   users: '<circle cx="9" cy="8" r="3.5"/><path d="M2.5 20c.8-3.5 3.3-5.5 6.5-5.5s5.7 2 6.5 5.5"/><path d="M16 4.5a3.5 3.5 0 0 1 0 7M18 14.8c2 .8 3.2 2.6 3.6 5.2"/>',
   box: '<path d="M3 7l9-4 9 4v10l-9 4-9-4z"/><path d="M3 7l9 4 9-4M12 11v10"/>',
+  rack: '<rect x="4" y="3" width="16" height="18" rx="1.5"/><path d="M4 8h16M4 13h16M4 18h16M7 5.5h.01M7 10.5h.01M7 15.5h.01"/>',
+  plug: '<path d="M9 3v5M15 3v5M6 8h12v3a6 6 0 0 1-12 0zM12 17v4"/>',
   list: '<path d="M8 6h13M8 12h13M8 18h13M3 6h.01M3 12h.01M3 18h.01"/>',
   restore: '<path d="M3 12a9 9 0 1 0 3-6.7L3 8"/><path d="M3 3v5h5"/>',
   download: '<path d="M12 4v11M7 10l5 5 5-5M4 20h16"/>',
@@ -1011,7 +1013,7 @@ async function viewSearch(q) {
 const TABS = [['display', 'Display', 'sun', 'user'], ['account', 'Account', 'user', 'user'], ['about', 'About', 'spark', 'user']];
 const ADMIN_TABS = [
   ['spaces', 'Spaces', 'list'], ['people', 'People', 'users'], ['problems', 'Problems', 'alert'], ['todo', 'To do lists', 'check'], ['checklog', 'Checklist log', 'clock'], ['setup', 'Equipment setup', 'spark'],
-  ['church', 'Church', 'image'], ['notify', 'Notifications', 'bell'], ['backups', 'Backups', 'box'], ['trash', 'Trash', 'trash'], ['activity', 'Activity', 'clock'], ['reset', 'Reset', 'restore']
+  ['church', 'Church', 'image'], ['notify', 'Notifications', 'bell'], ['backups', 'Backups', 'box'], ['storage', 'Storage', 'image'], ['trash', 'Trash', 'trash'], ['activity', 'Activity', 'clock'], ['reset', 'Reset', 'restore']
 ];
 
 /** The admin area: everything that builds or runs LiveGenie (users only see help pages, checklists and the drawings). */
@@ -1024,7 +1026,7 @@ async function viewAdmin(tab) {
     <div class="setup adminv"><div class="side">${ADMIN_TABS.map((t) => '<button data-tab="' + t[0] + '" class="' + (t[0] === tab ? 'on' : '') + '">' + icon(t[2]) + t[1] + (t[0] === 'problems' && n ? '<em class="cnt bad">' + n + '</em>' : '') + '</button>').join('')}</div><div class="pane" id="pane"></div></div>`;
   $$('[data-tab]').forEach((b) => b.addEventListener('click', () => { location.hash = '#/admin/' + b.dataset.tab; }));
   const pane = $('#pane');
-  await ({ spaces: tabSpaces, people: tabUsers, problems: tabProblems, todo: tabTodoLists, checklog: tabChecklog, setup: tabGearSetup, church: tabChurch, notify: tabNotify, backups: tabBackups, trash: tabTrash, activity: tabActivity, reset: tabReset }[tab])(pane);
+  await ({ spaces: tabSpaces, people: tabUsers, problems: tabProblems, todo: tabTodoLists, checklog: tabChecklog, setup: tabGearSetup, church: tabChurch, notify: tabNotify, backups: tabBackups, storage: tabStorage, trash: tabTrash, activity: tabActivity, reset: tabReset }[tab])(pane);
 }
 
 async function viewSettings(tab) {
@@ -1230,6 +1232,24 @@ function reportProblem(where, ctx = {}) {
 
 // ----- admin: the checklist log -----
 /** Admin › Equipment setup: the guided setup runs once; here is where it runs again. */
+/** Admin › Storage: how much space pictures and documents take, the biggest, and pictures nothing uses (to clear out). */
+async function tabStorage(pane) {
+  const d = await get('/api/admin/storage');
+  const sz = (n) => (n > 1048576 ? (n / 1048576).toFixed(1) + ' MB' : Math.max(n ? 1 : 0, Math.round(n / 1024)) + ' KB');
+  const pic = (u) => '<div class="stpic"><img src="/uploads/' + esc(u.id) + '" alt="" loading="lazy"><div><b>' + sz(u.bytes) + '</b><span>' + esc(u.uses.length ? u.uses.slice(0, 2).join(', ') + (u.uses.length > 2 ? ' +' + (u.uses.length - 2) : '') : 'Not used anywhere') + '</span></div></div>';
+  pane.innerHTML = '<p class="note pnote">The same picture uploaded again is stored once. A rack photo can be used by every piece of gear in the rack, so there is no need to add it to each card.</p>' +
+    '<div class="card"><h2>Space used</h2>' + setRow('Pictures', d.pictures.count + ' pictures', '<b>' + sz(d.pictures.bytes) + '</b>') + setRow('Manuals and documents', d.files.count + ' files', '<b>' + sz(d.files.bytes) + '</b>') + '</div>' +
+    '<div class="card"><h2>Pictures nothing uses</h2>' + (d.unused.count ? '<p class="note">Not on any page (or its history, or in the trash), any Gear Locker card, any rack or the church logo. ' + d.unused.count + ' picture' + (d.unused.count === 1 ? '' : 's') + ', ' + sz(d.unused.bytes) + '.</p><div class="stgrid">' + d.unused.list.slice(0, 24).map(pic).join('') + '</div>' +
+      '<div class="acts" style="justify-content:flex-start"><button class="btn danger" id="stClean">' + icon('trash') + 'Remove ' + d.unused.count + ' unused picture' + (d.unused.count === 1 ? '' : 's') + '</button></div>' : '<p class="note">None. Every picture is in use.</p>') + '</div>' +
+    '<div class="card"><h2>Biggest pictures</h2><div class="stgrid">' + d.biggest.map(pic).join('') + '</div></div>' +
+    (d.biggestFiles.length ? '<div class="card"><h2>Biggest documents</h2>' + d.biggestFiles.map((f) => setRow(esc(f.name), esc(f.device || ''), sz(f.bytes))).join('') + '</div>' : '');
+  const b = $('#stClean', pane);
+  if (b) b.addEventListener('click', async () => {
+    if (!await confirmBox('Remove ' + d.unused.count + ' unused picture' + (d.unused.count === 1 ? '' : 's') + '?', 'Only pictures nothing uses are removed (checked again now). Backups made before today still have them.', 'Remove', true)) return;
+    try { const r = await call('POST', '/api/admin/storage/clean', { ids: d.unused.list.map((u) => u.id) }); toast(r.removed + ' removed, ' + sz(r.bytes) + ' freed', 'ok'); tabStorage(pane); } catch (e) { toast(e.message, 'bad'); }
+  });
+}
+
 function tabGearSetup(pane) {
   const g = (S.state && S.state.gearSetup) || {};
   pane.innerHTML = '<p class="note pnote">The guided equipment setup walks through the console, stage boxes, wireless, in-ears and PA, makes their Gear Locker cards and puts them on the stage patch. It runs once when LiveGenie is new; run it again here to add more gear (what is already there is kept).</p>' +
@@ -1565,6 +1585,7 @@ async function route() {
     else if (p[0] === 'p' && p[1]) await viewPage(p[1], qs.get('c'));
     else if (p[0] === 'new') await viewEdit(null, qs.get('space'));
     else if (p[0] === 'map') await viewMap(p[1]);
+    else if (p[0] === 'racks') await (p[1] ? viewRack(p[1], p[2]) : viewRacks());
     else if (p[0] === 'patch') await PatchView.view(qs);
     else if (p[0] === 'gear-setup') await viewGearSetup(qs);
     else if ((p[0] === 'devices' || p[0] === 'gear') && p[1] === 'new') await viewDeviceEdit(null);

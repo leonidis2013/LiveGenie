@@ -134,3 +134,6 @@
 .sjrow.on { border-color:var(--acc); }
 .sjrow span { font-size:12px; color:var(--dim); font-weight:400; }
 .sjrow u { color:var(--acc); cursor:pointer; }
+
+/* edit mode banner (0.25.4) */
+.rkmode { margin:4px 0 10px; padding:8px 12px; border-radius:10px; background:color-mix(in srgb, var(--acc) 12%, transparent); border:1px solid color-mix(in srgb, var(--acc) 35%, transparent); }

@@ -50,12 +50,15 @@ function rackDialog(rk) {
   });
 }
 
-async function viewRack(id) {
+/** A rack. View mode by default (look, step through the photo, print); #/racks/ID/edit is edit mode, for admins. */
+async function viewRack(id, mode) {
   let data;
   try { data = await get('/api/racks/' + id); }
   catch (e) { if (e.status === 404) { app.innerHTML = '<div class="card empty"><b>That rack is not here any more.</b><div style="margin-top:12px"><a class="btn" href="#/racks">Racks</a></div></div>'; return; } throw e; }
   await loadDevices(true);
-  const admin = can('admin');
+  const canEdit = can('admin');
+  // everything that changes the rack is only there in edit mode
+  const admin = canEdit && mode === 'edit';
   let rack = data.rack;
   setTitle(rack.name);
   // the layout as it is being arranged
@@ -70,7 +73,9 @@ async function viewRack(id) {
     <div class="crumbs"><a href="#/">Home</a><span>/</span><a href="#/racks">Racks</a></div>
     <div class="bar"><div class="grow"><h1 class="title">${esc(rack.name)}</h1><div class="meta" style="margin:0"><span class="chip">${rack.units}U</span>${rack.location ? '<span>' + icon('pin') + esc(rack.location) + '</span>' : ''}<span id="rkuse"></span></div></div>
       ${admin ? '<button class="btn" id="rkEd">' + icon('edit') + 'Details</button><button class="btn" id="rkPh">' + icon('image') + (rack.photo ? 'Photo' : 'Add photo') + '</button>' : ''}
-      <button class="btn" id="rkPr">${icon('pdf')}Print</button></div>
+      ${admin ? '' : '<button class="btn" id="rkPr">' + icon('pdf') + 'Print</button>'}
+      ${admin ? '<button class="btn primary" id="rkDone">' + icon('check') + 'Done</button>' : canEdit ? '<a class="btn primary" href="#/racks/' + rack.id + '/edit">' + icon('edit') + 'Edit</a>' : ''}</div>
+    ${admin ? '<div class="rkmode note">Editing: changes save as you go. Tap <b>Done</b> when you are finished.</div>' : ''}
     ${rack.notes ? '<div class="doc rknotes">' + md(rack.notes) + '</div>' : ''}
     <div class="rkmain">
       <div class="rkcol"><div class="rkhd"><h2>Front</h2><span class="note" id="rkst"></span></div>
@@ -175,7 +180,7 @@ async function viewRack(id) {
   // ---- the photo, each piece glowing in its spot
   function paintPhoto() {
     const host = $('#rkphoto');
-    if (!rack.photo) { host.innerHTML = '<div class="rkhd"><h2>Photo</h2></div><div class="card empty">' + (admin ? 'Add a photo of the front of the rack, then line it up: every piece of gear in it then shows its spot in the photo, on its own card too.' : 'No photo of this rack yet.') + '</div>'; return; }
+    if (!rack.photo) { host.innerHTML = '<div class="rkhd"><h2>Photo</h2></div><div class="card empty">' + (admin ? 'Add a photo of the front of the rack (Photo, at the top), then line it up: every piece of gear in it then shows its spot in the photo, on its own card too.' : 'No photo of this rack yet.' + (canEdit ? ' Tap Edit to add one.' : '')) + '</div>'; return; }
     const rows = gearRows().filter((g) => g.rack_u || g.shelf_id).sort((a, b) => ((a.rack_u || (items.find((x) => x.id === a.shelf_id) || {}).u || 99) - (b.rack_u || (items.find((x) => x.id === b.shelf_id) || {}).u || 99)) || String(a.rack_side).localeCompare(String(b.rack_side)));
     const marks = rows.map((g) => rackMark(g, rack));
     host.innerHTML = '<div class="rkhd"><h2>Photo</h2>' + (admin ? '<span class="rkbtns">' + (rows.length ? '<button class="btn sm" id="rkSpots">' + icon('edit') + 'Adjust spots</button>' : '') + '<button class="btn sm" id="rkLine">' + icon('edit') + 'Line up the photo</button></span>' : '') + '</div><div id="rkspot" class="capped">' + marksView(rack.photo, marks, { location: rack.name }) + '</div>' +
@@ -257,7 +262,7 @@ async function viewRack(id) {
     const strips = data.power || [];
     const rows = gearRows().filter((g) => g.kind !== 'power');
     const unplugged = rows.filter((g) => !g.power_pdu);
-    if (!strips.length) { host.innerHTML = '<div class="card empty">No power strip or PDU in this rack.' + (admin ? ' Add one to the Gear Locker (What is it? Power strip or PDU, with its outlets as Outputs), then place it here.' : '') + '</div>'; return; }
+    if (!strips.length) { host.innerHTML = '<div class="card empty">No power strip or PDU in this rack.' + (admin ? ' Add one with + Power strip above the rack, or from the Gear Locker, then place it.' : '') + '</div>'; return; }
     host.innerHTML = strips.map((p) => {
       const n = Math.max(p.outlets || 0, ...p.plugs.map((x) => x.outlet || 0), 1);
       return '<div class="card rkpdu' + (p.over ? ' over' : '') + '"><div class="rkhd"><b>' + esc(p.name) + (p.model && p.model !== p.name ? ' <span class="note">' + esc(p.model) + '</span>' : '') + '</b><span class="rkw">' + p.watts + ' W' + (p.max ? ' of ' + p.max + ' W' : '') + (p.over ? ' · over the limit' : '') + '</span></div>' +
@@ -418,7 +423,9 @@ async function viewRack(id) {
       lineUp(rack, async (rails) => { await call('PUT', '/api/racks/' + rack.id, { rails }); rack.rails = rails; paintPhoto(); toast('Photo lined up', 'ok'); });
     }));
   }
-  $('#rkPr').addEventListener('click', () => printRack(rack, elevation(true), tableHtml()));
+  const pr = $('#rkPr'); if (pr) pr.addEventListener('click', () => printRack(rack, elevation(true), tableHtml()));
+  // Done: wait for the last save, then back to view mode
+  const dn = $('#rkDone'); if (dn) dn.addEventListener('click', async () => { dn.disabled = true; try { await saving; } catch (e) { /* the save said why */ } location.hash = '#/racks/' + rack.id; });
   paintAll();
 }
 

@@ -4,7 +4,7 @@
 
 The Rolling Hills Community Church AVL knowledge base: one web app where volunteers find how our system works, how to run a service and how to fix what broke. Part of the Live series (LiveMic, LiveCompanion, LivePi, LiveVoice).
 
-Version 0.25.3 · © 2026 Jerod Ulicki
+Version 0.25.4 · © 2026 Jerod Ulicki
 
 ## What it does
 
@@ -118,7 +118,8 @@ Run it on the TrueNAS host and reach it from the AVL and office VLANs through th
 | 0.11.0 | Phone layout (bottom tabs, + button, bottom sheets, To do screen) and desktop layout (sidebar with spaces and pages, On this page outline) |
 | 0.12.0 | Phone sign in: tap your name, PIN pad, and QR code sign in from a signed-in computer |
 | 0.13.0 | Stage patch: one visual signal-flow drawing for the whole system (equipment pane, drag to connect, follow a signal, overview and sockets, cable styles, checks), with the input, output, wireless, in-ear and cable lists and the PDF made from it; old patch lists moved onto it |
-| 0.25.3 | Photo spotlight shows one label, not two: the caption carries the name (with the tag in front when it adds something), and the small tag on the box only shows when there is no caption title (this release) |
+| 0.25.4 | Racks have a clear **view mode** and **edit mode**, like the stage patch: a rack opens in view mode (look, tap gear, step through the photo, Print), and admins tap **Edit** to arrange it (toolbar, Gear Locker list, drag and resize, power outlets, Details, Photo, Adjust spots, Line up the photo); changes save as you go and **Done** goes back to view mode (this release) |
+| 0.25.3 | Photo spotlight shows one label, not two: the caption carries the name (with the tag in front when it adds something), and the small tag on the box only shows when there is no caption title |
 | 0.25.2 | Racks: **Adjust spots** on the rack photo: drag and resize each piece's box to where it really is (a half-U gap, gear a hole off the U lines, a photo taken at an angle), with Back to the grid per piece or for all; gear cards use the adjusted spot too. **Patch panels** by type: network (RJ45), audio (XLR / TRS) and AV / video (BNC, HDMI), drawn with their jacks |
 | 0.25.1 | Racks: add patch panels, cable managers and **custom items** of your own (a rack light, a monitor, a keyboard tray, any height); add a **network switch** (with its ports) or a **power strip** (with its outlets and limit) straight from the rack page, which makes its Gear Locker card and lets you tap a slot to place it |
 | 0.25.0 | **Racks:** a Racks page with a front elevation for each rack (U numbers, full and half-width gear, shelves, blanks, vents, drawers, free space); drag or tap Gear Locker cards into U slots, move and resize, overlaps refused; line up a photo of the rack once (four corner handles) and every piece glows in its spot in the spotlight look; power strips and PDUs with outlets, what plugs into each and total watts against the limit; a printable rack elevation with an item table. Racked gear with no photo of its own shows its spot in the rack photo; Gear Locker gets a By rack view and Rack and Power fields. **Pictures:** identical uploads are stored once, a picker to choose a photo already in LiveGenie, and Admin › Storage to see what uses space and remove unused pictures (never one in use). **Highlights** are drawn from the Edit form (Highlight on the photo), card photos are smaller (tap for full screen), and spotlight captions scale with the photo |

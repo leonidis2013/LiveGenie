@@ -509,12 +509,12 @@ function marksView(photo, marks, v) {
   const where = String(v.location || '').toUpperCase();
   const fallback = [v.make, v.model].filter(Boolean).join(' ') || v.name || '';
   const boxes = marks.map((m, i) => '<div class="spk" data-mi="' + i + '" style="left:' + (m.x * 100) + '%;top:' + (m.y * 100) + '%;width:' + (m.w * 100) + '%;height:' + (m.h * 100) + '%;--mc:' + MARK_COLORS[m.color || 'blue'] + '">' +
-    (m.tag ? '<em class="sptag">' + esc(m.tag) + '</em>' : '') + '</div>').join('');
+    (m.tag && !m.label ? '<em class="sptag">' + esc(m.tag) + '</em>' : '') + '</div>').join('');
   const caps = marks.map((m, i) => {
     const below = m.y + m.h < 0.62, right = m.x + m.w / 2 > 0.5;
     const style = (below ? 'top:calc(' + ((m.y + m.h) * 100) + '% + 12px);' : 'bottom:calc(' + ((1 - m.y) * 100) + '% + 12px);') + (right ? 'right:' + Math.max(2, (1 - m.x - m.w) * 100) + '%;' : 'left:' + Math.max(2, m.x * 100) + '%;');
     return '<div class="spcap" data-cap="' + i + '" style="' + style + '--mc:' + MARK_COLORS[m.color || 'blue'] + '">' + (where ? '<span class="spwhere">' + esc(where) + '</span>' : '') +
-      '<b class="sptitle">' + esc(m.label || fallback || 'Highlight ' + (i + 1)) + '</b>' + (m.note ? '<p>' + esc(m.note) + '</p>' : '') + '</div>';
+      '<b class="sptitle">' + esc(m.label ? (m.tag && !Tags.norm(m.label).includes(Tags.norm(m.tag)) ? m.tag + ' · ' + m.label : m.label) : (m.tag || fallback || 'Highlight ' + (i + 1))) + '</b>' + (m.note ? '<p>' + esc(m.note) + '</p>' : '') + '</div>';
   }).join('');
   // the captions sit outside the dimmed photo so they are never cut off; on a phone they drop below it
   return '<div class="mkwrap spot"><div class="spstage"><div class="mkpic spotpic"><img src="/uploads/' + esc(photo) + '" alt="">' + boxes +

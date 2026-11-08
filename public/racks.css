@@ -116,3 +116,21 @@
 .rktools .rksep { width:1px; height:22px; background:var(--line); margin:0 4px; }
 .ngrow { display:flex; gap:10px; flex-wrap:wrap; }
 .ngrow > div { flex:1; min-width:120px; }
+
+/* adjust spots (0.25.2) */
+.rkbtns { display:flex; gap:6px; flex-wrap:wrap; }
+.rkpsel { width:auto; padding-right:28px; }
+.rkjack { fill:rgba(0,0,0,.55); stroke:rgba(255,255,255,.25); stroke-width:1; }
+.sjwrap { display:flex; gap:14px; align-items:flex-start; flex-wrap:wrap; }
+.sjpic { position:relative; flex:1 1 420px; max-width:min(100%, 720px); touch-action:none; user-select:none; -webkit-user-select:none; }
+.sjpic img { display:block; width:100%; height:auto; pointer-events:none; }
+.sjbox { position:absolute; border:1.5px dashed rgba(120,170,255,.75); background:rgba(80,140,255,.08); border-radius:3px; cursor:move; }
+.sjbox.moved { border-style:solid; }
+.sjbox.on { border:2px solid #4c8dff; background:rgba(76,141,255,.2); box-shadow:0 0 0 1px rgba(0,0,0,.5); z-index:2; }
+.sjbox em { position:absolute; left:4px; top:2px; font:700 10px/1.2 ui-sans-serif, system-ui, sans-serif; font-style:normal; color:#fff; background:rgba(10,12,16,.75); padding:1px 4px; border-radius:2px; white-space:nowrap; pointer-events:none; }
+.sjh { position:absolute; right:-9px; bottom:-9px; width:18px; height:18px; border-radius:50%; background:#4c8dff; border:3px solid #fff; cursor:nwse-resize; }
+.sjlist { flex:0 1 240px; display:flex; flex-direction:column; gap:4px; max-height:70vh; overflow:auto; }
+.sjrow { display:flex; flex-direction:column; align-items:flex-start; text-align:left; gap:2px; padding:7px 10px; border-radius:10px; border:1px solid var(--line); background:var(--card); }
+.sjrow.on { border-color:var(--acc); }
+.sjrow span { font-size:12px; color:var(--dim); font-weight:400; }
+.sjrow u { color:var(--acc); cursor:pointer; }

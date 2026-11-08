@@ -9,7 +9,7 @@
  */
 (function (root) {
   /** Rack-only pieces (not Gear Locker cards). custom: anything else, named by you. */
-  const ITEM_TYPES = { blank: 'Blank panel', vent: 'Vent panel', shelf: 'Shelf', drawer: 'Drawer', patch: 'Patch panel', cable: 'Cable manager', custom: 'Custom item' };
+  const ITEM_TYPES = { blank: 'Blank panel', vent: 'Vent panel', shelf: 'Shelf', drawer: 'Drawer', patch: 'Network patch panel', patchaudio: 'Audio patch panel', patchav: 'AV patch panel', cable: 'Cable manager', custom: 'Custom item' };
   const MAX_UNITS = 60;
   const int = (v) => { const n = Math.round(Number(v)); return Number.isFinite(n) ? n : null; };
 
@@ -88,6 +88,20 @@
     return lerp(lerp(r.tl, r.tr, across), lerp(r.bl, r.br, across), down);
   }
   /** Where a spot sits on the photo, as a box in fractions of the picture (photos taken at an angle give a slanted rack; the box holds it). */
+  /** Spots moved by hand on the photo: { g12: {x,y,w,h}, … } as fractions of the photo. */
+  function cleanSpots(o) {
+    const out = {};
+    for (const [k, v] of Object.entries(o && typeof o === 'object' ? o : {})) {
+      if (!/^[gi][\w-]{1,24}$/.test(k) || !v) continue;
+      const n = (x) => Math.max(0, Math.min(1, Number(x) || 0));
+      const b = { x: n(v.x), y: n(v.y), w: n(v.w), h: n(v.h) };
+      if (b.w < 0.005 || b.h < 0.005) continue;
+      out[k] = b;
+      if (Object.keys(out).length >= 400) break;
+    }
+    return out;
+  }
+
   function region(rails, units, u, h, side) {
     const a0 = side === 'R' ? 0.5 : 0, a1 = side === 'L' ? 0.5 : 1;
     const d0 = (u - 1) / units, d1 = (u - 1 + (h || 1)) / units;
@@ -106,7 +120,7 @@
     });
   }
 
-  const api = { ITEM_TYPES, MAX_UNITS, int, cells, problems, usage, gaps, DEFAULT_RAILS, cleanRails, at, region, power };
+  const api = { ITEM_TYPES, MAX_UNITS, int, cells, problems, usage, gaps, DEFAULT_RAILS, cleanRails, cleanSpots, at, region, power };
   if (typeof module !== 'undefined' && module.exports) module.exports = api;
   else root.RackCore = api;
 })(typeof window !== 'undefined' ? window : globalThis);

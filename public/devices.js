@@ -532,7 +532,8 @@ function rackSpot(v, rack) {
 function rackMark(v, rack) {
   let u = v.rack_u || 1, h = v.rack_h || 1, side = v.rack_side || '';
   if (v.shelf_id) { const sh = (rack.items || []).find((x) => x.id === v.shelf_id); if (sh) { u = sh.u; h = sh.h; side = ''; } }
-  const r = RackCore.region(rack.rails, rack.units, u, h, side);
+  // a spot moved by hand on the photo wins over the U grid
+  const r = (rack.spots && rack.spots['g' + v.id]) || RackCore.region(rack.rails, rack.units, u, h, side);
   return { ...r, color: 'blue', tag: v.name, label: tagModel(v), note: String(v.notes || '').split('\n').map((x) => x.replace(/[#*_`>]/g, '').trim()).find(Boolean) || '' };
 }
 /** Tap the photo: full screen, with its highlights and stepping. Esc, the ✕ or a tap outside the photo closes it. */

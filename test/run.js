@@ -1007,6 +1007,18 @@ test('pictures: the same picture uploaded again is stored once; removing unused 
   assert.strictEqual((await admin.post('/api/admin/storage/clean', { ids: [used, a1.id] })).data.removed, 2, 'no longer used once the card and rack are gone');
 });
 
+test('rack photo spots can be moved by hand, and only sensible ones are kept', async () => {
+  const r = await admin.post('/api/racks', { name: 'Spot test rack', units: 6 });
+  const id = r.data.id || (r.data.rack && r.data.rack.id);
+  await admin.put('/api/racks/' + id, { spots: { g12: { x: 0.1, y: 0.2, w: 0.5, h: 0.08 }, bad: { x: 1 }, g13: { x: 0, y: 0, w: 0, h: 0 }, i_ab: { x: 2, y: -1, w: 0.3, h: 0.1 } } });
+  const g = (await admin.get('/api/racks/' + id)).data;
+  const rack = g.rack || g;
+  assert.deepStrictEqual(Object.keys(rack.spots).sort(), ['g12', 'i_ab'], 'bad keys and empty boxes are dropped');
+  assert.deepStrictEqual(rack.spots.i_ab, { x: 1, y: 0, w: 0.3, h: 0.1 }, 'clamped to the photo');
+  assert.strictEqual(rack.name, 'Spot test rack', 'a spots-only change keeps the rest');
+  await admin.del('/api/racks/' + id);
+});
+
 test('checklists that were on pages move to To do, keeping their ticks and log', async () => {
   const os2 = require('os'), fs2 = require('fs');
   const dir = fs2.mkdtempSync(path.join(os2.tmpdir(), 'lg-todo-'));

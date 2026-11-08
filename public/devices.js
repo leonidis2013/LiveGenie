@@ -16,6 +16,9 @@ const AUTO_BUCKETS = ['Wired mics', 'Wireless mics', 'Receivers', 'Capsules', 'I
 const GEAR_KIND = [['mic', 'Microphone'], ['txmic', 'Wireless mic (handheld or pack)'], ['capsule', 'Mic capsule or head'], ['receiver', 'Wireless receiver'], ['di', 'DI box'], ['source', 'Instrument or playback'],
   ['iemtx', 'In-ear transmitter'], ['bodypack', 'In-ear pack'], ['headamp', 'Headphone amp'], ['console', 'Mixer'], ['stagebox', 'Stage box'], ['processor', 'Processor'], ['amp', 'Amplifier'], ['speaker', 'Speaker'], ['wedge', 'Wedge or monitor'],
   ['network', 'Network'], ['computer', 'Computer'], ['other', 'Something else']];
+/** Gear with its own frequency, person or channel: one card each, never a quantity. */
+const ONE_EACH = ['txmic', 'receiver', 'iemtx', 'bodypack'];
+const qtyOf = (d) => (d && !ONE_EACH.includes(d.kind) ? Math.max(1, d.qty || 1) : 1);
 const kindLabel = (k) => (GEAR_KIND.find((x) => x[0] === k) || [0, ''])[1];
 /** What each kind pairs with, and how the card says it. */
 const GEAR_PAIR = { txmic: { with: 'receiver', label: 'Receiver', add: 'Add a wireless mic', list: 'Wireless mics' }, capsule: { with: 'txmic', label: 'Fits on', add: 'Add a capsule', list: 'Capsules' }, bodypack: { with: 'iemtx', label: 'Transmitter', add: 'Add an in-ear pack', list: 'In-ear packs' } };
@@ -201,7 +204,8 @@ async function viewDevices(qs) {
   const order = bucketOrder(list);
   app.innerHTML = `<div class="crumbs"><a href="#/">Home</a><span>/</span></div>
     <div class="bar"><div class="grow"><h1 class="title" style="font-size:22px;letter-spacing:.06em;margin:4px 0 2px">GEAR LOCKER</h1>
-      <div class="note">Every piece of gear, sorted into buckets. Its name, nickname or IP typed on a page links to its card here.</div></div>
+      <div class="note">Every piece of gear, sorted into buckets. Its name, nickname or IP typed on a page links to its card here.</div>
+      ${list.length ? '<div class="gtotal">' + list.length + ' card' + (list.length === 1 ? '' : 's') + ' · ' + list.reduce((t, d) => t + qtyOf(d), 0) + ' piece' + (list.reduce((t, d) => t + qtyOf(d), 0) === 1 ? '' : 's') + ' of gear</div>' : ''}</div>
       ${can('admin') && !(S.state.gearSetup && S.state.gearSetup.done) ? '<a class="btn" href="#/gear-setup">' + icon('spark') + '<span class="hide-sm">Guided setup</span></a>' : ''}
       ${can('admin') ? '<button class="btn" id="gBk">' + icon('list') + '<span class="hide-sm">Buckets</span></button>' : ''}
       ${sug.length ? '<button class="btn" id="imp">' + icon('net') + 'From IP lists (' + sug.length + ')</button>' : ''}
@@ -213,7 +217,7 @@ async function viewDevices(qs) {
     <div class="gchips" id="dcat"><button data-b="" class="chipb on">All <em>${list.length}</em></button>${order.filter((b) => list.some((d) => bucketOf(d) === b)).map((b) => '<button class="chipb" data-b="' + esc(b) + '">' + esc(b) + ' <em>' + list.filter((d) => bucketOf(d) === b).length + '</em></button>').join('')}</div>
     <div id="dgrid"></div>`;
   const cardHtml = (d) => '<a class="dcard" href="#/d/' + d.id + '">' + devThumb(d, 46) +
-    '<div class="t"><b>' + esc(d.name) + '</b><span>' + esc(gearLine(d, list)) + '</span>' +
+    '<div class="t"><b>' + esc(d.name) + (qtyOf(d) > 1 ? ' <span class="qtyb">×' + qtyOf(d) + '</span>' : '') + '</b><span>' + esc(gearLine(d, list)) + '</span>' +
     '<span class="dmeta">' + [d.location ? icon('pin') + esc(d.location) : '', d.networked && d.ips.length ? '<span class="mono">' + esc(d.ips[0]) + '</span>' + (d.ips.length > 1 ? ' +' + (d.ips.length - 1) : '') : '', users.get(d.id) ? icon('user') + esc(users.get(d.id)) : ''].filter(Boolean).join('<i>·</i>') + '</span></div>' +
     '<div class="dbadges">' + (d.files ? '<span class="badge" title="' + d.files + ' manual' + (d.files === 1 ? '' : 's') + '">' + icon('pdf') + d.files + '</span>' : '') + (d.tech_only ? '<span class="badge tech">Tech only</span>' : '') + '</div></a>';
   const paint = () => {
@@ -263,21 +267,77 @@ function gearWarnings(list) {
       if (vals.length > 1) counts.push({ text: g.length + ' ' + g[0].model + ' cards disagree: ' + vals.sort((x, y) => x - y).join(' vs ') + ' ' + f, cards: g.filter((d) => d[f] > 0) });
     }
   }
-  return { dupes, counts };
+  // identical gear on separate cards (same make, model and kind, not wireless): can be one card with a quantity
+  const same = new Map();
+  list.filter((d) => d.model && !ONE_EACH.includes(d.kind)).forEach((d) => { const k = Tags.norm(d.make) + '|' + Tags.norm(d.model) + '|' + (d.kind || ''); if (!same.has(k)) same.set(k, []); same.get(k).push(d); });
+  const skip = DEV.dupeSkip || new Set();
+  const key = (g) => g.map((d) => String(d.id)).sort().join('|');
+  const combos = [...same.values()].filter((g) => g.length > 1 && !skip.has(key(g)));
+  // a near-duplicate that is also the same model gets Combine on its own line instead
+  const comboOf = (g) => combos.find((c) => g.every((d) => c.includes(d)));
+  const dupesLeft = dupes.filter((g) => !comboOf(g));
+  return { dupes: dupesLeft, counts, combos };
 }
 function paintDupes(host, list) {
   if (!host) return;
   const w = gearWarnings(list);
-  if (!w.dupes.length && !w.counts.length) { host.innerHTML = ''; return; }
+  if (!w.dupes.length && !w.counts.length && !w.combos.length) { host.innerHTML = ''; return; }
   const link = (d) => '<a href="#/d/' + d.id + '">' + esc(tagModel(d)) + '</a>';
   host.innerHTML = '<div class="gwarn">' + icon('alert') + '<div class="gwl">' +
     w.dupes.map((g, i) => '<div class="gwr"><span>' + g.map(link).join(' and ') + ' look like the same gear.</span><span class="gwb"><button type="button" class="btn xs" data-merge="' + i + '">Merge…</button><button type="button" class="ghost xs" data-notdup="' + i + '">Not a duplicate</button></span></div>').join('') +
+    w.combos.map((g, i) => '<div class="gwr"><span>' + g.map(link).join(', ') + ' are the same ' + esc([g[0].make, g[0].model].filter(Boolean).join(' ')) + ': one card ×' + g.reduce((t, d) => t + qtyOf(d), 0) + ' would do.</span><span class="gwb"><button type="button" class="btn xs" data-combine="' + i + '">Combine ×' + g.reduce((t, d) => t + qtyOf(d), 0) + '</button><button type="button" class="btn xs ghost" data-cmerge="' + i + '">Merge…</button><button type="button" class="ghost xs" data-cskip="' + i + '">Keep separate</button></span></div>').join('') +
     w.counts.map((c) => '<div class="gwr"><span>' + esc(c.text) + ': ' + c.cards.map(link).join(', ') + '.</span></div>').join('') + '</div></div>';
   $$('[data-notdup]', host).forEach((b) => b.addEventListener('click', async () => {
     const g = w.dupes[Number(b.dataset.notdup)];
     try { const r = await call('PUT', '/api/devices/dupe-skip', { ids: g.map((d) => d.id) }); DEV.dupeSkip = new Set(r.dupeSkip); paintDupes(host, list); toast('Left alone', 'ok'); } catch (e) { toast(e.message, 'bad'); }
   }));
   $$('[data-merge]', host).forEach((b) => b.addEventListener('click', () => mergeDialog(w.dupes[Number(b.dataset.merge)])));
+  $$('[data-combine]', host).forEach((b) => b.addEventListener('click', () => combineDialog(w.combos[Number(b.dataset.combine)])));
+  $$('[data-cmerge]', host).forEach((b) => b.addEventListener('click', () => mergeDialog(w.combos[Number(b.dataset.cmerge)])));
+  $$('[data-cskip]', host).forEach((b) => b.addEventListener('click', async () => {
+    const g = w.combos[Number(b.dataset.cskip)];
+    try { const r = await call('PUT', '/api/devices/dupe-skip', { ids: g.map((d) => d.id) }); DEV.dupeSkip = new Set(r.dupeSkip); paintDupes(host, list); toast('Kept as separate cards', 'ok'); } catch (e) { toast(e.message, 'bad'); }
+  }));
+}
+/**
+ * Split a card with a quantity into a card for each one (to give each its own details): this card becomes one,
+ * the others are new cards with the same make, model, kind, location, bucket and notes. Tag names: the next free ones
+ * when this card's name is a tag (SPK-1 → SPK-2, SPK-3), otherwise "Name 2", "Name 3".
+ */
+async function splitCard(v) {
+  const n = qtyOf(v);
+  if (!await confirmBox('Split ' + v.name + ' into ' + n + ' cards?', 'This card becomes one of them. ' + (n - 1) + ' new card' + (n > 2 ? 's get' : ' gets') + ' the same make, model, location and notes, ready for details of their own. Manuals and the photo stay on this card.', 'Split')) return;
+  try {
+    const all = await loadDevices(true);
+    const taken = all.flatMap((x) => [x.name, ...(x.aliases || [])]);
+    const tagLike = Tags.norm(v.name) === Tags.norm(Tags.suggest(v.kind || 'other', [], { model: v.model })) || /^[A-Z]{1,6}(-[A-Z]{1,4})?-?\d+[A-Z]?$/i.test(v.name.trim());
+    const ids = [v.id];
+    for (let i = 2; i <= n; i++) {
+      let name = tagLike ? Tags.suggest(v.kind || 'other', taken, { model: v.model }) : v.name + ' ' + i;
+      while (taken.some((t) => Tags.norm(t) === Tags.norm(name))) name += '+';
+      taken.push(name);
+      ids.push((await call('POST', '/api/devices', { name, aliases: [], kind: v.kind, category: v.category, make: v.make, model: v.model, location: v.location, bucket: v.bucket, notes: v.notes, inputs: v.inputs, outputs: v.outputs, qty: 1 })).id);
+    }
+    await call('PUT', '/api/devices/' + v.id, { ...v, qty: 1 });
+    // they were split on purpose: the Gear Locker does not suggest combining them again
+    try { await call('PUT', '/api/devices/dupe-skip', { ids }); } catch (e) { /* only a suggestion */ }
+    forgetDevices(); toast('Split into ' + n + ' cards', 'ok'); route();
+  } catch (e) { toast(e.message, 'bad'); }
+}
+/** Combine: identical cards become one card with their quantities added (the others merge into it). */
+function combineDialog(group) {
+  const total = group.reduce((t, d) => t + qtyOf(d), 0);
+  const line = (d) => esc([d.make, d.model].filter(Boolean).join(' ')) + (qtyOf(d) > 1 ? ' · ×' + qtyOf(d) : '') + (d.location ? ' · ' + esc(d.location) : '') + (d.files ? ' · ' + d.files + ' manual' + (d.files === 1 ? '' : 's') : '');
+  modal('<h3>Combine into one card ×' + total + '</h3><p>Pick the card to keep. It becomes ×' + total + '; the others’ manuals, photo, nicknames and stage patch blocks move onto it, then they are removed.</p>' +
+    '<form id="cbf"><div class="mgl">' + group.map((d, i) => '<label class="mgo"><input type="radio" name="keep" value="' + d.id + '"' + (i ? '' : ' checked') + '><span><b>' + esc(d.name) + '</b><em>' + line(d) + '</em></span></label>').join('') + '</div>' +
+    '<div class="acts"><button type="button" data-close>Cancel</button><button class="primary">Combine ×' + total + '</button></div></form>', (w, close) => {
+    $('#cbf', w).addEventListener('submit', async (e) => {
+      e.preventDefault();
+      const keep = Number($('input[name=keep]:checked', w).value);
+      try { await call('POST', '/api/devices/' + keep + '/combine', { ids: group.map((d) => d.id).filter((x) => x !== keep) }); close(); forgetDevices(); toast('Combined into one card ×' + total, 'ok'); route(); }
+      catch (err) { toast(err.message, 'bad'); }
+    });
+  });
 }
 /** Merge: pick the card to keep; the others' manuals, photo, pairings, nicknames and stage patch place move onto it. */
 function mergeDialog(group) {
@@ -366,6 +426,7 @@ async function viewDevice(id) {
   const kids = PAIR_CHILD[v.kind] ? all.filter((x) => x.pair_id === v.id && x.kind === PAIR_CHILD[v.kind]) : [];
   const facts = [
     ['What it is', esc(kindLabel(v.kind) + (v.txtype ? ' · ' + v.txtype : ''))],
+    ['Quantity', qtyOf(v) > 1 ? qtyOf(v) + ' <span class="note">one card for all of them</span>' : ''],
     [GEAR_PAIR[v.kind] ? GEAR_PAIR[v.kind].label : '', mate ? dl(mate) : ''],
     ['Capsule', (() => { const c = v.kind === 'txmic' && all.find((x) => x.kind === 'capsule' && x.pair_id === v.id); return c ? dl(c) : esc(v.capsule); })()],
     ['Location', esc(v.location)],
@@ -380,9 +441,9 @@ async function viewDevice(id) {
   app.innerHTML = `<div class="page dev">
     <div class="crumbs"><a href="#/">Home</a><span>/</span><a href="#/gear">Gear Locker</a></div>
     <div class="devhead">${v.photo ? '<a href="#dphoto" class="devphotoa" id="dpa"><img class="devphoto" src="/uploads/' + esc(v.photo) + '" alt=""></a>' : devThumb(v, 84)}
-      <div class="grow"><h1 class="title">${esc(v.name)}</h1><div class="meta" style="margin:0">${esc([v.make, v.model].filter(Boolean).join(' '))}
+      <div class="grow"><h1 class="title">${esc(v.name)}${qtyOf(v) > 1 ? ' <span class="qtyb big">×' + qtyOf(v) + '</span>' : ''}</h1><div class="meta" style="margin:0">${esc([v.make, v.model].filter(Boolean).join(' '))}
         <span class="chip">${CAT[v.category] || 'Other'}</span>${v.tech_only ? '<span class="badge tech">Tech only</span>' : ''}</div></div>
-      <div class="acts-top">${can('admin') ? '<button class="btn" id="eD">' + icon('edit') + 'Edit</button><button class="ghost danger" id="xD" title="Delete device">' + icon('trash') + '</button>' : '<button class="btn ghost" id="rD">' + icon('alert') + 'Report a problem</button>'}</div></div>
+      <div class="acts-top">${can('admin') ? '<button class="btn" id="eD">' + icon('edit') + 'Edit</button>' + (qtyOf(v) > 1 ? '<button class="btn" id="spD" title="Make a card for each one, to give each its own details">Split into ' + qtyOf(v) + ' cards</button>' : '') + '<button class="ghost danger" id="xD" title="Delete device">' + icon('trash') + '</button>' : '<button class="btn ghost" id="rD">' + icon('alert') + 'Report a problem</button>'}</div></div>
     ${facts.length ? '<div class="card facts">' + facts.map((f) => '<div class="fact"><span>' + f[0] + '</span><div>' + f[1] + '</div></div>').join('') + '</div>' : ''}
     ${v.notes.trim() ? '<div class="doc" id="dnotes">' + md(v.notes) + '</div>' : ''}
     ${v.photo ? '<div class="section" style="margin-top:20px" id="dphoto"><div class="hsh"><h2>Photo</h2>' + (can('admin') ? '<button class="btn" id="dmk">' + icon('edit') + (v.marks.length ? 'Edit highlights' : 'Highlight on the photo') + '</button>' : '') + '</div><div id="dmarks"></div></div>' : ''}
@@ -410,6 +471,7 @@ async function viewDevice(id) {
   const rd = $('#rD'); if (rd) rd.addEventListener('click', () => reportProblem(v.name, { device_id: v.id }));
   if (can('admin')) {
     $('#eD').addEventListener('click', () => { location.hash = '#/d/' + v.id + '/edit'; });
+    const sp = $('#spD'); if (sp) sp.addEventListener('click', () => splitCard(v));
     $('#xD').addEventListener('click', async () => {
       if (!await confirmBox('Delete ' + v.name + '?', 'The card is removed and pages stop linking to it. The pages themselves do not change.', 'Delete', true)) return;
       try { await call('DELETE', '/api/devices/' + v.id); forgetDevices(); toast('Removed from the Gear Locker', 'ok'); location.hash = '#/gear'; } catch (e) { toast(e.message, 'bad'); }
@@ -565,7 +627,7 @@ async function viewDeviceEdit(id) {
       <div class="dform">
         <label class="dfield wide"><span>What is it?</span><select data-k="kind" id="dkind"><option value="">Choose…</option>${GEAR_KIND.map((k) => '<option value="' + k[0] + '"' + (k[0] === d.kind ? ' selected' : '') + '>' + k[1] + '</option>').join('')}</select><em>Sorts it into the right bucket, and lets wireless mics pair with their receiver</em></label>
         <label class="dfield wide"><span>Tag name</span><div class="tagrow"><input data-k="name" value="${esc(d.name)}" placeholder="Like RX-1 or WMIC-1" autocapitalize="characters" spellcheck="false"><button type="button" class="btn" id="dauto" title="Suggest a tag name from what it is">${icon('spark')}Auto label</button></div><em id="dtagnote">What your team calls it; it goes on the label. Auto label suggests one from what it is.</em></label>
-        ${id ? '' : '<label class="dfield"><span>How many?</span><input id="dqty" type="number" min="1" max="48" value="1" inputmode="numeric"><em>More than one makes a card for each, numbered (WMIC-1, WMIC-2… or SM58 1, SM58 2…)</em></label>'}
+        <label class="dfield" id="dqtyw"><span id="dqtyt">Quantity</span><input id="dqty" type="number" min="1" max="999" value="${qtyOf(d)}" inputmode="numeric"><em id="dqtyh"></em></label>
         <label class="dfield wide"><span>Also called</span><input data-k="aliases" value="${esc(d.aliases.join(', '))}" placeholder="Nicknames, comma between"><em>Other names people type, separated by commas. Each one links to this card.</em></label>
         <label class="dfield"><span>Category</span><select data-k="category">${Object.keys(CAT).map((k) => '<option value="' + k + '"' + (k === d.category ? ' selected' : '') + '>' + CAT[k] + '</option>').join('')}</select></label>
         <label class="dfield"><span>Bucket</span><select data-k="bucket"><option value="" id="dbauto">Automatic (${esc(autoBucket({ ...d, kind: d.kind || (DEV.list || []).find((x) => x.id === d.id)?.kind || '' }))})</option>${bucketOrder(DEV.list || []).map((b) => '<option' + (b === d.bucket ? ' selected' : '') + '>' + esc(b) + '</option>').join('')}</select><em>Where it sits in the Gear Locker</em></label>
@@ -657,7 +719,20 @@ async function viewDeviceEdit(id) {
     if (['network', 'computer'].includes(d.kind)) { d.category = d.kind; $('[data-k=category]').value = d.kind; } else if (d.kind && d.kind !== 'other') { d.category = 'audio'; $('[data-k=category]').value = 'audio'; }
     wireless();
     $('#dbauto').textContent = 'Automatic (' + autoBucket({ ...d }) + ')';
+    qtyField();
   });
+  // Quantity: one card for several of the same gear. Wireless gear has its own frequency and channel, so "How many?" makes a card for each.
+  function qtyField() {
+    const each = ONE_EACH.includes(d.kind), w = $('#dqtyw');
+    if (each && id) { w.classList.add('hide'); return; }
+    w.classList.remove('hide');
+    $('#dqtyt').textContent = each ? 'How many?' : 'Quantity';
+    $('#dqtyh').textContent = each ? 'More than one makes a card for each (' + (d.kind === 'receiver' ? 'RX-1, RX-2' : d.kind === 'iemtx' ? 'IEM-TX1, IEM-TX2' : d.kind === 'bodypack' ? 'IEM-1, IEM-2' : 'WMIC-1, WMIC-2') + '…): each has its own frequency and channel.'
+      : 'How many of these you have. One card stands for all of them; on the stage patch each is placed and cabled on its own.';
+    if (!each && Number($('#dqty').value) > 999) $('#dqty').value = 999;
+  }
+  qtyField();
+  $('#dqty').addEventListener('input', () => dirty());
   // Auto label: a short code from what it is (RX-1, WMIC-2, PA-AMP1…), never one another card already uses
   let autoNamed = false;
   const otherNames = () => all.filter((x) => String(x.id) !== String(id)).flatMap((x) => [x.name, ...(x.aliases || [])]);
@@ -666,7 +741,7 @@ async function viewDeviceEdit(id) {
     if (!d.kind) { toast('Pick what it is first, then Auto label', 'bad'); $('#dkind').focus(); return; }
     const n = $('[data-k=name]');
     n.value = d.name = suggestTag(); autoNamed = true; dirty();
-    const q = $('#dqty'); if (q && Number(q.value) > 1) $('#dtagnote').textContent = 'Each of the ' + q.value + ' gets its own number when you add them.';
+    const q = $('#dqty'); if (q && !id && ONE_EACH.includes(d.kind) && Number(q.value) > 1) $('#dtagnote').textContent = 'Each of the ' + q.value + ' gets its own number when you add them.';
   });
   $('[data-k=name]').addEventListener('input', () => { autoNamed = false; });
   // a model already on your list fills in what it is and who makes it
@@ -712,6 +787,7 @@ async function viewDeviceEdit(id) {
   /** What gets saved: a wireless mic sends its capsule card (or none, keeping a typed one). */
   const body = () => {
     const b = { ...d };
+    b.qty = ONE_EACH.includes(d.kind) ? 1 : Math.max(1, Math.min(999, Math.round(Number($('#dqty').value) || 1)));
     if (d.kind === 'txmic') { b.capsule_id = /^\d+$/.test(String(d.capsule_id)) ? d.capsule_id : ''; if (d.capsule_id === '__text') b.capsule_typed = true; else delete b.capsule; }
     else delete b.capsule_id;
     return b;
@@ -721,7 +797,8 @@ async function viewDeviceEdit(id) {
     try {
       if (id) { await call('PUT', '/api/devices/' + id, body()); S.dirty = false; forgetDevices(); toast('Saved', 'ok'); location.hash = '#/d/' + id; }
       else {
-        const n = Math.max(1, Math.min(48, Number($('#dqty').value) || 1));
+        // wireless: a card for each; anything else: one card with its quantity
+        const n = ONE_EACH.includes(d.kind) ? Math.max(1, Math.min(48, Number($('#dqty').value) || 1)) : 1;
         let x;
         // auto-labelled (or left empty): each one gets its own tag, WMIC-1, WMIC-2…; a typed name is numbered after it
         const auto = autoNamed || !d.name.trim();

@@ -935,8 +935,20 @@ const PatchView = (() => {
       if (!keepView || !st.tf) fit(); else apply();
       paintChecks(); paintReport();
     }
+    /** More blocks on the drawing than the Gear Locker card has (its quantity). */
+    function qtyChecks(doc) {
+      const by = new Map();
+      doc.gear.forEach((g) => { if (g.device_id) { if (!by.has(g.device_id)) by.set(g.device_id, []); by.get(g.device_id).push(g); } });
+      const out = [];
+      by.forEach((gs, id) => {
+        const d = devCard(id); if (!d) return;
+        const q = typeof qtyOf === 'function' ? qtyOf(d) : 1;
+        if (gs.length > q) out.push({ level: 'warn', text: Tags.withModel(d.name, d.model) + ': ' + gs.length + ' on the drawing, ' + q + ' in the Gear Locker. Raise its quantity, or remove one.', gear: gs.map((g) => g.id) });
+      });
+      return out;
+    }
     function paintChecks() {
-      const list = P.checks(st.doc);
+      const list = P.checks(st.doc).concat(qtyChecks(st.doc));
       // a network cable on gear whose Gear Locker card is not ticked "On the network"
       st.doc.cables.filter((c) => c.ap === 'net').forEach((c) => { const g = gearOf(c.a), dev = devOf(g); if (g && dev && !dev.networked && g.kind !== 'network' && g.kind !== 'computer') list.push({ level: 'warn', text: g.name + ' has a network cable, but its Gear Locker card is not ticked “On the network”. Tick it, or remove the cable.', gear: [g.id] }); });
       // a list, worst first: tap one to see it on the drawing
@@ -1373,12 +1385,12 @@ const PatchView = (() => {
         const o = A.get(gid);
         if (o && o.b === c.b && o.port === c.port) return;
         const g = G.get(gid), sw = G.get(c.b);
-        if (g && sw && g.device_id && sw.device_id) jobs.push([g.device_id, { networked: true, uplink_id: sw.device_id, uplink_port: c.port ? String(c.port) : '' }]);
+        if (g && sw && g.device_id && sw.device_id && !shared(g.device_id)) jobs.push([g.device_id, { networked: true, uplink_id: sw.device_id, uplink_port: c.port ? String(c.port) : '' }]);
       });
       A.forEach((c, gid) => {
         if (B.has(gid)) return;
         const g = G.get(gid), sw = G.get(c.b), dev = devOf(g);
-        if (g && sw && dev && sw.device_id && g.device_id) jobs.push([g.device_id, { uplink_id: null, uplink_port: '', _only: sw.device_id }]);
+        if (g && sw && dev && sw.device_id && g.device_id && !shared(g.device_id)) jobs.push([g.device_id, { uplink_id: null, uplink_port: '', _only: sw.device_id }]);
       });
       if (!jobs.length || !canEdit) return;
       (async () => {
@@ -1438,6 +1450,7 @@ const PatchView = (() => {
           const links = (DEV.list || []).filter((d) => d.uplink_id).map((d) => ({ from: d.uplink_id, to: d.id, port: d.uplink_port }));
           for (const l of links) {
             const sw = doc.gear.find((g) => g.kind === 'network' && g.device_id === l.from);
+            if (shared(l.to)) continue;   // a card for several: each unit is plugged in on the drawing
             const g = doc.gear.find((x) => x.device_id === l.to && !P.hostOf(doc, x));
             if (!sw || !g || g === sw || P.netOf(doc, g)) continue;
             const port = parseInt(l.port, 10) || null;
@@ -1727,7 +1740,7 @@ const PatchView = (() => {
       const cabText = (c) => { const r = P.cableList({ gear: st.doc.gear, cables: [c] })[0]; return r ? r.from + ' → ' + r.to : ''; };
       modal('<h3>Auto label</h3><p class="note">Tag names for your gear, and one name for each cable that says what it does (IN-A03 plugs into stage box A input 3; SPK, OUT, LNK and NET are numbered), printed the same at both ends. Untick anything that keeps its own name. Undo puts the old names back.</p><form id="alf">' +
         '<div class="alh"><b>Gear</b><span class="grow"></span><button type="button" class="linkbtn" data-all="g1">All</button> · <button type="button" class="linkbtn" data-all="g0">None</button></div><div class="allist" id="al_g"></div>' +
-        '<label class="tog sm"><input type="checkbox" id="al_dev" checked> Also rename their Gear Locker cards</label>' +
+        '<label class="tog sm"><input type="checkbox" id="al_dev" checked> Also rename their Gear Locker cards <span class="note">(not cards with a quantity: their units are named on the drawing)</span></label>' +
         '<div class="alh"><b>Cables</b><span class="grow"></span><button type="button" class="linkbtn" data-all="c1">All</button> · <button type="button" class="linkbtn" data-all="c0">None</button></div><div class="allist" id="al_c"></div>' +
         '<div class="acts"><button type="button" data-close>Cancel</button><button class="primary" id="al_ok">Apply</button></div></form>', (w, close) => {
         w.classList.add('mwide');
@@ -1757,7 +1770,7 @@ const PatchView = (() => {
           close();
           const renamed = [];
           change(() => {
-            r.g.forEach((n, id) => { const g = gearOf(id); if (g && g.name !== n) { g.name = n; if (g.device_id) renamed.push([g.device_id, n]); } });
+            r.g.forEach((n, id) => { const g = gearOf(id); if (g && g.name !== n) { g.name = n; if (g.device_id && !shared(g.device_id)) renamed.push([g.device_id, n]); } });
             r.c.forEach((n, id) => { const c = st.doc.cables.find((x) => x.id === id); if (c) c.label = n; });
           }, (r.g.size ? r.g.size + ' tag name' + (r.g.size === 1 ? '' : 's') : '') + (r.g.size && r.c.size ? ' and ' : '') + (r.c.size ? r.c.size + ' cable' + (r.c.size === 1 ? '' : 's') : '') + ' labelled. Undo puts them back.');
           if (dev && renamed.length && canEdit) {
@@ -1931,7 +1944,7 @@ const PatchView = (() => {
      * grouped by type, then your models; "New gear" (folded) for something you have not added before.
      */
     function addPane(host) {
-      const onPatch = new Set(st.doc.gear.map((g) => g.device_id).filter(Boolean));
+      const onPatch = new Set(((typeof DEV !== 'undefined' && DEV.list) || []).filter((d) => unitsOf(d.id) >= (typeof qtyOf === 'function' ? qtyOf(d) : 1)).map((d) => d.id));
       const devs = ((typeof DEV !== 'undefined' && DEV.list) || []).filter((d) => !onPatch.has(d.id) && (['audio', 'network', 'computer'].includes(d.category) || P.KINDS[d.kind]));
       const pre = st.prefill || {};
       const kind = pre.kind || st.newKind || 'mic';
@@ -1951,7 +1964,8 @@ const PatchView = (() => {
       host.innerHTML = '<div class="pph"><b>Add equipment</b>' + (host.id === 'ppane' ? '<button class="ghost pback" id="pclose" title="Close" style="margin-left:auto">' + icon('x') + '</button>' : '') + '</div>' + (st.placeAt ? '<p class="note">It goes where you right-clicked.</p>' : '') +
         '<input type="search" id="pfind" placeholder="Find in your list and Gear Locker" class="pfind" autocomplete="off">' +
         '<p class="note pnone hide" id="pnone">Nothing matches. Add it as new gear below.</p>' +
-        (devGroups.length ? '<div class="psec"><div class="psech">In the Gear Locker, not on the drawing yet</div>' + devGroups.map(([k, l]) => '<div class="pcat"><div class="pch">' + esc(typeOf(k)) + '</div><div class="pitems">' + l.map((d) => '<button class="pitem cat-' + ((P.KINDS[k] || P.KINDS.other).cat) + '" data-dev="' + d.id + '"><b>' + esc(Tags.withModel(d.name, d.model)) + '</b><span>' + esc([d.make, d.location].filter(Boolean).join(' · ') || 'Gear Locker') + '</span></button>').join('') + '</div></div>').join('') + '</div>' : '') +
+        (devGroups.length ? '<div class="psec"><div class="psech">In the Gear Locker, not on the drawing yet</div>' + devGroups.map(([k, l]) => '<div class="pcat"><div class="pch">' + esc(typeOf(k)) + '</div><div class="pitems">' + l.map((d) => { const q = typeof qtyOf === 'function' ? qtyOf(d) : 1, u = unitsOf(d.id);
+          return '<button class="pitem cat-' + ((P.KINDS[k] || P.KINDS.other).cat) + '" data-dev="' + d.id + '"><b>' + esc(Tags.withModel(d.name, d.model)) + (q > 1 ? ' ×' + q : '') + '</b><span>' + esc((q > 1 ? u + ' of ' + q + ' placed · ' : '') + ([d.make, d.location].filter(Boolean).join(' · ') || 'Gear Locker')) + '</span></button>'; }).join('') + '</div></div>').join('') + '</div>' : '') +
         (modGroups.length ? '<div class="psec"><div class="psech">Your models</div>' + modGroups.map(([k, l]) => '<div class="pcat"><div class="pch">' + esc(typeOf(k)) + '</div><div class="pitems">' + l.map((m) => '<div class="pitemw"><button class="pitem cat-' + (P.KINDS[k] || P.KINDS.other).cat + '" data-mod="' + esc(GearModels.keyOf(m)) + '"><b>' + esc(m.model) + '</b><span>' + esc([m.make, m.nin != null && k !== 'receiver' && k !== 'amp' ? m.nin + ' in' : '', m.nout ? m.nout + ' out' : '', (k === 'receiver' || k === 'amp') && m.nin ? m.nin + ' ch' : '', m.link].filter(Boolean).join(' · ')) + '</span></button><button type="button" class="pforget2" data-forget="' + esc(GearModels.keyOf(m)) + '" title="Take off your list">' + icon('x') + '</button></div>').join('') + '</div></div>').join('') + '</div>'
           : '<p class="note pempty2">Your list is empty. Each make and model you add as new gear is kept here, so next time it is one tap.</p>') +
         '<details class="pnewd" id="pnewd"' + (openNew ? ' open' : '') + '><summary>' + icon('plus') + 'New gear' + (pre.device_id ? ' · from the Gear Locker' : '') + '</summary>' +
@@ -2022,7 +2036,12 @@ const PatchView = (() => {
       const h = HEAD + Math.min(6, (item.nin || 1)) * ROW + FOOT;
       return freeSpot(rects, CW, h, c.x, c.y);
     }
-    /** A card from the Gear Locker: its model from your list when it is there, else the New gear form asks what it is. */
+    /** How many blocks on the drawing stand for this Gear Locker card, and how many it has (its quantity). */
+    function devCard(id) { return ((typeof DEV !== 'undefined' && DEV.list) || []).find((d) => d.id === id); }
+    function unitsOf(id) { return st.doc.gear.filter((g) => g.device_id === id).length; }
+    function shared(id) { const d = devCard(id); return !!d && typeof qtyOf === 'function' && qtyOf(d) > 1; }
+    /** A card from the Gear Locker: its model from your list when it is there, else the New gear form asks what it is.
+     *  A card with a quantity is placed once per unit, each its own block with its own tag (SPK-1, SPK-2). */
     function addDevice(d, host) {
       const m = GearModels.find(d.model) || GearModels.find(d.name);
       if (!m && !(d.kind && P.KINDS[d.kind])) {
@@ -2033,10 +2052,14 @@ const PatchView = (() => {
       }
       const item = { ...(m || { kind: d.kind }), name: d.name, make: d.make || (m && m.make), model: d.model || (m && m.model), device_id: d.id };
       if (d.kind && P.KINDS[d.kind]) item.kind = d.kind;
+      if (typeof qtyOf === 'function' && qtyOf(d) > 1) {
+        const taken = st.doc.gear.map((g) => g.name).concat(((typeof DEV !== 'undefined' && DEV.list) || []).filter((x) => x.id !== d.id).flatMap((x) => [x.name, ...(x.aliases || [])]));
+        item.name = Tags.suggest(item.kind || 'other', taken, { model: item.model });
+      }
       if (!m && d.inputs) item.nin = d.inputs; if (!m && d.outputs) item.nout = d.outputs;
       if (item.kind === 'network') item.nports = Math.max(d.inputs || 0, d.outputs || 0) || 8;
       if (item.kind === 'txmic') Object.assign(item, { txtype: d.txtype || undefined, freq: d.freq || undefined, capsule: d.capsule || undefined });
-      placeItem(item, d.name);
+      placeItem(item, item.name);
     }
     function placeItem(item, name) {
       Object.assign(item, newSpot(item));
@@ -2085,7 +2108,7 @@ const PatchView = (() => {
       let html = '<div class="pph"><button class="ghost pback" id="pbk" title="Back">' + icon('x') + '</button><span class="pkind cat-' + k.cat + '">' + esc(k.label) + '</span>' + (host2 ? '<button class="linkbtn" id="phost">in ' + esc(host2.name) + '</button>' : '') + '</div>' +
         (ro ? '<h3 class="pname">' + esc(g.name) + '</h3><div class="pfacts">' + facts.map((f) => '<div><span>' + f[0] + '</span><b>' + esc(f[1]) + '</b></div>').join('') + '</div>' : '<div class="pform">' +
         '<label>Tag name<span class="tagrow"><input data-f="name" value="' + esc(g.name) + '"><button type="button" class="btn sm" id="pautotag" title="Suggest a tag name (RX-1, WMIC-1, PA-AMP1…)">Auto label</button></span></label>' +
-        (g.device_id ? '<label class="tog sm pdevren"><input type="checkbox" id="pdevren" checked> Rename its Gear Locker card too</label>' : '') +
+        (g.device_id ? (shared(g.device_id) ? '<p class="note pdevren">One of ' + qtyOf(devCard(g.device_id)) + ' on the Gear Locker card ' + esc(devCard(g.device_id).name) + ': its tag here is for this one only.</p>' : '<label class="tog sm pdevren"><input type="checkbox" id="pdevren" checked> Rename its Gear Locker card too</label>') : '') +
         (k.fields.includes('person') ? fld('person', 'Who uses it', g.person, ' list="pppl" placeholder="Name"') + '<datalist id="pppl">' + peopleList().map((p) => '<option value="' + esc(p) + '">').join('') + '</datalist>' : '') +
         (k.fields.includes('use') ? fld('use', 'Used for', g.use, ' placeholder="Kick, Pastor, Keys L"') : '') +
         (k.fields.includes('txtype') ? '<label>Transmitter type<select data-f="txtype"><option value="">—</option>' + TX_TYPES.map((t) => '<option' + (t === g.txtype ? ' selected' : '') + '>' + t + '</option>').join('') + '</select></label>' : '') +
@@ -2210,7 +2233,7 @@ const PatchView = (() => {
           else { if (v.trim()) g[f] = v.trim(); else delete g[f]; }
         }, null, !['nin', 'nout', 'nch', 'mode', 'nports', 'spare'].includes(f));
         // a new tag name goes to its Gear Locker card too (when ticked)
-        if (f === 'name' && g.device_id && v.trim() && canEdit) { const rn = $('#pdevren', host); if (!rn || rn.checked) putDevice(g.device_id, { name: v.trim() }).catch((e) => toast('Gear Locker card not renamed: ' + e.message, 'bad')); }
+        if (f === 'name' && g.device_id && v.trim() && canEdit && !shared(g.device_id)) { const rn = $('#pdevren', host); if (!rn || rn.checked) putDevice(g.device_id, { name: v.trim() }).catch((e) => toast('Gear Locker card not renamed: ' + e.message, 'bad')); }
       }));
       const pat = $('#pautotag', host);
       if (pat) pat.addEventListener('click', () => {
@@ -2415,7 +2438,11 @@ const PatchView = (() => {
       const eq = GROUPS.map(([title, kinds]) => {
         const list = doc.gear.filter((g) => kinds.includes(g.kind));
         if (!list.length) return '';
-        return '<h3>' + title + '</h3>' + T(['Tag', 'Make', 'Model', 'Location', 'Connections', 'Network'], list.map((g) => { const dev = devOf(g); return ['<b>' + esc(g.name) + '</b>', esc(g.make || (dev && dev.make) || ''), esc(g.model || (dev && dev.model) || ''), esc((dev && dev.location) || ''), conn(g), net(g)]; }), '');
+        // units of one Gear Locker card (a card with a quantity) are one row: SPK-1, SPK-2 · Qty 2
+        const rows = [], byDev = new Map();
+        list.forEach((g) => { if (g.device_id) { if (!byDev.has(g.device_id)) { byDev.set(g.device_id, []); rows.push(byDev.get(g.device_id)); } byDev.get(g.device_id).push(g); } else rows.push([g]); });
+        return '<h3>' + title + '</h3>' + T(['Tag', 'Qty', 'Make', 'Model', 'Location', 'Connections', 'Network'], rows.map((gs) => { const g = gs[0], dev = devOf(g);
+          return [gs.map((x) => '<b>' + esc(x.name) + '</b>').join(', '), String(gs.length), esc(g.make || (dev && dev.make) || ''), esc(g.model || (dev && dev.model) || ''), esc((dev && dev.location) || ''), gs.map((x) => conn(x)).filter(Boolean).join('<br>'), gs.map((x) => net(x)).filter(Boolean).join('<br>')]; }), '');
       }).join('');
       add('gear', 'Equipment', eq || '<p class="rnone">No equipment yet.</p>');
       // cables
@@ -2423,7 +2450,7 @@ const PatchView = (() => {
         .map((r) => ['<b>' + esc(r.c.label || '') + '</b>', esc(r.from), esc(r.to), esc(KIND_STYLE[r.c.kind] || r.c.kind || ''), esc(r.c.length || '')]);
       add('cables', 'Cables', T(['Name', 'From', 'To', 'Type', 'Length'], cl, 'No cables.'));
       // things to check (frequencies first)
-      const ck = P.checks(doc).slice().sort((p, q) => !!q.rf - !!p.rf || ({ bad: 0, warn: 1, note: 2 }[p.level] - { bad: 0, warn: 1, note: 2 }[q.level]));
+      const ck = P.checks(doc).concat(qtyChecks(doc)).sort((p, q) => !!q.rf - !!p.rf || ({ bad: 0, warn: 1, note: 2 }[p.level] - { bad: 0, warn: 1, note: 2 }[q.level]));
       if (ck.length) add('checks', 'Things to check', T(['', 'What'], ck.map((c) => ['<span class="rlv ' + c.level + '">' + (c.level === 'bad' ? 'Clash' : c.level === 'warn' ? 'Check' : 'Note') + '</span>', esc(c.text)]), ''));
       // the key for the drawing page
       const cats = Object.entries(P.CATS).filter(([k]) => D.key.cats.includes(k));

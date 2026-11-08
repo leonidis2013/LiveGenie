@@ -368,13 +368,25 @@ async function api(req, res, url, user, token) {
       let buckets = []; try { buckets = JSON.parse(store.getSetting('gear_buckets', '[]')); } catch (e) { /* default */ }
       const dupeSkip = Auth.atLeast(user, 'admin') ? devices.dupeSkip(store.getSetting) : [];
       return send(res, 200, { ok: true, categories: Devices.CATEGORIES, buckets, dupeSkip, devices: devices.list(user).map((d) => ({
-        id: d.id, name: d.name, aliases: d.aliases, category: d.category, make: d.make, model: d.model, location: d.location, bucket: d.bucket, kind: d.kind || pk.get(d.id) || '', pair_id: d.pair_id, txtype: d.txtype, capsule: d.capsule, freq: d.freq, networked: d.networked, uplink_id: d.networked ? d.uplink_id : null, uplink_port: d.networked ? d.uplink_port : '',
+        id: d.id, name: d.name, aliases: d.aliases, category: d.category, make: d.make, model: d.model, location: d.location, bucket: d.bucket, kind: d.kind || pk.get(d.id) || '', qty: d.qty || 1, pair_id: d.pair_id, txtype: d.txtype, capsule: d.capsule, freq: d.freq, networked: d.networked, uplink_id: d.networked ? d.uplink_id : null, uplink_port: d.networked ? d.uplink_port : '',
         ips: d.ips, photo: d.photo, tech_only: d.tech_only, inputs: d.inputs, outputs: d.outputs, files: fileCount.get(d.id) || 0 })) });
     }
     if (m === 'GET' && b === 'models') return send(res, 200, { ok: true, models: devices.models(store.getSetting) });
     if (m === 'POST' && b === 'models') { need(user, 'admin'); const body = await readJson(req); return send(res, 200, { ok: true, models: devices.saveModels(body.add, body.remove, user, store.getSetting, store.setSetting) }); }
     if (m === 'PUT' && b === 'buckets') { need(user, 'admin'); const body = await readJson(req); return send(res, 200, { ok: true, buckets: devices.setBuckets(body.buckets, body.renames, user, store.setSetting) }); }
     if (m === 'PUT' && b === 'dupe-skip') { need(user, 'admin'); const body = await readJson(req); return send(res, 200, { ok: true, dupeSkip: devices.addDupeSkip(body.ids, user, store.getSetting, store.setSetting) }); }
+    if (m === 'POST' && b && /^\d+$/.test(b) && c === 'combine') {
+      need(user, 'admin');
+      const r = devices.combine(b, (await readJson(req)).ids, user);
+      // stage patch blocks of the combined cards now stand for units of the kept card
+      const cur = patch.get();
+      if (cur.doc.gear.some((g) => r.gone.includes(g.device_id))) {
+        const doc = JSON.parse(JSON.stringify(cur.doc));
+        doc.gear.forEach((g) => { if (r.gone.includes(g.device_id)) g.device_id = Number(b); });
+        patch.save(doc, user, null, 'Combined identical cards');
+      }
+      return send(res, 200, { ok: true, id: Number(b), qty: r.qty });
+    }
     if (m === 'POST' && b && /^\d+$/.test(b) && c === 'merge') {
       need(user, 'admin');
       const into = Number((await readJson(req)).into);

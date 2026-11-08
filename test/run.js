@@ -758,6 +758,33 @@ test('to do lists live on one page in groups: admins make and arrange them, ever
   assert.strictEqual((await vol.post('/api/pages/0/checklists/' + stage + '/tick', { item: 'Mics out', done: true })).status, 409, 'a removed list cannot be ticked');
 });
 
+test('quantities: one card for several of the same gear; wireless stays one each; identical cards combine', async () => {
+  const one = async (id) => (await admin.get('/api/devices/' + id)).data.device;
+  const spk = (await admin.post('/api/devices', { name: 'Q SPK', kind: 'speaker', make: 'Brand', model: 'S12', qty: 2 })).data.id;
+  assert.strictEqual((await one(spk)).qty, 2);
+  assert.strictEqual((await admin.get('/api/devices')).data.devices.find((d) => d.id === spk).qty, 2, 'the list carries it');
+  for (const bad of [0, -1, 1000, 2.5, 'x']) { const id = (await admin.post('/api/devices', { name: 'Q bad ' + String(bad), kind: 'speaker', qty: bad })).data.id; assert.strictEqual((await one(id)).qty, 1, 'qty ' + bad + ' falls back to 1'); await admin.del('/api/devices/' + id); }
+  const rx = (await admin.post('/api/devices', { name: 'Q RX', kind: 'receiver', qty: 4 })).data.id;
+  assert.strictEqual((await one(rx)).qty, 1, 'a receiver is one each');
+  // an edit that leaves qty out keeps it
+  await admin.put('/api/devices/' + spk, { ...(await one(spk)), qty: undefined, location: 'Stage' });
+  assert.strictEqual((await one(spk)).qty, 2);
+  // combine: quantities add up, the other card goes, its manual and links move
+  const spk2 = (await admin.post('/api/devices', { name: 'Q SPK B', kind: 'speaker', make: 'brand', model: 's12', qty: 3 })).data.id;
+  const amp = (await admin.post('/api/devices', { name: 'Q AMP', kind: 'amp', make: 'Brand', model: 'A1' })).data.id;
+  const sw = (await admin.post('/api/devices', { name: 'Q SW', kind: 'network', networked: true })).data.id;
+  await admin.put('/api/devices/' + spk2, { ...(await one(spk2)), networked: true, uplink_id: sw, uplink_port: '4' });
+  assert.strictEqual((await vol.post('/api/devices/' + spk + '/combine', { ids: [spk2] })).status, 403);
+  assert.strictEqual((await admin.post('/api/devices/' + spk + '/combine', { ids: [amp] })).status, 400, 'different gear cannot be one card');
+  assert.strictEqual((await admin.post('/api/devices/' + rx + '/combine', { ids: [spk] })).status, 400, 'wireless never combines');
+  const r = await admin.post('/api/devices/' + spk + '/combine', { ids: [spk2] });
+  assert.strictEqual(r.data.qty, 5);
+  assert.strictEqual((await admin.get('/api/devices/' + spk2)).status, 404, 'the other card is gone');
+  const k = await one(spk);
+  assert.ok(k.aliases.includes('Q SPK B') && k.uplink_id === sw, 'its name and network link move to the kept card');
+  for (const id of [spk, rx, amp, sw]) await admin.del('/api/devices/' + id);
+});
+
 test('gear knows what it is: wireless mics pair with a receiver, capsules fit a mic, old gear learns its kind', async () => {
   const rx = (await admin.post('/api/devices', { name: 'Test RX', kind: 'receiver', category: 'audio', make: 'Brand', model: 'R2' })).data.id;
   const tx = (await admin.post('/api/devices', { name: 'Test HH 1', kind: 'txmic', pair_id: rx, txtype: 'Handheld', capsule: 'Head A', freq: '518.2' })).data.id;
@@ -795,7 +822,7 @@ test('gear knows what it is: wireless mics pair with a receiver, capsules fit a 
   const dir = fs2.mkdtempSync(path.join(os2.tmpdir(), 'lg-kind-'));
   const DBm = require(path.join(ROOT, 'lib', 'db'));
   const db1 = DBm.open(path.join(dir, 'x.db'));
-  db1.exec('ALTER TABLE patch DROP COLUMN rev; ALTER TABLE patch_versions DROP COLUMN rev; ALTER TABLE patch_versions DROP COLUMN kind'); db1.exec(['kind', 'pair_id', 'txtype', 'capsule', 'freq'].map((c) => 'ALTER TABLE devices DROP COLUMN ' + c).join('; ')); db1.prepare('UPDATE schema_version SET v = 12').run();
+  db1.exec('ALTER TABLE devices DROP COLUMN qty; ALTER TABLE patch DROP COLUMN rev; ALTER TABLE patch_versions DROP COLUMN rev; ALTER TABLE patch_versions DROP COLUMN kind'); db1.exec(['kind', 'pair_id', 'txtype', 'capsule', 'freq'].map((c) => 'ALTER TABLE devices DROP COLUMN ' + c).join('; ')); db1.prepare('UPDATE schema_version SET v = 12').run();
   db1.prepare("INSERT INTO settings (key, value) VALUES ('gear_models', ?)").run(JSON.stringify([{ kind: 'speaker', make: 'Brand', model: 'Col 70' }]));
   db1.prepare("INSERT INTO devices (name, aliases, category, make, model, location, ip, mac, photo, manual_url, notes, created_at, updated_at) VALUES ('Brand Col 70', '[]', 'audio', 'Brand', 'COL 70', '', '', '', '', '', '', 1, 1)").run();
   db1.close();
@@ -903,7 +930,7 @@ test('checklists that were on pages move to To do, keeping their ticks and log',
   const DBm = require(path.join(ROOT, 'lib', 'db'));
   // a database from before 0.20: back to migration 10, then a page with a checklist and a tick
   const db1 = DBm.open(path.join(dir, 'x.db'));
-  db1.exec('ALTER TABLE patch DROP COLUMN rev; ALTER TABLE patch_versions DROP COLUMN rev; ALTER TABLE patch_versions DROP COLUMN kind'); db1.exec('DROP TABLE todo_lists; ALTER TABLE devices DROP COLUMN networked; ' + ['kind', 'pair_id', 'txtype', 'capsule', 'freq'].map((c) => 'ALTER TABLE devices DROP COLUMN ' + c).join('; ')); db1.prepare('UPDATE schema_version SET v = 10').run();
+  db1.exec('ALTER TABLE devices DROP COLUMN qty; ALTER TABLE patch DROP COLUMN rev; ALTER TABLE patch_versions DROP COLUMN rev; ALTER TABLE patch_versions DROP COLUMN kind'); db1.exec('DROP TABLE todo_lists; ALTER TABLE devices DROP COLUMN networked; ' + ['kind', 'pair_id', 'txtype', 'capsule', 'freq'].map((c) => 'ALTER TABLE devices DROP COLUMN ' + c).join('; ')); db1.prepare('UPDATE schema_version SET v = 10').run();
   db1.prepare("INSERT INTO spaces (slug, name) VALUES ('audio', 'Audio')").run();
   const blocks = [{ type: 'text', md: 'Before' }, { type: 'checklist', id: 'abc12345', title: 'Desk check', items: ['Faders down', 'Scenes loaded'], schedule: [] }];
   db1.prepare("INSERT INTO pages (space_id, title, blocks, version, created_at, updated_at) VALUES (1, 'Sunday desk', ?, 1, 1, 1)").run(JSON.stringify(blocks));

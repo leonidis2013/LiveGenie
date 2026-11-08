@@ -56,7 +56,17 @@ async function viewGearSetup(qs) {
     const out = { console: null, boxes: [], other: [] };
     out.console = c.useId ? { name: c.name, id: c.useId, kept: true } : { name: take(c.name.trim() || Tags.suggest('console', taken, { model: c.model.trim() })) };
     for (const b of st.boxes) out.boxes.push({ b, name: take(b.name.trim() || Tags.suggest('stagebox', taken)) });
-    for (const o of st.other) for (let i = 0; i < o.qty; i++) out.other.push({ o, name: take(Tags.suggest(o.kind, taken)) });
+    // wireless (receivers, in-ears): a card for each. Processors, amps, speakers: one card with a quantity,
+    // named after its make and model, and each unit gets its own tag on the stage patch (SPK-1, SPK-2)
+    const each = ['receiver', 'iemtx', 'txmic', 'bodypack'];
+    for (const o of st.other) {
+      if (each.includes(o.kind) || o.qty === 1) { for (let i = 0; i < o.qty; i++) { const n = take(Tags.suggest(o.kind, taken)); out.other.push({ o, name: n, units: [n] }); } continue; }
+      let card = [o.make, o.model].filter(Boolean).join(' ') || Tags.suggest(o.kind, taken);
+      if (taken.some((t) => Tags.norm(t) === Tags.norm(card))) { let k = 2; while (taken.some((t) => Tags.norm(t) === Tags.norm(card + ' ' + k))) k++; card += ' ' + k; }
+      take(card);
+      const units = []; for (let i = 0; i < o.qty; i++) units.push(take(Tags.suggest(o.kind, taken)));
+      out.other.push({ o, name: card, units });
+    }
     return out;
   }
 
@@ -141,7 +151,7 @@ async function viewGearSetup(qs) {
       const groups = [
         ['Console', [p.console.kept ? '' : row(p.console.name, c.model, 'Console')]],
         ['Stage boxes', p.boxes.map((x) => row(x.name, x.b.model, x.b.inputs + ' in · ' + x.b.outputs + ' out'))],
-        ...SETUP_GROUPS.map((g) => [g.title, p.other.filter((x) => x.o.role === g.role).map((x) => row(x.name, x.o.model, [x.o.make, x.o.n && g.unit ? x.o.n + ' ' + g.unit : ''].filter(Boolean).join(' · ')))])
+        ...SETUP_GROUPS.map((g) => [g.title, p.other.filter((x) => x.o.role === g.role).map((x) => row(x.name + (x.units.length > 1 ? ' ×' + x.units.length : ''), x.o.model, [x.o.make, x.o.n && g.unit ? x.o.n + ' ' + g.unit : '', x.units.length > 1 ? 'on the drawing as ' + x.units.join(', ') : ''].filter(Boolean).join(' · ')))])
       ].filter((g) => g[1].join(''));
       const total = groups.reduce((n, g) => n + g[1].filter(Boolean).length, 0);
       const proc = p.other.filter((x) => x.o.role === 'processor'), amps = p.other.filter((x) => x.o.role === 'amp'), spk = p.other.filter((x) => x.o.role === 'speaker');
@@ -272,7 +282,7 @@ async function viewGearSetup(qs) {
       for (const x of p.boxes) boxIds.push(await post({ name: x.name, kind: 'stagebox', make: x.b.make.trim(), model: x.b.model.trim(), location: x.b.location, inputs: Number(x.b.inputs) || 0, outputs: Number(x.b.outputs) || 0, notes: 'Connected to ' + p.console.name + ' over ' + x.b.link + '.' }));
       const otherIds = [];
       for (const x of p.other) {
-        const o = x.o, d = { name: x.name, kind: o.kind, make: o.make, model: o.model };
+        const o = x.o, d = { name: x.name, kind: o.kind, make: o.make, model: o.model, qty: x.units.length };
         if (o.kind === 'receiver') Object.assign(d, { outputs: o.n || 1, notes: (o.n || 1) + '-channel wireless receiver.' });
         else if (o.kind === 'iemtx') Object.assign(d, { inputs: 2 });
         else if (o.kind === 'processor') Object.assign(d, { inputs: 2, outputs: o.n || 6 });
@@ -292,14 +302,16 @@ async function viewGearSetup(qs) {
         if (!doc.cables.some((k) => k.ap === 'link' && ((k.a === sb.id && k.b === con.id) || (k.b === sb.id && k.a === con.id)))) P.connect(doc, sb, 'link', con, 'link', { label: x.b.link });
       });
       const pg = [], ag = [], sg = [];
-      p.other.forEach((x, i) => {
-        const o = x.o, base = { name: x.name, make: o.make, model: o.model, device_id: otherIds[i] };
+      // a card with a quantity: one block per unit (the k-th one already on the drawing is kept)
+      const placeUnit = (item, k) => doc.gear.filter((g) => g.device_id === item.device_id)[k] || P.findGear(doc, item.name) || P.addGear(doc, item);
+      p.other.forEach((x, i) => x.units.forEach((unit, k) => {
+        const o = x.o, base = { name: unit, make: o.make, model: o.model, device_id: otherIds[i] };
         if (o.kind === 'receiver') place({ ...base, kind: 'receiver', nin: o.n || 1 });
         else if (o.kind === 'iemtx') place({ ...base, kind: 'iemtx', mode: 'Stereo' });
-        else if (o.kind === 'processor') pg.push(place({ ...base, kind: 'processor', nin: 2, nout: o.n || 6 }));
-        else if (o.kind === 'amp') ag.push(place({ ...base, kind: 'amp', nin: o.n || 2 }));
-        else if (o.kind === 'speaker') sg.push(place({ ...base, kind: 'speaker', group: 'Mains' }));
-      });
+        else if (o.kind === 'processor') pg.push(placeUnit({ ...base, kind: 'processor', nin: 2, nout: o.n || 6 }, k));
+        else if (o.kind === 'amp') ag.push(placeUnit({ ...base, kind: 'amp', nin: o.n || 2 }, k));
+        else if (o.kind === 'speaker') sg.push(placeUnit({ ...base, kind: 'speaker', group: 'Mains' }, k));
+      }));
       if (st.cables) {
         // a starting point for the PA: console LR → processor → amps → speakers (check it against the rack)
         const first = pg[0];

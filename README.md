@@ -4,7 +4,7 @@
 
 The Rolling Hills Community Church AVL knowledge base: one web app where volunteers find how our system works, how to run a service and how to fix what broke. Part of the Live series (LiveMic, LiveCompanion, LivePi, LiveVoice).
 
-Version 0.23.4 · © 2026 Jerod Ulicki
+Version 0.24.0 · © 2026 Jerod Ulicki
 
 ## What it does
 
@@ -118,7 +118,8 @@ Run it on the TrueNAS host and reach it from the AVL and office VLANs through th
 | 0.11.0 | Phone layout (bottom tabs, + button, bottom sheets, To do screen) and desktop layout (sidebar with spaces and pages, On this page outline) |
 | 0.12.0 | Phone sign in: tap your name, PIN pad, and QR code sign in from a signed-in computer |
 | 0.13.0 | Stage patch: one visual signal-flow drawing for the whole system (equipment pane, drag to connect, follow a signal, overview and sockets, cable styles, checks), with the input, output, wireless, in-ear and cable lists and the PDF made from it; old patch lists moved onto it |
-| 0.23.4 | Stage patch PDF no longer freezes phones: the report prints a still copy of the drawing instead of moving the live one, the drawing is not refitted while the print sheet is open, extra taps on PDF are ignored while one is being made, and the report is tidied away when you leave the page (this release) |
+| 0.24.0 | **Quantities in the Gear Locker:** one card can stand for several of the same thing (JBL CBT 70J-1 ×2, SM58 ×6, capsules, DIs); wireless mics, receivers, in-ear transmitters and packs stay one card each. ×N badges, a Quantity line and a total in the header (cards · pieces of gear). **Split into separate cards** when units need their own details, and **Combine ×N** for identical cards you already have. On the stage patch a card is placed once per unit (SPK-1, SPK-2), the Add pane shows how many are placed, and placing more than you own is flagged. The guided setup makes one card with a quantity for speakers, amps and processors; the PDF lists each card once with its quantity (this release) |
+| 0.23.4 | Stage patch PDF no longer freezes phones: the report prints a still copy of the drawing instead of moving the live one, the drawing is not refitted while the print sheet is open, extra taps on PDF are ignored while one is being made, and the report is tidied away when you leave the page |
 | 0.23.3 | Auto-arrange is compact, like a stage plot: inputs (sources, stage boxes) to the left of the console, and each thing the console feeds in its own band starting right next to it (in-ears, a sub off the stage box, processor → amps → speakers), stacked top to bottom in console output order, instead of one long line; network gear in a lane underneath and unconnected gear in a row at the bottom |
 | 0.23.2 | Gear photo highlights shown as a spotlight: the photo dims except the highlight in focus, which glows in its colour with a tag on it (like AWCK-01), and a caption sits beside it with where the gear lives, a bold title and a line about it; step through several with the arrows, the list or a tap; on a phone the caption sits under the photo. Each highlight now has a title, a tag and a line about it |
 | 0.23.1 | Wireless mics and in-ear packs are no longer drawn twice: opening the stage patch links ones already on the drawing to their Gear Locker cards (by name) instead of adding copies, and removes copies an earlier version made; when a receiver is full it says so instead of drawing a loose copy. The PDF report lists wireless receivers (with location and network) under Microphones and in-ear transmitters under In-ear monitors, and no longer repeats them under Equipment |

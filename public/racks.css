@@ -80,25 +80,56 @@
 .lupic .lut { font-size:22px; fill:#fff; font-weight:800; paint-order:stroke; stroke:#000; stroke-width:4px; }
 .luh { position:absolute; width:26px; height:26px; margin:-13px 0 0 -13px; border-radius:50%; background:#5aa2ff; border:3px solid #fff; box-shadow:0 0 0 2px rgba(0,0,0,.5); cursor:grab; touch-action:none; }
 
-/* print: the rack for its door */
+/* print: the rack for its door (0.25.5) — one letter page for most racks, black on white, no blank pages */
 #rkprint { display:none; }
 @media print {
+  @page rackdoor { size:letter portrait; margin:12mm 12mm 12mm; }
+  html, body.printrack { height:auto !important; min-height:0 !important; overflow:visible !important; padding:0 !important; margin:0 !important; background:#fff !important; }
   body.printrack > *:not(#rkprint) { display:none !important; }
-  body.printrack { background:#fff !important; }
-  body.printrack #rkprint { display:block; color:#111; font:11px/1.4 system-ui, -apple-system, "Segoe UI", sans-serif; }
-  #rkprint .rkph { display:flex; gap:14px; align-items:center; border-bottom:2px solid #111; padding-bottom:8px; margin-bottom:12px; }
-  #rkprint .rkph img { height:46px; }
-  #rkprint .rkpo { font-size:11px; letter-spacing:.12em; text-transform:uppercase; color:#555; }
-  #rkprint h1 { font-size:22px; margin:2px 0; }
-  #rkprint .rkpm { color:#444; }
-  #rkprint .rkpb { display:grid; grid-template-columns:82mm 1fr; gap:10mm; align-items:start; }
-  #rkprint .rksvg .rkframe { fill:#fff; stroke:#111; } #rkprint .rksvg .rkslot { fill:#fff; stroke:#ccc; }
-  #rkprint .rksvg .rkun { fill:#333; } #rkprint .rksvg .rkhole { fill:#999; } #rkprint .rksvg .rkfree { fill:#999; }
-  #rkprint .rksvg .rkg rect { fill:#f1f3f6 !important; stroke:#111 !important; } #rkprint .rksvg .rkt { fill:#111; } #rkprint .rksvg .rks { fill:#444; }
+  body.printrack #rkprint { display:block; page:rackdoor; color:#111; font:10.5px/1.4 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; -webkit-print-color-adjust:exact; print-color-adjust:exact; }
+  #rkprint h2 { font-size:10px; letter-spacing:.14em; text-transform:uppercase; color:#333; margin:14px 0 6px; padding-bottom:3px; border-bottom:1px solid #bbb; }
+  #rkprint .rkph { display:flex; gap:12px; align-items:center; border-bottom:2.5px solid #111; padding-bottom:9px; margin-bottom:12px; }
+  #rkprint .rkph img { height:44px; width:auto; }
+  #rkprint .rkph .grow { flex:1; min-width:0; }
+  #rkprint .rkpo { font-size:9.5px; letter-spacing:.16em; text-transform:uppercase; color:#555; font-weight:700; }
+  #rkprint h1 { font-size:24px; line-height:1.1; margin:2px 0 3px; font-weight:900; }
+  #rkprint .rkpm { color:#444; font-size:10px; }
+  #rkprint .rkpstats { display:flex; gap:6px; }
+  #rkprint .rkpstat { border:1px solid #bbb; border-radius:6px; padding:4px 8px; text-align:center; min-width:42px; }
+  #rkprint .rkpstat b { display:block; font-size:13px; line-height:1.15; }
+  #rkprint .rkpstat span { font-size:8px; text-transform:uppercase; letter-spacing:.1em; color:#555; }
+  /* the drawing big on the left, notes and power beside it */
+  #rkprint .rkpbody { display:flex; gap:9mm; align-items:flex-start; }
+  #rkprint .rkpsvg { flex:0 0 104mm; }
+  #rkprint .rkpsvg svg { display:block; width:100%; height:auto; max-height:150mm; }
+  #rkprint .rkpside { flex:1; min-width:0; }
+  #rkprint .rkpside h2:first-child { margin-top:0; }
+  #rkprint .rkpnotes { font-size:10px; color:#222; margin-bottom:8px; }
+  #rkprint .rkppow { break-inside:avoid; margin-bottom:8px; }
+  #rkprint .rkppow > span, #rkprint .rkppow li span { color:#666; font-weight:400; }
+  #rkprint .rkppow em { display:block; font-style:normal; font-weight:700; font-size:10px; margin:1px 0 4px; }
+  #rkprint .rkppow ol { list-style:none; margin:0; padding:0; columns:2; column-gap:10px; }
+  #rkprint .rkppow li { break-inside:avoid; padding:2px 0; border-bottom:1px solid #e3e3e3; font-size:9.5px; }
+  #rkprint .rkppow li i { display:inline-block; width:15px; font-style:normal; font-weight:700; color:#555; }
+  /* the list, full width */
+  #rkprint .rkpt { width:100%; border-collapse:collapse; font-size:10px; }
+  #rkprint .rkpt th { text-align:left; font-size:8.5px; letter-spacing:.1em; text-transform:uppercase; color:#333; border-bottom:1.5px solid #111; padding:4px 6px; }
+  #rkprint .rkpt td { border-bottom:1px solid #d6d6d6; padding:4px 6px; vertical-align:top; }
+  #rkprint .rkpt td:first-child { white-space:nowrap; font-weight:700; width:12mm; }
+  #rkprint .rkpt .r { text-align:right; white-space:nowrap; }
+  #rkprint .rkpt tr { break-inside:avoid; }
+  #rkprint .rkpt tr.panel td { color:#555; font-style:italic; }
+  #rkprint .rkpt tr.panel td span { font-style:normal; color:#888; margin-left:4px; }
+  #rkprint .rkpt tr.free td { color:#999; }
+  #rkprint .rkpfoot { margin-top:10px; padding-top:5px; border-top:1px solid #bbb; font-size:8.5px; color:#666; }
+  /* drawing colours on paper */
+  #rkprint .rksvg .rkframe { fill:#fff; stroke:#111; } #rkprint .rksvg .rkslot { fill:#fff; stroke:#d0d0d0; }
+  #rkprint .rksvg .rkun { fill:#333; } #rkprint .rksvg .rkhole { fill:#aaa; } #rkprint .rksvg .rkfree { fill:#999; }
+  #rkprint .rksvg .rkg rect { fill:#f2f4f7 !important; stroke:#111 !important; } #rkprint .rksvg .rkt { fill:#111; } #rkprint .rksvg .rks { fill:#444; }
   #rkprint .rksvg .rkit > rect:first-of-type { fill:#fafafa; stroke:#888; } #rkprint .rksvg .rkh { stroke:#ccc; } #rkprint .rksvg .rkvent { fill:#ddd; stroke:#999; }
   #rkprint .rksvg .rkpl { fill:#555; } #rkprint .rksvg .rkchip rect { fill:#eee; stroke:#888; } #rkprint .rksvg .rkchip text { fill:#111; } #rkprint .rksvg .rkshelf { stroke:#555; }
-  #rkprint .rktab { font-size:10.5px; } #rkprint .rktab th { color:#333; border-bottom:1.5px solid #111; } #rkprint .rktab td { border-bottom:1px solid #ccc; }
-  #rkprint .rktab tr { break-inside:avoid; }
+  #rkprint .rksvg .rkjack { fill:#fff; stroke:#555; }
+  #rkprint .rksvg .rkgrip { display:none; }
 }
 .rkphoto .mkpic img { max-height:min(680px, 82vh) !important; }
 .rkphoto .sptitle { font-size:clamp(14px, 1.6vw, 20px); }

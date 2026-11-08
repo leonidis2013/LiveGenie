@@ -181,18 +181,32 @@ async function viewRack(id, mode) {
   function paintPhoto() {
     const host = $('#rkphoto');
     if (!rack.photo) { host.innerHTML = '<div class="rkhd"><h2>Photo</h2></div><div class="card empty">' + (admin ? 'Add a photo of the front of the rack (Photo, at the top), then line it up: every piece of gear in it then shows its spot in the photo, on its own card too.' : 'No photo of this rack yet.' + (canEdit ? ' Tap Edit to add one.' : '')) + '</div>'; return; }
-    const rows = gearRows().filter((g) => g.rack_u || g.shelf_id).sort((a, b) => ((a.rack_u || (items.find((x) => x.id === a.shelf_id) || {}).u || 99) - (b.rack_u || (items.find((x) => x.id === b.shelf_id) || {}).u || 99)) || String(a.rack_side).localeCompare(String(b.rack_side)));
-    const marks = rows.map((g) => rackMark(g, rack));
+    const rows = photoEntries();
+    const marks = rows.map((r) => r.mark);
     host.innerHTML = '<div class="rkhd"><h2>Photo</h2>' + (admin ? '<span class="rkbtns">' + (rows.length ? '<button class="btn sm" id="rkSpots">' + icon('edit') + 'Adjust spots</button>' : '') + '<button class="btn sm" id="rkLine">' + icon('edit') + 'Line up the photo</button></span>' : '') + '</div><div id="rkspot" class="capped">' + marksView(rack.photo, marks, { location: rack.name }) + '</div>' +
       '<div class="note" style="margin-top:6px">' + (marks.length ? 'Tap a piece of gear in the drawing, or step through with the arrows. Tap the photo for full screen.' : 'Place gear in the rack and it shows here.') + '</div>';
     wireMarksView($('#rkspot'));
     photoLightbox($('#rkspot'), rack.photo, marks, { location: rack.name });
-    rkSpotIds = rows.map((g) => g.id);
+    rkSpotIds = rows.map((r) => r.key);
     const sb = $('#rkSpots'); if (sb) sb.addEventListener('click', () => adjustSpots(rack, rows, async (spots) => { await call('PUT', '/api/racks/' + rack.id, { spots }); rack.spots = spots; paintPhoto(); toast('Spots saved', 'ok'); }));
     const lb = $('#rkLine'); if (lb) lb.addEventListener('click', () => lineUp(rack, async (rails) => { await call('PUT', '/api/racks/' + rack.id, { rails }); rack.rails = rails; paintPhoto(); toast('Photo lined up', 'ok'); }));
   }
+  /**
+   * What shows on the photo, top to bottom: every piece of gear, and the rack's own pieces worth pointing at
+   * (patch panels, custom items, cable managers, drawers, a shelf with nothing on it…). Each has a key (g12 / iab3) for its spot.
+   */
+  function photoEntries() {
+    const g = gearRows().filter((x) => x.rack_u || x.shelf_id).map((x) => ({ key: 'g' + x.id, u: x.rack_u || (items.find((y) => y.id === x.shelf_id) || {}).u || 99, side: x.rack_side || '', name: x.name, title: tagModel(x), mark: rackMark(x, rack), grid: () => { const m = rackMark({ ...x, notes: '' }, { ...rack, spots: {} }); return { x: m.x, y: m.y, w: m.w, h: m.h }; } }));
+    const it = items.filter((x) => x.type !== 'shelf' || !gear.some((y) => y.shelf === x.id)).map((x) => {
+      const title = x.label || RackCore.ITEM_TYPES[x.type];
+      const grid = () => RackCore.region(rack.rails, rack.units, x.u, x.h, '');
+      const box = (rack.spots && rack.spots['i' + x.id]) || grid();
+      return { key: 'i' + x.id, u: x.u, side: '', name: title, title, mark: { ...box, color: 'blue', label: title, tag: '', note: x.label ? RackCore.ITEM_TYPES[x.type] : '' }, grid };
+    });
+    return g.concat(it).sort((a, b) => a.u - b.u || a.side.localeCompare(b.side));
+  }
   let rkSpotIds = [];
-  const spotTo = (gid) => { const k = rkSpotIds.indexOf(gid); const b = $('#rkspot .spk[data-mi="' + k + '"]'); if (k >= 0 && b) b.click(); };
+  const spotTo = (key) => { const k = rkSpotIds.indexOf(key); const b = $('#rkspot .spk[data-mi="' + k + '"]'); if (k >= 0 && b) b.click(); };
 
   // ---- the gear list beside it (admins): unracked first
   function paintSide() {
@@ -328,8 +342,8 @@ async function viewRack(id, mode) {
         if (placeCard(pending.id, p.u, pending.side || '')) { pending = null; paintPending(); paintSide(); }
         return;
       }
-      if (gEl) { sel = { kind: 'gear', id: Number(gEl.dataset.gear) }; paintAll(true); spotTo(sel.id); return; }
-      if (iEl) { sel = { kind: 'item', id: iEl.dataset.item }; paintAll(true); return; }
+      if (gEl) { sel = { kind: 'gear', id: Number(gEl.dataset.gear) }; paintAll(true); spotTo('g' + sel.id); return; }
+      if (iEl) { sel = { kind: 'item', id: iEl.dataset.item }; paintAll(true); spotTo('i' + sel.id); return; }
       sel = null; paintAll(true);
     });
     if (!admin) return;
@@ -423,7 +437,28 @@ async function viewRack(id, mode) {
       lineUp(rack, async (rails) => { await call('PUT', '/api/racks/' + rack.id, { rails }); rack.rails = rails; paintPhoto(); toast('Photo lined up', 'ok'); });
     }));
   }
-  const pr = $('#rkPr'); if (pr) pr.addEventListener('click', () => printRack(rack, elevation(true), tableHtml()));
+  // the print: every U top to bottom (free space too), what plugs in where, IPs, and a power summary
+  function printTable() {
+    const rows = gearRows().map((g) => ({ g, u: g.rack_u || ((items.find((x) => x.id === g.shelf_id) || {}).u) || 99, sub: g.shelf_id ? 1 : 0 }))
+      .concat(items.filter((x) => x.type !== 'shelf' || !gear.some((g) => g.shelf === x.id)).map((it) => ({ it, u: it.u, sub: 0 })))
+      .concat(RackCore.gaps(rack.units, items, gearRows()).map((gp) => ({ free: gp, u: gp.u, sub: 0 })))
+      .sort((a, b) => a.u - b.u || a.sub - b.sub || String((a.g || {}).rack_side || '').localeCompare(String((b.g || {}).rack_side || '')));
+    const pdu = (g) => { const p = g.power_pdu && card(g.power_pdu); return p ? esc(p.name) + (g.power_outlet ? ' · outlet ' + g.power_outlet : '') : ''; };
+    const ip = (g) => { const c = card(g.id); const a = (c.ips && c.ips.length ? c.ips.map((x) => x.ip || x).filter(Boolean) : []).concat(c.ip ? [c.ip] : []); return esc([...new Set(a)].join(', ')); };
+    const span = (u, h) => u + (h > 1 ? '–' + (u + h - 1) : '');
+    return '<table class="rkpt"><thead><tr><th>U</th><th>Tag</th><th>Make and model</th><th>Plugs into</th><th class="r">Power</th><th>IP address</th></tr></thead><tbody>' + rows.map((r) => {
+      if (r.free) return '<tr class="free"><td>' + span(r.free.u, r.free.h) + '</td><td colspan="5">Free · ' + r.free.h + 'U</td></tr>';
+      if (r.it) return '<tr class="panel"><td>' + span(r.it.u, r.it.h) + '</td><td colspan="5">' + esc(r.it.label || RackCore.ITEM_TYPES[r.it.type]) + (r.it.label ? ' <span>' + esc(RackCore.ITEM_TYPES[r.it.type]) + '</span>' : '') + '</td></tr>';
+      const g = r.g, where = rackSpot(g, rack).replace(/^U/, '').replace(/ left half$/, ' L').replace(/ right half$/, ' R');
+      return '<tr><td>' + esc(where) + '</td><td><b>' + esc(g.name) + '</b></td><td>' + esc([g.make, g.model].filter(Boolean).join(' ')) + '</td><td>' + pdu(g) + '</td><td class="r">' + (g.power_w ? g.power_w + ' W' : '') + '</td><td>' + ip(g) + '</td></tr>';
+    }).join('') + '</tbody></table>';
+  }
+  const pr = $('#rkPr'); if (pr) pr.addEventListener('click', () => {
+    const us = RackCore.usage(rack.units, items, gearRows());
+    const strips = (data.power || []);
+    const watts = gearRows().filter((g) => g.kind !== 'power').reduce((t, g) => t + (Number(g.power_w) || 0), 0);
+    printRack(rack, elevation(true), printTable(), { used: us.used, free: us.free, watts, strips, count: gear.length });
+  });
   // Done: wait for the last save, then back to view mode
   const dn = $('#rkDone'); if (dn) dn.addEventListener('click', async () => { dn.disabled = true; try { await saving; } catch (e) { /* the save said why */ } location.hash = '#/racks/' + rack.id; });
   paintAll();
@@ -522,9 +557,9 @@ function lineUp(rack, done) {
  */
 function adjustSpots(rack, rows, done) {
   const spots = JSON.parse(JSON.stringify(rack.spots || {}));
-  const grid = (g) => { const m = rackMark({ ...g, notes: '' }, { ...rack, spots: {} }); return { x: m.x, y: m.y, w: m.w, h: m.h }; };
-  const boxOf = (g) => spots['g' + g.id] || grid(g);
-  let cur = rows.length ? rows[0].id : null;
+  // rows: { key, name, title, grid() } for gear and the rack's own pieces
+  const boxOf = (g) => spots[g.key] || g.grid();
+  let cur = rows.length ? rows[0].key : null;
   modal('<h3>Adjust spots</h3><p class="note">Drag a box to where that piece of gear really is in the photo, and drag its corner to resize. Handy when there is a gap between pieces, or gear sits a hole off the U lines.</p>' +
     '<div class="sjwrap"><div class="lupic sjpic" id="sjp"><img src="/uploads/' + esc(rack.photo) + '" alt="" draggable="false"><div id="sjb"></div></div>' +
     '<div class="sjlist" id="sjl"></div></div>' +
@@ -532,10 +567,10 @@ function adjustSpots(rack, rows, done) {
     w.classList.add('mwide', 'mkmodal');
     const pic = $('#sjp', w);
     const paint = () => {
-      $('#sjb', w).innerHTML = rows.map((g) => { const b = boxOf(g), on = g.id === cur, moved = !!spots['g' + g.id];
-        return '<div class="sjbox' + (on ? ' on' : '') + (moved ? ' moved' : '') + '" data-g="' + g.id + '" style="left:' + b.x * 100 + '%;top:' + b.y * 100 + '%;width:' + b.w * 100 + '%;height:' + b.h * 100 + '%"><em>' + esc(g.name) + '</em>' + (on ? '<i class="sjh" data-h="1"></i>' : '') + '</div>'; }).join('');
-      $('#sjl', w).innerHTML = rows.map((g) => '<button type="button" class="sjrow' + (g.id === cur ? ' on' : '') + '" data-pick="' + g.id + '"><b>' + esc(tagModel(g)) + '</b><span>' + (spots['g' + g.id] ? 'Moved by hand · <u data-reset="' + g.id + '">back to the grid</u>' : 'On the grid') + '</span></button>').join('');
-      $$('[data-pick]', w).forEach((b) => b.addEventListener('click', (e) => { const r = e.target.closest('[data-reset]'); if (r) { delete spots['g' + r.dataset.reset]; } cur = Number(b.dataset.pick); paint(); }));
+      $('#sjb', w).innerHTML = rows.map((g) => { const b = boxOf(g), on = g.key === cur, moved = !!spots[g.key];
+        return '<div class="sjbox' + (on ? ' on' : '') + (moved ? ' moved' : '') + '" data-g="' + g.key + '" style="left:' + b.x * 100 + '%;top:' + b.y * 100 + '%;width:' + b.w * 100 + '%;height:' + b.h * 100 + '%"><em>' + esc(g.name) + '</em>' + (on ? '<i class="sjh" data-h="1"></i>' : '') + '</div>'; }).join('');
+      $('#sjl', w).innerHTML = rows.map((g) => '<button type="button" class="sjrow' + (g.key === cur ? ' on' : '') + '" data-pick="' + g.key + '"><b>' + esc(g.title) + '</b><span>' + (spots[g.key] ? 'Moved by hand · <u data-reset="' + g.key + '">back to the grid</u>' : 'On the grid') + '</span></button>').join('');
+      $$('[data-pick]', w).forEach((b) => b.addEventListener('click', (e) => { const r = e.target.closest('[data-reset]'); if (r) { delete spots[r.dataset.reset]; } cur = b.dataset.pick; paint(); }));
     };
     paint();
     let drag = null;
@@ -544,8 +579,8 @@ function adjustSpots(rack, rows, done) {
     pic.addEventListener('pointerdown', (e) => {
       const el = e.target.closest('.sjbox'); if (!el) return;
       e.preventDefault();
-      const g = rows.find((x) => x.id === Number(el.dataset.g)); if (!g) return;
-      if (cur !== g.id) { cur = g.id; paint(); }
+      const g = rows.find((x) => x.key === el.dataset.g); if (!g) return;
+      if (cur !== g.key) { cur = g.key; paint(); }
       const p = at(e), b = { ...boxOf(g) };
       drag = { g, p, b, resize: !!e.target.closest('.sjh') };
       pic.setPointerCapture(e.pointerId);
@@ -554,8 +589,8 @@ function adjustSpots(rack, rows, done) {
       if (!drag) return;
       const p = at(e), dx = p.x - drag.p.x, dy = p.y - drag.p.y, b = drag.b;
       const nb = drag.resize ? { x: b.x, y: b.y, w: clamp(b.w + dx, 0.02, 1 - b.x), h: clamp(b.h + dy, 0.01, 1 - b.y) } : { x: clamp(b.x + dx, 0, 1 - b.w), y: clamp(b.y + dy, 0, 1 - b.h), w: b.w, h: b.h };
-      spots['g' + drag.g.id] = nb;
-      const el = $('.sjbox[data-g="' + drag.g.id + '"]', w);
+      spots[drag.g.key] = nb;
+      const el = $('.sjbox[data-g="' + drag.g.key + '"]', w);
       if (el) { el.style.left = nb.x * 100 + '%'; el.style.top = nb.y * 100 + '%'; el.style.width = nb.w * 100 + '%'; el.style.height = nb.h * 100 + '%'; el.classList.add('moved'); }
     });
     const end = () => { if (drag) { drag = null; paint(); } };
@@ -563,25 +598,37 @@ function adjustSpots(rack, rows, done) {
     $('#sjall', w).addEventListener('click', () => { Object.keys(spots).forEach((k) => delete spots[k]); paint(); });
     $('#sjok', w).addEventListener('click', async () => {
       // keep only spots for gear still in the rack
-      const keep = {}; rows.forEach((g) => { if (spots['g' + g.id]) keep['g' + g.id] = spots['g' + g.id]; });
+      const keep = {}; rows.forEach((g) => { if (spots[g.key]) keep[g.key] = spots[g.key]; });
       try { await done(keep); close(); } catch (e) { toast(e.message, 'bad'); }
     });
   });
 }
 
 /** Print the rack for its door: the front drawing and the list, with a smart file name. */
-function printRack(rack, svg, table) {
+function printRack(rack, svg, table, info) {
+  info = info || {};
   const old = document.getElementById('rkprint'); if (old) old.remove();
   const box = document.createElement('div');
   box.id = 'rkprint';
   const org = (S.state && S.state.org) || {};
-  const d = new Date();
-  box.innerHTML = '<div class="rkph">' + (org.logo ? '<img src="/api/org/logo" alt="">' : '') + '<div><div class="rkpo">' + esc(org.name || '') + '</div><h1>' + esc(rack.name) + '</h1><div class="rkpm">' + rack.units + 'U' + (rack.location ? ' · ' + esc(rack.location) : '') + ' · ' + d.toLocaleDateString(undefined, { year: 'numeric', month: 'long', day: 'numeric' }) + '</div></div></div>' +
-    '<div class="rkpb"><div class="rkpsvg">' + svg + '</div><div class="rkptab">' + table + '</div></div>';
+  const d = new Date(), date = d.toLocaleDateString(undefined, { year: 'numeric', month: 'long', day: 'numeric' });
+  const stat = (n, l) => '<div class="rkpstat"><b>' + n + '</b><span>' + l + '</span></div>';
+  const power = (info.strips || []).map((p) => '<div class="rkppow"><b>' + esc(p.name) + '</b>' + (p.model && p.model !== p.name ? ' <span>' + esc(p.model) + '</span>' : '') +
+    '<em>' + p.watts + ' W' + (p.max ? ' of ' + p.max + ' W' : '') + (p.over ? ' · over the limit' : '') + '</em>' +
+    '<ol>' + Array.from({ length: Math.max(p.outlets || 0, ...p.plugs.map((x) => x.outlet || 0)) }, (_, k) => { const on = p.plugs.find((x) => x.outlet === k + 1); return '<li><i>' + (k + 1) + '</i>' + (on ? esc(on.name) + (on.watts ? ' <span>' + on.watts + ' W</span>' : '') : '<span>Empty</span>') + '</li>'; }).join('') + '</ol></div>').join('');
+  box.innerHTML =
+    '<div class="rkph">' + (org.logo ? '<img src="/api/org/logo" alt="">' : '') + '<div class="grow"><div class="rkpo">' + esc(org.name || '') + '</div><h1>' + esc(rack.name) + '</h1>' +
+      '<div class="rkpm">' + [rack.location, 'Printed ' + date].filter(Boolean).map(esc).join(' · ') + '</div></div>' +
+      '<div class="rkpstats">' + stat(rack.units + 'U', 'rack') + stat(info.used + 'U', 'used') + stat(info.free + 'U', 'free') + stat(info.count || 0, 'pieces') + (info.watts ? stat(info.watts + ' W', 'power') : '') + '</div></div>' +
+    '<div class="rkpbody"><div class="rkpsvg">' + svg + '</div><div class="rkpside">' + (rack.notes ? '<div class="rkpnotes">' + md(rack.notes) + '</div>' : '') + (power ? '<h2>Power</h2>' + power : '') + '</div></div>' +
+    '<h2>In this rack, top to bottom</h2>' + table +
+    '<div class="rkpfoot">' + esc([org.name, rack.name, date].filter(Boolean).join(' · ')) + '</div>';
   document.body.appendChild(box);
   document.body.classList.add('printrack');
+  const started = Date.now();
   const done = () => { box.remove(); document.body.classList.remove('printrack'); window.removeEventListener('hashchange', done); };
   window.addEventListener('hashchange', done);
-  window.addEventListener('afterprint', function after() { window.removeEventListener('afterprint', after); setTimeout(done, 2500); });
+  // some phones say "done" as the print sheet opens: ignore that, and tidy up when you leave the page
+  window.addEventListener('afterprint', function after() { if (Date.now() - started < 2500) return; window.removeEventListener('afterprint', after); setTimeout(done, 500); });
   exportPdf(rack.name + ' Rack');
 }

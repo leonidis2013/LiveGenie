@@ -155,3 +155,8 @@
 .spk.quad:hover .spline { opacity:1; }
 .spk.quad.on .spdim, .spk.quad.on .spfill, .spk.quad.on .spedge { opacity:1; }
 .spk.quad.on .spline { opacity:1; stroke:var(--mc); stroke-width:2; filter:drop-shadow(0 0 6px var(--mc)); }
+/* the gear photo in the stage patch pane (0.28.6) */
+.pphoto { margin-top:12px; }
+.pphoto .pphimg .spstage, .pphoto .pphimg .mkpic { max-width:100%; }
+.pphoto .pphimg .mkpic img { max-height:240px; max-width:100%; width:auto; height:auto; }
+.pphoto .note { margin-top:4px; }

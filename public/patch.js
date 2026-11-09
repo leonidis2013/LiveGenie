@@ -2389,6 +2389,8 @@ const PatchView = (() => {
       html += '<div class="pdev">' + (dev ? '<a class="btn abtn" href="#/d/' + dev.id + '">' + icon('box') + 'Gear card: ' + esc(Tags.withModel(dev.name, dev.model)) + '</a>' : st.edit && k.card ? '<button class="btn" id="pmkdev">' + icon('box') + 'Add to the Gear Locker</button>' : '') +
         (dev && dev.files ? '<a class="btn abtn" href="#/d/' + dev.id + '">' + icon('pdf') + dev.files + ' manual' + (dev.files === 1 ? '' : 's') + '</a>' : '') +
         (!st.edit ? '<button class="btn ghost" id="prep">' + icon('alert') + 'Report a problem</button>' : '') + '</div>';
+      // its photo (with its highlights), or where it sits in its rack's photo: filled in once loaded
+      if (dev && (dev.photo || dev.rack_id) && typeof gearPicture === 'function') html += '<div class="pphoto hide" id="pphoto"></div>';
       // a wireless system: its mics or packs
       if (g.kind === 'receiver' || g.kind === 'iemtx') {
         html += '<div class="pmem"><div class="pch">' + (g.kind === 'receiver' ? 'Mics on its channels' : 'Packs') + '</div>';
@@ -2464,6 +2466,13 @@ const PatchView = (() => {
       }
       if (st.edit) html += '<div class="pacts">' + (host2 ? '<button class="ghost" id="pout">Take out of ' + esc(host2.name) + '</button>' : '<button class="ghost" id="pdup">' + icon('plus') + 'Duplicate</button>') + '<span class="grow"></span><button class="ghost danger" id="pdel">' + icon('trash') + 'Remove</button></div>';
       host.innerHTML = html;
+      const php = $('#pphoto', host);
+      if (php) gearPicture(dev).then((pic) => {
+        if (!pic || !php.isConnected) return;
+        php.innerHTML = '<div class="pch">' + (pic.rack ? 'Where it is in ' + esc(pic.rack.name) : 'Photo') + '</div><div class="pphimg">' + marksView(pic.photo, pic.marks, pic.card) + '</div><div class="note">Tap the photo to see it full screen.</div>';
+        php.classList.remove('hide');
+        wireMarksView(php); photoLightbox(php, pic.photo, pic.marks, pic.card);
+      });
       $('#pbk', host).addEventListener('click', () => { select(null); const m = host.closest('.modal'); if (m) m.remove(); });
       const ph2 = $('#phost', host); if (ph2) ph2.addEventListener('click', () => select({ gear: [host2.id] }));
       $$('[data-sel]', host).forEach((b) => b.addEventListener('click', () => select({ gear: [b.dataset.sel] })));

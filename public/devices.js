@@ -586,6 +586,23 @@ function rackMark(v, rack) {
   const r = (rack.spots && rack.spots['g' + v.id]) || RackCore.region(rack.rails, rack.units, u, h, side);
   return { ...r, color: 'blue', tag: v.name, label: tagModel(v), note: String(v.notes || '').split('\n').map((x) => x.replace(/[#*_`>]/g, '').trim()).find(Boolean) || '' };
 }
+/**
+ * A card's picture, wherever it is shown: its own photo with its highlights, or its spot in its rack's photo.
+ * Resolves to { photo, marks, card, rack } or null. Racks are fetched once a minute at most.
+ */
+const RACK_CACHE = new Map();
+async function gearPicture(v) {
+  if (!v) return null;
+  if (v.photo) return { photo: v.photo, marks: v.marks || [], card: v };
+  if (!v.rack_id) return null;
+  let hit = RACK_CACHE.get(v.rack_id);
+  if (!hit || Date.now() - hit.at > 60000) {
+    try { hit = { at: Date.now(), rack: (await get('/api/racks/' + v.rack_id)).rack }; } catch (e) { hit = { at: Date.now(), rack: null }; }
+    RACK_CACHE.set(v.rack_id, hit);
+  }
+  const rack = hit.rack;
+  return rack && rack.photo ? { rack, photo: rack.photo, marks: [rackMark(v, rack)], card: { ...v, location: rack.name } } : null;
+}
 /** Tap the photo: full screen, with its highlights and stepping. Esc, the ✕ or a tap outside the photo closes it. */
 function photoLightbox(host, photo, marks, card) {
   const pic = $('.mkpic', host); if (!pic) return;

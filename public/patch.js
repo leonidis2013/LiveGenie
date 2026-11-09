@@ -34,7 +34,9 @@ const PatchView = (() => {
   /** The Gear Locker card behind a piece of gear (null when it has none, or the list is not loaded). */
   const devOf = (g) => (g && g.device_id && typeof DEV !== 'undefined' && DEV.list ? DEV.list.find((d) => d.id === g.device_id) || null : null);
   /** Gear with a network socket: switches and computers, anything ticked "On the network" in the Gear Locker, or already cabled. */
-  const hasNet = (doc, g) => g.kind === 'network' || g.kind === 'computer' || !!(devOf(g) || {}).networked || !!P.netOf(doc, g);
+  /** Gear that takes a network cable: big gear always does (a console, stage box, receiver…); anything else once its card says it is on the network. */
+  const NET_KINDS = ['network', 'computer', 'console', 'stagebox', 'processor', 'amp', 'receiver', 'iemtx'];
+  const hasNet = (doc, g) => NET_KINDS.includes(g.kind) || !!(devOf(g) || {}).networked || !!P.netOf(doc, g);
 
   // ================= cards =================
   /** Gear drawn as cards: everything except mics and packs that live inside a wireless system. */
@@ -945,6 +947,14 @@ const PatchView = (() => {
         const q = typeof qtyOf === 'function' ? qtyOf(d) : 1;
         if (gs.length > q) out.push({ level: 'warn', text: Tags.withModel(d.name, d.model) + ': ' + gs.length + ' on the drawing, ' + q + ' in the Gear Locker. Raise its quantity, or remove one.', gear: gs.map((g) => g.id) });
       });
+      // the drawing and the Gear Locker disagree
+      doc.gear.forEach((g) => {
+        if (g.wrong_card) out.push({ level: 'warn', text: g.name + ' was linked to ' + g.wrong_card + ', which is a different kind of gear, so it was unlinked. Link it to its own card (Gear card in its details).', gear: [g.id] });
+        if (g.lost_card) out.push({ level: 'warn', text: g.name + '\'s Gear Locker card was removed. Link it to another card, or remove the block.', gear: [g.id] });
+        const d = g.device_id && devCard(g.device_id);
+        if (d && !(typeof qtyOf === 'function' && qtyOf(d) > 1) && d.name && Tags.norm(String(g.name).replace(/\s+#\d+$/, '')) !== Tags.norm(d.name)) out.push({ level: 'warn', text: g.name + ' is called ' + d.name + ' in the Gear Locker. Open the stage patch again to bring them in line, or rename one.', gear: [g.id] });
+        if (d && (g.kind === 'txmic' || g.kind === 'bodypack')) { const h = P.hostOf(doc, g); if (h && h.device_id && d.pair_id && d.pair_id !== h.device_id) out.push({ level: 'warn', text: g.name + ' is on ' + h.name + ' here, but paired with another ' + (g.kind === 'txmic' ? 'receiver' : 'transmitter') + ' in the Gear Locker.', gear: [g.id] }); }
+      });
       return out;
     }
     function paintChecks() {
@@ -1047,6 +1057,15 @@ const PatchView = (() => {
       const sx = st.tf.x + m.g.x * k, sy = st.tf.y + m.g.y * k;
       if (sx > 20 && sx + m.w * k < r.width - 20 && sy > 20 && sy + Math.min(m.h, 200) * k < r.height - 20) return;
       st.tf.x = r.width * 0.3 - m.g.x * k; st.tf.y = r.height * 0.3 - m.g.y * k; apply();
+    }
+    /** Zoom so one piece of gear (its card) fills most of the view: readable on a phone. */
+    function zoomTo(id) {
+      const m = D && D.models.get(cardOf(id));
+      if (!m) return;
+      const r = cv.getBoundingClientRect();
+      const k = Math.max(0.4, Math.min(1.4, (r.width * 0.86) / m.w, (r.height * 0.55) / Math.max(80, m.h)));
+      st.tf.k = k; st.tf.x = (r.width - m.w * k) / 2 - m.g.x * k; st.tf.y = Math.max(12, r.height * 0.12) - m.g.y * k;
+      st.userView = true; apply();
     }
     const world = (cx, cy) => { const r = svg.getBoundingClientRect(); return { x: (cx - r.left - st.tf.x) / st.tf.k, y: (cy - r.top - st.tf.y) / st.tf.k }; };
     function zoomAt(f, cx, cy) {
@@ -1341,11 +1360,13 @@ const PatchView = (() => {
         if (!hasNet(st.doc, g)) return toast(g.name + ' is not on the network. Tick “On the network” on its Gear Locker card first.', 'bad');
         return netDialog(g, sw, sk && sk.dataset.net ? Number(sk.dataset.net) : null);
       }
-      if (port == null && ((b.kind === 'network' && a.kind !== 'network' && hasNet(st.doc, a) && !P.KINDS[a.kind].link) || (a.kind === 'network' && b.kind !== 'network' && hasNet(st.doc, b) && !P.KINDS[b.kind].link))) {
+      if (port == null && ((b.kind === 'network' && a.kind !== 'network' && hasNet(st.doc, a)) || (a.kind === 'network' && b.kind !== 'network' && hasNet(st.doc, b)))) {
         const sw = b.kind === 'network' ? b : a;
         return netDialog(sw === b ? a : b, sw, null);
       }
       if (port === 'link' || ld) {
+        // a switch takes network cables (with a port), not links
+        if (a.kind === 'network' || b.kind === 'network') { const sw = b.kind === 'network' ? b : a, g = sw === b ? a : b; if (g.kind !== 'network') return netDialog(g, sw, null); }
         if (!P.KINDS[a.kind].link || !P.KINDS[b.kind].link) return toast(b.name + ' has no link socket', 'bad');
         return picker(a, b, { linkOnly: true });
       }
@@ -1424,6 +1445,64 @@ const PatchView = (() => {
         doc.gear = doc.gear.filter((x) => x !== drop);
         n++;
       }
+      // ---- the Gear Locker wins for linked blocks: the card's name, frequency, capsule and type; a block linked to a card of
+      // another kind (a card deleted and its number reused, or changed) is unlinked and flagged in the checks
+      const byId = new Map(DEV.list.map((d) => [d.id, d]));
+      const renamed = [], moved = [], unpaired = [], pushUp = [];
+      for (const g of doc.gear.filter((x) => x.device_id)) {
+        const dev = byId.get(g.device_id);
+        if (!dev) { if (DEV.list.length) { g.lost_card = true; delete g.device_id; n++; } continue; }
+        if (dev.kind && dev.kind !== 'other' && g.kind !== 'other' && dev.kind !== g.kind) { g.wrong_card = dev.name + ' (' + (dev.kind || 'other') + ')'; delete g.device_id; n++; continue; }
+        if (g.wrong_card) { delete g.wrong_card; n++; }
+        if (!shared(dev.id) && dev.name && bare(g.name) !== dev.name) { renamed.push(g.name + ' → ' + dev.name); g.name = P.uniqueName ? P.uniqueName({ ...doc, gear: doc.gear.filter((x) => x !== g) }, dev.name) : dev.name; n++; }
+        if (g.kind === 'txmic' || g.kind === 'bodypack') {
+          // the card's value wins; a value only on the drawing (from before cards kept it) goes up to the card
+          for (const f of ['freq', 'txtype', 'capsule']) {
+            if ((dev[f] || '') === (g[f] || '')) continue;
+            if (dev[f]) { g[f] = dev[f]; n++; } else if (g[f] && canEdit && !shared(dev.id)) pushUp.push([dev.id, f === 'capsule' ? { capsule: g[f], capsule_id: '', capsule_typed: true } : { [f]: g[f] }]);
+          }
+        }
+      }
+      // pairing: a mic or pack sits on the receiver or transmitter its card is paired with
+      const rfOff = (g, h) => { doc.cables = doc.cables.filter((c) => !(c.kind === 'rf' && ((c.a === g.id && c.b === h.id) || (c.a === h.id && c.b === g.id)))); };
+      for (const g of doc.gear.filter((x) => (x.kind === 'txmic' || x.kind === 'bodypack') && x.device_id)) {
+        const dev = byId.get(g.device_id); if (!dev) continue;
+        const H = P.hostOf(doc, g);
+        const want = dev.pair_id ? doc.gear.find((x) => x.device_id === dev.pair_id && (x.kind === 'receiver' || x.kind === 'iemtx')) : null;
+        if (H && want && H === want) continue;
+        if (H && !dev.pair_id && H.device_id) {
+          // unpaired in the Gear Locker: off its receiver; gone if nothing else is wired to it
+          rfOff(g, H);
+          if (!doc.cables.some((c) => c.a === g.id || c.b === g.id)) doc.gear = doc.gear.filter((x) => x !== g);
+          else { g.x = (H.x || 0) - 340; g.y = H.y || 0; }
+          unpaired.push(g.name); n++; continue;
+        }
+        if (want && H !== want) {
+          if (H) rfOff(g, H);
+          if (want.kind === 'iemtx') { P.connect(doc, want, 0, g, 0, { kind: 'rf' }); moved.push(g.name + ' → ' + want.name); n++; continue; }
+          const usedCh = new Set(P.members(doc, want).map((m) => m.port)), ch = want.ins.findIndex((_, i) => !usedCh.has(i));
+          if (ch < 0) { notes.push(dev.name); continue; }
+          P.connect(doc, g, 0, want, ch, { kind: 'rf' }); delete g.x; delete g.y; moved.push(g.name + ' → ' + want.name); n++;
+        }
+      }
+      // network: a card plugged into another port (or switch) in the Gear Locker moves its cable here
+      for (const c of doc.cables.filter((x) => x.ap === 'net')) {
+        const g = doc.gear.find((x) => x.id === c.a), dev = g && g.device_id && byId.get(g.device_id);
+        if (!dev || shared(dev.id) || !dev.uplink_id) continue;
+        const sw = doc.gear.find((x) => x.kind === 'network' && x.device_id === dev.uplink_id);
+        const port = parseInt(dev.uplink_port, 10) || null;
+        if (sw && (sw.id !== c.b || (port && port !== c.port))) {
+          if (port && doc.cables.some((o) => o !== c && o.ap === 'net' && o.b === sw.id && o.port === port)) continue;
+          c.b = sw.id; if (port) c.port = port; n++;
+        }
+      }
+      const said = [];
+      if (renamed.length) said.push('renamed ' + renamed.join(', '));
+      if (moved.length) said.push('moved ' + moved.join(', '));
+      if (unpaired.length) said.push(unpaired.join(', ') + ' unpaired');
+      if (said.length) toast('From the Gear Locker: ' + said.join('; '));
+      if (pushUp.length) (async () => { for (const [id, f] of pushUp) { try { await putDevice(id, f); } catch (e) { /* shown next time */ } } })();
+
       for (const host of doc.gear.filter((g) => (g.kind === 'receiver' || g.kind === 'iemtx') && g.device_id)) {
         const want = host.kind === 'receiver' ? 'txmic' : 'bodypack';
         for (const dev of DEV.list.filter((d) => d.pair_id === host.device_id && d.kind === want)) {
@@ -1833,7 +1912,9 @@ const PatchView = (() => {
     function undo() { if (!st.undo.length) return; const b = st.doc; st.redo.push(JSON.stringify(st.doc)); st.doc = JSON.parse(st.undo.pop()); syncNet(b, st.doc); st.cache = null; paint(true); paintPane(); queueSave(); }
     function redo() { if (!st.redo.length) return; const b = st.doc; st.undo.push(JSON.stringify(st.doc)); st.doc = JSON.parse(st.redo.pop()); syncNet(b, st.doc); st.cache = null; paint(true); paintPane(); queueSave(); }
     let saveTimer = null;
-    function queueSave() { $('#psave').textContent = 'Saving…'; S.dirty = true; clearTimeout(saveTimer); saveTimer = setTimeout(save, 700); }
+    /** The save status by the title; the page may have been left while a save was on its way. */
+    function saveNote(t) { const el = $('#psave'); if (el) el.textContent = t; }
+    function queueSave() { saveNote('Saving…'); S.dirty = true; clearTimeout(saveTimer); saveTimer = setTimeout(save, 700); }
     async function save() {
       if (st.saving) { st.dirtySave = true; return; }
       st.saving = true;
@@ -1841,10 +1922,10 @@ const PatchView = (() => {
         const r = await call('PUT', '/api/patch', { doc: st.doc, baseVersion: st.version });
         st.version = r.version;
         if (!st.draft) { st.draft = true; paintRev(); }
-        $('#psave').textContent = 'Saved'; S.dirty = false;
+        saveNote('Saved'); S.dirty = false;
       } catch (e) {
-        if (e.status === 409) { toast(e.message, 'bad'); const d = await get('/api/patch'); st.doc = d.doc; st.version = d.version; st.undo = []; st.redo = []; S.dirty = false; st.cache = null; paint(true); paintPane(); $('#psave').textContent = 'Reloaded'; }
-        else { $('#psave').textContent = 'Not saved: ' + e.message; }
+        if (e.status === 409) { toast(e.message, 'bad'); const d = await get('/api/patch'); st.doc = d.doc; st.version = d.version; st.undo = []; st.redo = []; S.dirty = false; st.cache = null; paint(true); paintPane(); saveNote('Reloaded'); }
+        else { saveNote('Not saved: ' + e.message); }
       }
       st.saving = false;
       if (st.dirtySave) { st.dirtySave = false; save(); }
@@ -1945,10 +2026,10 @@ const PatchView = (() => {
      */
     function addPane(host) {
       const onPatch = new Set(((typeof DEV !== 'undefined' && DEV.list) || []).filter((d) => unitsOf(d.id) >= (typeof qtyOf === 'function' ? qtyOf(d) : 1)).map((d) => d.id));
-      const devs = ((typeof DEV !== 'undefined' && DEV.list) || []).filter((d) => !onPatch.has(d.id) && d.kind !== 'power' && (['audio', 'network', 'computer'].includes(d.category) || P.KINDS[d.kind]));
+      const devs = ((typeof DEV !== 'undefined' && DEV.list) || []).filter((d) => !onPatch.has(d.id) && d.kind !== 'power' && d.kind !== 'capsule' && (['audio', 'network', 'computer'].includes(d.category) || P.KINDS[d.kind]));
       const pre = st.prefill || {};
       const kind = pre.kind || st.newKind || 'mic';
-      const models = GearModels.all();
+      const models = GearModels.all().filter((m) => m.kind !== 'capsule' && m.kind !== 'power');   // capsules go in mics, power strips in racks: not blocks on the drawing
       const typeOf = (k) => (P.KINDS[k] ? P.KINDS[k].label : 'Not sorted yet');
       const order = (k) => { const i = P.KIND_ORDER.indexOf(k); return i < 0 ? 99 : i; };
       const group = (list, kindOf) => { const m = new Map(); list.forEach((x) => { const k = kindOf(x) || ''; if (!m.has(k)) m.set(k, []); m.get(k).push(x); }); return [...m.entries()].sort((a, b) => order(a[0]) - order(b[0])); };
@@ -2053,13 +2134,18 @@ const PatchView = (() => {
       const item = { ...(m || { kind: d.kind }), name: d.name, make: d.make || (m && m.make), model: d.model || (m && m.model), device_id: d.id };
       if (d.kind && P.KINDS[d.kind]) item.kind = d.kind;
       if (typeof qtyOf === 'function' && qtyOf(d) > 1) {
-        const taken = st.doc.gear.map((g) => g.name).concat(((typeof DEV !== 'undefined' && DEV.list) || []).filter((x) => x.id !== d.id).flatMap((x) => [x.name, ...(x.aliases || [])]));
-        item.name = Tags.suggest(item.kind || 'other', taken, { model: item.model });
+        const taken = st.doc.gear.map((g) => g.name).concat(((typeof DEV !== 'undefined' && DEV.list) || []).filter((x) => x.id !== d.id).flatMap((x) => Tags.namesOf(x)));
+        // a card named as a range (MIC-2–3) gives its units those names, in order; otherwise the next free tag
+        const own = d.unit_tags && d.unit_tags.length ? d.unit_tags : Tags.namesOf({ name: d.name, qty: qtyOf(d) }), used = new Set(st.doc.gear.map((g) => Tags.norm(g.name)));
+        const next = own.length > 1 ? own.find((x) => !used.has(Tags.norm(x))) : null;
+        item.name = next || Tags.suggest(item.kind || 'other', taken.filter((x) => x !== d.name), { model: item.model });
       }
       if (!m && d.inputs) item.nin = d.inputs; if (!m && d.outputs) item.nout = d.outputs;
       if (item.kind === 'network') item.nports = Math.max(d.inputs || 0, d.outputs || 0) || 8;
       if (item.kind === 'txmic') Object.assign(item, { txtype: d.txtype || undefined, freq: d.freq || undefined, capsule: d.capsule || undefined });
       placeItem(item, item.name);
+      // a receiver or in-ear transmitter: its mics and packs from the Gear Locker come with it
+      if (item.kind === 'receiver' || item.kind === 'iemtx') syncFromLocker().then((k) => { if (k) { st.cache = null; paint(true); paintPane(); } });
     }
     function placeItem(item, name) {
       Object.assign(item, newSpot(item));
@@ -2209,9 +2295,8 @@ const PatchView = (() => {
       if (!st.edit) return;
       $$('[data-addm]', host).forEach((b) => b.addEventListener('click', () => {
         if (g.kind === 'iemtx') return memberDialog(live());
-        const i = Number(b.dataset.addm);
-        change(() => P.addMember(st.doc, live(), {}, i), 'Mic added to ' + g.name + ' ' + g.ins[i]);
-        const m = P.members(st.doc, live()).find((x) => x.port === i); if (m) { select({ gear: [m.g.id] }); toast('Now tag who uses it'); }
+        // one way to add a mic: the dialog, which also makes (or picks) its Gear Locker card
+        memberDialog(live(), null, Number(b.dataset.addm));
       }));
       const pc = $('#pchan', host); if (pc) pc.addEventListener('click', () => channelDialog(live()));
       $$('[data-f]', host).forEach((inp) => inp.addEventListener('change', () => {
@@ -2234,6 +2319,12 @@ const PatchView = (() => {
         }, null, !['nin', 'nout', 'nch', 'mode', 'nports', 'spare'].includes(f));
         // a new tag name goes to its Gear Locker card too (when ticked)
         if (f === 'name' && g.device_id && v.trim() && canEdit && !shared(g.device_id)) { const rn = $('#pdevren', host); if (!rn || rn.checked) putDevice(g.device_id, { name: v.trim() }).catch((e) => toast('Gear Locker card not renamed: ' + e.message, 'bad')); }
+        // a wireless mic's or pack's frequency, type and capsule live on its Gear Locker card too
+        if (['freq', 'txtype', 'capsule'].includes(f) && g.device_id && canEdit && !shared(g.device_id) && (g.kind === 'txmic' || g.kind === 'bodypack')) {
+          const ch = { [f]: v.trim() };
+          if (f === 'capsule') Object.assign(ch, { capsule_id: '', capsule_typed: true });
+          putDevice(g.device_id, ch).catch((e) => toast('Gear Locker card not updated: ' + e.message, 'bad'));
+        }
       }));
       const pat = $('#pautotag', host);
       if (pat) pat.addEventListener('click', () => {
@@ -2541,7 +2632,13 @@ const PatchView = (() => {
     if (await syncFromLocker()) st.cache = null;
     paint(false);
     paintPane();
-    if (qs && qs.get('g')) { select({ gear: [qs.get('g')] }, { noSheet: true }); focusGear(qs.get('g')); }
+    if (qs && qs.get('g')) {
+      // from "Used on › Stage patch": on a phone, zoom in on that gear and open its details; on a computer, select it
+      const narrow = window.innerWidth < 700;
+      if (narrow) zoomTo(qs.get('g'));
+      select({ gear: [qs.get('g')] }, narrow ? {} : { noSheet: true });
+      if (!narrow) focusGear(qs.get('g'));
+    }
     if (qs && qs.get('edit') && canEdit) setEdit(true);
   }
 

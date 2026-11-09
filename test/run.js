@@ -833,7 +833,7 @@ test('gear knows what it is: wireless mics pair with a receiver, capsules fit a 
   const dir = fs2.mkdtempSync(path.join(os2.tmpdir(), 'lg-kind-'));
   const DBm = require(path.join(ROOT, 'lib', 'db'));
   const db1 = DBm.open(path.join(dir, 'x.db'));
-  db1.exec('DROP TABLE racks; DROP INDEX uploads_sha; ALTER TABLE uploads DROP COLUMN sha256; ' + ['rack_id', 'rack_u', 'rack_h', 'rack_side', 'shelf_id', 'power_w', 'power_pdu', 'power_outlet', 'power_max'].map((c) => 'ALTER TABLE devices DROP COLUMN ' + c).join('; ')); db1.exec('ALTER TABLE devices DROP COLUMN capsule_card; ALTER TABLE devices DROP COLUMN manual_from; ALTER TABLE devices DROP COLUMN qty; ALTER TABLE patch DROP COLUMN rev; ALTER TABLE patch_versions DROP COLUMN rev; ALTER TABLE patch_versions DROP COLUMN kind'); db1.exec(['kind', 'pair_id', 'txtype', 'capsule', 'freq'].map((c) => 'ALTER TABLE devices DROP COLUMN ' + c).join('; ')); db1.prepare('UPDATE schema_version SET v = 12').run();
+  db1.exec('DROP TABLE racks; DROP INDEX uploads_sha; ALTER TABLE uploads DROP COLUMN sha256; ' + ['rack_id', 'rack_u', 'rack_h', 'rack_side', 'shelf_id', 'power_w', 'power_pdu', 'power_outlet', 'power_max'].map((c) => 'ALTER TABLE devices DROP COLUMN ' + c).join('; ')); db1.exec('ALTER TABLE devices DROP COLUMN unit_tags; ALTER TABLE devices DROP COLUMN capsule_card; ALTER TABLE devices DROP COLUMN manual_from; ALTER TABLE devices DROP COLUMN qty; ALTER TABLE patch DROP COLUMN rev; ALTER TABLE patch_versions DROP COLUMN rev; ALTER TABLE patch_versions DROP COLUMN kind'); db1.exec(['kind', 'pair_id', 'txtype', 'capsule', 'freq'].map((c) => 'ALTER TABLE devices DROP COLUMN ' + c).join('; ')); db1.prepare('UPDATE schema_version SET v = 12').run();
   db1.prepare("INSERT INTO settings (key, value) VALUES ('gear_models', ?)").run(JSON.stringify([{ kind: 'speaker', make: 'Brand', model: 'Col 70' }]));
   db1.prepare("INSERT INTO devices (name, aliases, category, make, model, location, ip, mac, photo, manual_url, notes, created_at, updated_at) VALUES ('Brand Col 70', '[]', 'audio', 'Brand', 'COL 70', '', '', '', '', '', '', 1, 1)").run();
   db1.close();
@@ -987,6 +987,99 @@ test('racks: gear placed by U, half-width side by side, shelves, panels, nothing
   for (const id of [sw, amp, hl, hr, box]) await admin.del('/api/devices/' + id);
 });
 
+test('merging power strips moves their plugs; an edit still saves after; the power check only looks at what changed', async () => {
+  const mk = async (name, extra) => (await admin.post('/api/devices', { name, category: 'audio', ...extra })).data.id;
+  const one = async (id) => (await admin.get('/api/devices/' + id)).data.device;
+  const s1 = await mk('M Strip 1', { kind: 'power', outputs: 4 }), s2 = await mk('M Strip 2', { kind: 'power', outputs: 4 });
+  const a = await mk('M Amp A', { kind: 'amp' }), b = await mk('M Amp B', { kind: 'amp' }), c = await mk('M Amp C', { kind: 'amp' });
+  for (const [id, pdu, outlet] of [[a, s1, 1], [b, s2, 1], [c, s2, 2]]) assert.strictEqual((await admin.put('/api/devices/' + id, { ...(await one(id)), power_pdu: pdu, power_outlet: outlet })).status, 200);
+  assert.strictEqual((await admin.post('/api/devices/' + s1 + '/combine', { ids: [s2] })).status, 400, 'power strips never combine');
+  const r = await admin.post('/api/devices/' + s2 + '/merge', { into: s1 });
+  assert.strictEqual(r.status, 200, JSON.stringify(r.data));
+  assert.ok(r.data.notes.some((n) => /M Amp B moved to outlet/.test(n)), 'says what moved: ' + JSON.stringify(r.data.notes));
+  const [ra, rb, rc] = [await one(a), await one(b), await one(c)];
+  assert.deepStrictEqual([ra.power_pdu, rb.power_pdu, rc.power_pdu], [s1, s1, s1], 'every plug is on the kept strip');
+  assert.strictEqual(new Set([ra.power_outlet, rb.power_outlet, rc.power_outlet]).size, 3, 'no two on one outlet');
+  // other cards still save
+  assert.strictEqual((await admin.put('/api/devices/' + a, { ...ra, location: 'Stage left' })).status, 200);
+  const other = await mk('M Mic', { kind: 'mic' });
+  assert.strictEqual((await admin.put('/api/devices/' + other, { ...(await one(other)), location: 'Box' })).status, 200);
+  // an old bad plug elsewhere does not stop edits to unrelated cards
+  for (const id of [a, b, c, s1, other]) await admin.del('/api/devices/' + id);
+});
+
+test('card ids are never reused; removing a card unlinks its stage patch block and says so', async () => {
+  const P = require(path.join(ROOT, 'public', 'patchcore.js'));
+  const x = (await admin.post('/api/devices', { name: 'ID Newest', kind: 'mic' })).data.id;
+  await admin.del('/api/devices/' + x);
+  const y = (await admin.post('/api/devices', { name: 'ID Next', kind: 'mic' })).data.id;
+  assert.ok(y > x, 'a deleted id is not handed out again (' + x + ' then ' + y + ')');
+  let cur = (await admin.get('/api/patch')).data;
+  const d = cur.doc;
+  const g = P.addGear(d, { kind: 'mic', name: 'ID Next' }); g.device_id = y;
+  assert.strictEqual((await admin.put('/api/patch', { doc: d, baseVersion: cur.version })).status, 200);
+  const q = (await admin.get('/api/devices/' + y)).data.device;
+  assert.ok(q, 'the card is there');
+  assert.strictEqual((await admin.del('/api/devices/' + y)).status, 200);
+  cur = (await admin.get('/api/patch')).data;
+  const back = cur.doc.gear.find((b) => b.id === g.id);
+  assert.ok(back, 'the block stays');
+  assert.ok(!back.device_id && back.lost_card === true, 'unlinked and flagged');
+  cur.doc.gear = cur.doc.gear.filter((b) => b.id !== g.id);
+  await admin.put('/api/patch', { doc: cur.doc, baseVersion: cur.version });
+});
+
+test('guided setup PA: one passive speaker per amp channel, powered speakers and subs on their own processor outputs', () => {
+  const P = require(path.join(ROOT, 'public', 'patchcore.js'));
+  const blk = (name, i, o) => ({ name, ins: Array(i).fill('in'), outs: Array(o).fill('out') });
+  const con = blk('FOH', 32, 16), pr = blk('PROC', 2, 6), amp = blk('AMP', 2, 2);
+  const sp = (n, type) => ({ g: blk(n, 1, 0), type });
+  const speakers = [sp('PA-L', 'passive'), sp('PA-R', 'passive'), sp('SUB-1', 'psub'), sp('FILL', 'powered')];
+  const r = P.paPlan(con, [pr], [amp], speakers);
+  const into = (n) => r.links.filter((l) => l.to.name === n);
+  assert.deepStrictEqual(into('PROC').map((l) => [l.from.name, l.out, l.in]), [['FOH', 0, 0], ['FOH', 1, 1]], 'console L/R into the processor');
+  assert.deepStrictEqual([into('PA-L')[0].from.name, into('PA-R')[0].from.name], ['AMP', 'AMP']);
+  assert.notStrictEqual(into('PA-L')[0].out, into('PA-R')[0].out, 'never two speakers on one amp channel');
+  assert.strictEqual(into('SUB-1')[0].from.name, 'PROC', 'a powered sub is fed from the processor');
+  assert.strictEqual(into('FILL')[0].from.name, 'PROC');
+  const procOuts = r.links.filter((l) => l.from === pr).map((l) => l.out);
+  assert.strictEqual(new Set(procOuts).size, procOuts.length, 'each processor output feeds one thing');
+  assert.strictEqual(into('SUB-1')[0].out, 5, 'the sub gets its own output, from the end');
+  // more passive speakers than amp channels: the extra one is left for the user, not doubled up
+  const r2 = P.paPlan(con, [pr], [amp], [sp('S1', 'passive'), sp('S2', 'passive'), sp('S3', 'passive')]);
+  assert.deepStrictEqual(r2.left.map((g) => g.name), ['S3']);
+  // no processor: the console's L/R feed the amp
+  const r3 = P.paPlan(con, [], [amp], [sp('S1', 'passive'), sp('S2', 'passive')]);
+  assert.deepStrictEqual(r3.links.filter((l) => l.to === amp).map((l) => [l.from.name, l.out]), [['FOH', 0], ['FOH', 1]]);
+});
+
+test('on update: bad plugs, dangling links and the id high-water mark are repaired', () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'lg-repair-'));
+  const DBm = require(path.join(ROOT, 'lib', 'db'));
+  const db1 = DBm.open(path.join(dir, 'x.db'));
+  const ins = (name, kind, extra = {}) => Number(db1.prepare("INSERT INTO devices (name, aliases, category, make, model, location, ip, mac, photo, manual_url, notes, created_at, updated_at, kind) VALUES (?, '[]', 'audio', '', '', '', '', '', '', '', '', 1, 1, ?)").run(name, kind).lastInsertRowid);
+  const strip = ins('Rp Strip', 'power'), amp = ins('Rp Amp', 'amp'), a = ins('Rp A', 'mic'), b = ins('Rp B', 'mic'), c = ins('Rp C', 'mic'), d = ins('Rp D', 'txmic');
+  db1.exec('PRAGMA foreign_keys = OFF');   // old data could have these from before the keys were checked
+  const set = (id, sql, ...v) => db1.prepare('UPDATE devices SET ' + sql + ' WHERE id = ' + id).run(...v);
+  set(a, 'power_pdu = ?, power_outlet = 1', amp);        // into an amp
+  set(b, 'power_pdu = ?, power_outlet = 1', 9999);       // into a card that is gone
+  set(amp, 'power_pdu = ?, power_outlet = 2', strip);    // fine
+  set(c, 'power_pdu = ?, power_outlet = 2', strip);      // same outlet as the amp: the newer card comes out
+  set(d, 'pair_id = 9998, uplink_id = 9997');
+  db1.exec('ALTER TABLE devices DROP COLUMN unit_tags'); db1.prepare('UPDATE schema_version SET v = 20').run();
+  db1.close();
+  const db = DBm.open(path.join(dir, 'x.db'));
+  const row = (id) => db.prepare('SELECT power_pdu, pair_id, uplink_id FROM devices WHERE id = ?').get(id);
+  assert.strictEqual(row(a).power_pdu, null, 'not into an amp');
+  assert.strictEqual(row(b).power_pdu, null, 'not into a missing card');
+  assert.strictEqual(row(amp).power_pdu, strip, 'a good plug stays');
+  assert.strictEqual(row(c).power_pdu, null, 'two on one outlet: the newer card comes out');
+  assert.deepStrictEqual([row(d).pair_id, row(d).uplink_id], [null, null]);
+  assert.ok(Number(db.prepare("SELECT value FROM settings WHERE key = 'device_id_hw'").get().value) >= d);
+  db.close();
+  fs.rmSync(dir, { recursive: true, force: true });
+});
+
 test('pictures: the same picture uploaded again is stored once; removing unused pictures never touches one in use', async () => {
   const pic = uniqPng();
   const a1 = (await admin.post('/api/uploads', pic, { raw: true, type: 'image/png' })).data;
@@ -1046,6 +1139,39 @@ test('gear check: "doesn\'t apply" is remembered per card and check, admins only
   assert.ok(!r.data.checkSkip.includes('12:power'), 'and can be undone');
 });
 
+test('tags for cards with a quantity: a run of numbers that new cards skip', () => {
+  const T = require(path.join(ROOT, 'public', 'tags.js'));
+  assert.deepStrictEqual(T.expand('MIC-2–3'), ['MIC-2', 'MIC-3']);
+  assert.deepStrictEqual(T.expand('JBL CBT 70J-1'), ['JBL CBT 70J-1'], 'a model number is not a run');
+  assert.strictEqual(T.suggest('mic', ['MIC-1', 'MIC-2–3']), 'MIC-4');
+  assert.strictEqual(T.suggestRange('mic', ['MIC-1'], 3), 'MIC-2–4');
+  assert.deepStrictEqual(T.namesOf({ name: 'MIC-2', qty: 2 }), ['MIC-2', 'MIC-3'], 'an old card with a quantity reserves the numbers it implies');
+  assert.strictEqual(T.suggest('mic', [{ name: 'MIC-1' }, { name: 'MIC-2', qty: 2 }].flatMap(T.namesOf)), 'MIC-4');
+});
+
+test('a card with a quantity keeps a tag for each piece; no other card can take them', async () => {
+  const a = (await admin.post('/api/devices', { name: 'Rode M5 test', kind: 'mic', make: 'Rode', model: 'M5', qty: 2, unit_tags: ['TMIC-2', 'TMIC-3', 'TMIC-9'] })).data.id;
+  const one = async (id) => (await admin.get('/api/devices/' + id)).data.device;
+  assert.deepStrictEqual((await one(a)).unit_tags, ['TMIC-2', 'TMIC-3'], 'trimmed to the quantity');
+  assert.strictEqual((await admin.post('/api/devices', { name: 'TMIC-3', kind: 'mic' })).status, 400, 'a piece tag is taken');
+  assert.ok((await admin.get('/api/devices')).data.devices.find((x) => x.id === a).unit_tags.includes('TMIC-3'), 'listed with the gear');
+  await admin.put('/api/devices/' + a, { ...(await one(a)), unit_tags: undefined, notes: 'x' });
+  assert.deepStrictEqual((await one(a)).unit_tags, ['TMIC-2', 'TMIC-3'], 'kept when not sent');
+  await admin.del('/api/devices/' + a);
+  // on update: an old card named like a tag with a quantity gets tags for its pieces, skipping ones in use
+  const os2 = require('os'), fs2 = require('fs');
+  const dir = fs2.mkdtempSync(path.join(os2.tmpdir(), 'lg-tags-'));
+  const DBm = require(path.join(ROOT, 'lib', 'db'));
+  const db1 = DBm.open(path.join(dir, 'x.db'));
+  const ins = db1.prepare("INSERT INTO devices (name, aliases, category, make, model, location, ip, mac, photo, manual_url, notes, kind, qty, created_at, updated_at) VALUES (?, '[]', 'audio', 'Rode', 'M5', '', '', '', '', '', '', 'mic', ?, 1, 1)");
+  ins.run('MIC-2', 2); ins.run('MIC-3', 2);
+  db1.exec('ALTER TABLE devices DROP COLUMN unit_tags'); db1.prepare('UPDATE schema_version SET v = 21').run(); db1.close();
+  const db = DBm.open(path.join(dir, 'x.db'));
+  const rows = db.prepare('SELECT name, unit_tags FROM devices ORDER BY id').all().map((r) => r.name + ':' + r.unit_tags);
+  assert.deepStrictEqual(rows, ['MIC-2:["MIC-2","MIC-4"]', 'MIC-3:["MIC-3","MIC-5"]'], 'no tag used twice');
+  db.close();
+});
+
 test('rack photo spots can be moved by hand, and only sensible ones are kept', async () => {
   const r = await admin.post('/api/racks', { name: 'Spot test rack', units: 6 });
   const id = r.data.id || (r.data.rack && r.data.rack.id);
@@ -1064,7 +1190,7 @@ test('checklists that were on pages move to To do, keeping their ticks and log',
   const DBm = require(path.join(ROOT, 'lib', 'db'));
   // a database from before 0.20: back to migration 10, then a page with a checklist and a tick
   const db1 = DBm.open(path.join(dir, 'x.db'));
-  db1.exec('DROP TABLE racks; DROP INDEX uploads_sha; ALTER TABLE uploads DROP COLUMN sha256; ' + ['rack_id', 'rack_u', 'rack_h', 'rack_side', 'shelf_id', 'power_w', 'power_pdu', 'power_outlet', 'power_max'].map((c) => 'ALTER TABLE devices DROP COLUMN ' + c).join('; ')); db1.exec('ALTER TABLE devices DROP COLUMN capsule_card; ALTER TABLE devices DROP COLUMN manual_from; ALTER TABLE devices DROP COLUMN qty; ALTER TABLE patch DROP COLUMN rev; ALTER TABLE patch_versions DROP COLUMN rev; ALTER TABLE patch_versions DROP COLUMN kind'); db1.exec('DROP TABLE todo_lists; ALTER TABLE devices DROP COLUMN networked; ' + ['kind', 'pair_id', 'txtype', 'capsule', 'freq'].map((c) => 'ALTER TABLE devices DROP COLUMN ' + c).join('; ')); db1.prepare('UPDATE schema_version SET v = 10').run();
+  db1.exec('DROP TABLE racks; DROP INDEX uploads_sha; ALTER TABLE uploads DROP COLUMN sha256; ' + ['rack_id', 'rack_u', 'rack_h', 'rack_side', 'shelf_id', 'power_w', 'power_pdu', 'power_outlet', 'power_max'].map((c) => 'ALTER TABLE devices DROP COLUMN ' + c).join('; ')); db1.exec('ALTER TABLE devices DROP COLUMN unit_tags; ALTER TABLE devices DROP COLUMN capsule_card; ALTER TABLE devices DROP COLUMN manual_from; ALTER TABLE devices DROP COLUMN qty; ALTER TABLE patch DROP COLUMN rev; ALTER TABLE patch_versions DROP COLUMN rev; ALTER TABLE patch_versions DROP COLUMN kind'); db1.exec('DROP TABLE todo_lists; ALTER TABLE devices DROP COLUMN networked; ' + ['kind', 'pair_id', 'txtype', 'capsule', 'freq'].map((c) => 'ALTER TABLE devices DROP COLUMN ' + c).join('; ')); db1.prepare('UPDATE schema_version SET v = 10').run();
   db1.prepare("INSERT INTO spaces (slug, name) VALUES ('audio', 'Audio')").run();
   const blocks = [{ type: 'text', md: 'Before' }, { type: 'checklist', id: 'abc12345', title: 'Desk check', items: ['Faders down', 'Scenes loaded'], schedule: [] }];
   db1.prepare("INSERT INTO pages (space_id, title, blocks, version, created_at, updated_at) VALUES (1, 'Sunday desk', ?, 1, 1, 1)").run(JSON.stringify(blocks));

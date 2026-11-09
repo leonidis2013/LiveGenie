@@ -7,6 +7,7 @@
 const GEAR_CHECKS = [
   { id: 'power', label: 'Not plugged in', why: 'Gear in a rack, or gear that needs power, with no power strip or sequencer outlet set.' },
   { id: 'kind', label: 'What it is', why: 'No "What is it?" set, so it cannot sort into a bucket or pair with anything.' },
+  { id: 'tags', label: 'Piece tags', why: 'A card with a quantity stands for several pieces; each needs its own tag (MIC-2, MIC-3) so the labels match and new cards never reuse them. The suggestion keeps what it has and skips tags already in use.' },
   { id: 'model', label: 'Make or model', why: 'Missing the make or the model number.' },
   { id: 'ip', label: 'IP address', why: 'Marked as on the network, with no IP address.' },
   { id: 'location', label: 'Location', why: 'No location, and not in a rack.' },
@@ -20,6 +21,7 @@ const GEAR_CHECKS = [
 ];
 /** Gear that plugs into the wall. Mics, capsules, packs (batteries), passive DIs and most speakers do not. */
 const NEEDS_POWER = ['console', 'stagebox', 'receiver', 'iemtx', 'processor', 'amp', 'network', 'computer', 'headamp'];
+const qtyOfCard = (d) => (['txmic', 'receiver', 'iemtx', 'bodypack'].includes(d.kind) ? 1 : Math.max(1, Number(d.qty) || 1));
 const NEEDS_IO = ['console', 'stagebox', 'receiver', 'processor', 'amp', 'iemtx'];
 
 /** What each card is missing (issue ids), not counting ones marked "doesn't apply". */
@@ -31,6 +33,7 @@ function gearIssues(d, ctx) {
   add('power', d.kind !== 'power' && !d.power_pdu && ctx.strips.length > 0 && (!!d.rack_id || NEEDS_POWER.includes(d.kind)));
   add('kind', !d.kind);
   add('model', !d.make || !d.model);
+  add('tags', qtyOfCard(d) > 1 && (d.unit_tags || []).length !== qtyOfCard(d));
   add('ip', !!d.networked && !(d.ips && d.ips.length));
   add('location', !d.location && !d.rack_id);
   add('watts', !!d.power_pdu && !Number(d.power_w));
@@ -76,6 +79,13 @@ async function tabGearCheck(pane, pick) {
         '<label class="gcf sm"><em>Outlet</em><select data-f="power_outlet"><option value="">—</option></select></label>' + f('power_w', 'Watts', d.power_w || '', 'type="number" min="0" max="20000" class="sm" placeholder="W"');
     }
     if (id === 'kind') return '<label class="gcf"><em>What is it?</em><select data-f="kind"><option value="">Choose…</option>' + GEAR_KIND.map((k) => '<option value="' + k[0] + '">' + k[1] + '</option>').join('') + '</select></label>';
+    if (id === 'tags') {
+      // keep the tags it has, fill the rest with the next free ones
+      const taken = list.filter((x) => x.id !== d.id).flatMap((x) => Tags.namesOf(x));
+      const have = (d.unit_tags || []).slice(0, qtyOfCard(d)); if (!have.length && /\d$/.test(d.name)) have.push(d.name);
+      const all2 = taken.concat(have); while (have.length < qtyOfCard(d)) { const t = Tags.suggest(d.kind || 'other', all2, { model: d.model }); have.push(t); all2.push(t); }
+      return f('unit_tags', 'Tags, one per piece (×' + qtyOfCard(d) + ')', have.join(', '), 'placeholder="MIC-2, MIC-3"');
+    }
     if (id === 'model') return f('make', 'Make', d.make, 'placeholder="Manufacturer"') + f('model', 'Model', d.model, 'placeholder="Model number"');
     if (id === 'ip') return f('ip', 'IP address', '', 'placeholder="192.168.1.20" inputmode="decimal"');
     if (id === 'location') return f('location', 'Location', d.location, 'list="gclocs" placeholder="Booth, Stage left…"');
@@ -111,6 +121,8 @@ async function tabGearCheck(pane, pick) {
         if (ch.power_pdu !== undefined) { body.power_pdu = Number(ch.power_pdu) || null; body.power_outlet = Number(ch.power_outlet) || null; }
         if (ch.power_w) body.power_w = Number(ch.power_w);
         if (ch.kind) body.kind = ch.kind;
+        if (ch.name) body.name = ch.name;
+        if (ch.unit_tags) body.unit_tags = ch.unit_tags.split(',').map((x) => x.trim()).filter(Boolean);
         if (ch.make !== undefined) body.make = ch.make; if (ch.model !== undefined) body.model = ch.model;
         if (ch.ip) { body.ip = ch.ip; body.networked = true; }
         if (ch.location) body.location = ch.location;

@@ -161,7 +161,7 @@ function devThumb(d, size) {
   const s = size || 40;
   return d.photo
     ? '<span class="dthumb" style="width:' + s + 'px;height:' + s + 'px;background-image:url(/uploads/' + esc(d.photo) + ')"></span>'
-    : '<span class="dthumb" style="width:' + s + 'px;height:' + s + 'px">' + esc(d.name.replace(/[^\p{L}\p{N}]/gu, '').slice(0, 2).toUpperCase()) + '</span>';
+    : '<span class="dthumb" style="width:' + s + 'px;height:' + s + 'px">' + esc(([d.make, d.model].filter(Boolean).join(' ') || d.name).replace(/[^\p{L}\p{N}]/gu, '').slice(0, 2).toUpperCase()) + '</span>';
 }
 
 // ---------- the Gear Locker ----------
@@ -174,10 +174,18 @@ const tagModel = (x) => (x ? (typeof Tags !== 'undefined' ? Tags.withModel(x.nam
  * One line that says what it is: "Wireless mic · Handheld · Shure SLXD2 · on RX-1 (SLXD4D)", "Receiver · 2 wireless mics".
  * Only wireless mics, capsules and in-ear packs say what they pair with; a wired mic never does.
  */
-function gearLine(d, list) {
+/** A card's title: its make and model ("Rode M5"), or its name when it has no model. */
+const gearTitle = (d) => [d.make, d.model].filter(Boolean).join(' ') || d.name;
+/** The tags on a card: one per piece for a card with a quantity (MIC-2, MIC-3), otherwise its tag name. */
+function gearTags(d) {
+  if (qtyOf(d) > 1) return d.unit_tags && d.unit_tags.length ? d.unit_tags : Tags.namesOf({ name: d.name, qty: qtyOf(d) });
+  return [d.name];
+}
+const tagChips = (d, cls) => { const t = gearTags(d); return t.length && !(t.length === 1 && t[0] === gearTitle(d)) ? '<span class="dtags' + (cls ? ' ' + cls : '') + '">' + t.map((x) => '<i>' + esc(x) + '</i>').join('') + (qtyOf(d) > 1 && t.length < qtyOf(d) ? '<i class="miss">+' + (qtyOf(d) - t.length) + ' untagged</i>' : '') + '</span>' : ''; };
+function gearLine(d, list, noModel) {
   list = list || DEV.list || [];
   const mm = [d.make, d.model].filter(Boolean).join(' ');
-  const showMm = mm && !(typeof Tags !== 'undefined' && d.model && Tags.norm(d.name).includes(Tags.norm(d.model)));
+  const showMm = !noModel && mm && !(typeof Tags !== 'undefined' && d.model && Tags.norm(d.name).includes(Tags.norm(d.model)));
   const mate = GEAR_PAIR[d.kind] && d.pair_id ? list.find((x) => x.id === d.pair_id) : null;
   const kids = PAIR_CHILD[d.kind] ? list.filter((x) => x.kind === PAIR_CHILD[d.kind] && x.pair_id === d.id).length : 0;
   // most useful first (what it is, what it pairs with), make and model last, since a narrow card cuts the end off
@@ -220,12 +228,12 @@ async function viewDevices(qs) {
     <div class="gchips" id="dcat"><button data-b="" class="chipb on">All <em>${list.length}</em></button>${order.filter((b) => list.some((d) => bucketOf(d) === b)).map((b) => '<button class="chipb" data-b="' + esc(b) + '">' + esc(b) + ' <em>' + list.filter((d) => bucketOf(d) === b).length + '</em></button>').join('')}</div>
     <div id="dgrid"></div>`;
   const cardHtml = (d) => '<a class="dcard" href="#/d/' + d.id + '">' + devThumb(d, 46) +
-    '<div class="t"><b>' + esc(d.name) + (qtyOf(d) > 1 ? ' <span class="qtyb">×' + qtyOf(d) + '</span>' : '') + '</b><span>' + esc(gearLine(d, list)) + '</span>' +
+    '<div class="t"><b>' + esc(gearTitle(d)) + (qtyOf(d) > 1 ? ' <span class="qtyb">×' + qtyOf(d) + '</span>' : '') + '</b>' + tagChips(d) + '<span>' + esc(gearLine(d, list, gearTitle(d) !== d.name)) + '</span>' +
     '<span class="dmeta">' + [d.location ? icon('pin') + esc(d.location) : '', d.networked && d.ips.length ? '<span class="mono">' + esc(d.ips[0]) + '</span>' + (d.ips.length > 1 ? ' +' + (d.ips.length - 1) : '') : '', users.get(d.id) ? icon('user') + esc(users.get(d.id)) : ''].filter(Boolean).join('<i>·</i>') + '</span></div>' +
     '<div class="dbadges">' + (d.files ? '<span class="badge" title="' + d.files + ' manual' + (d.files === 1 ? '' : 's') + '">' + icon('pdf') + d.files + '</span>' : '') + (d.tech_only ? '<span class="badge tech">Tech only</span>' : '') + '</div></a>';
   const paint = () => {
     const words = q.toLowerCase().split(/\s+/).filter(Boolean);
-    const shown = list.filter((d) => (!bk || bucketOf(d) === bk) && (!lc || (lc === '__none' ? !d.location : d.location === lc)) && words.every((w) => [d.name, ...d.aliases, d.make, d.model, d.location, ...d.ips, users.get(d.id) || '', bucketOf(d)].join(' ').toLowerCase().includes(w)));
+    const shown = list.filter((d) => (!bk || bucketOf(d) === bk) && (!lc || (lc === '__none' ? !d.location : d.location === lc)) && words.every((w) => [d.name, ...d.aliases, ...(d.unit_tags || []), d.make, d.model, d.location, ...d.ips, users.get(d.id) || '', bucketOf(d)].join(' ').toLowerCase().includes(w)));
     if (!shown.length) {
       $('#dgrid').innerHTML = '<div class="card empty">' + (list.length ? 'No gear matches.' : 'The Gear Locker is empty.' + (can('admin') ? ' Try the <a href="#/gear-setup">guided setup</a> or add your first piece of gear' + (sug.length ? ', or make cards from the names already in your IP lists' : '') + '.' : '')) + '</div>';
       return;
@@ -274,7 +282,8 @@ function gearWarnings(list) {
   }
   // identical gear on separate cards (same make, model and kind, not wireless): can be one card with a quantity
   const same = new Map();
-  list.filter((d) => d.model && !ONE_EACH.includes(d.kind)).forEach((d) => { const k = Tags.norm(d.make) + '|' + Tags.norm(d.model) + '|' + (d.kind || ''); if (!same.has(k)) same.set(k, []); same.get(k).push(d); });
+  // not offered for power strips (each has its own outlets), gear in a rack (each has its own spot) or gear with its own network link
+  list.filter((d) => d.model && !ONE_EACH.includes(d.kind) && d.kind !== 'power' && !d.rack_id && !d.uplink_id && !(d.ips && d.ips.length)).forEach((d) => { const k = Tags.norm(d.make) + '|' + Tags.norm(d.model) + '|' + (d.kind || ''); if (!same.has(k)) same.set(k, []); same.get(k).push(d); });
   const skip = DEV.dupeSkip || new Set();
   const key = (g) => g.map((d) => String(d.id)).sort().join('|');
   const combos = [...same.values()].filter((g) => g.length > 1 && !skip.has(key(g)));
@@ -311,22 +320,43 @@ function paintDupes(host, list) {
  */
 async function splitCard(v) {
   const n = qtyOf(v);
-  if (!await confirmBox('Split ' + v.name + ' into ' + n + ' cards?', 'This card becomes one of them. ' + (n - 1) + ' new card' + (n > 2 ? 's get' : ' gets') + ' the same make, model, location and notes, ready for details of their own. Manuals and the photo stay on this card.', 'Split')) return;
+  if (!await confirmBox('Split ' + v.name + ' into ' + n + ' cards?', 'This card becomes one of them. ' + (n - 1) + ' new card' + (n > 2 ? 's get' : ' gets') + ' the same make, model, location and notes, ready for details of their own. Manuals and the photo stay on this card. On the stage patch, each placed one goes with its own card.', 'Split')) return;
   try {
     const all = await loadDevices(true);
-    const taken = all.flatMap((x) => [x.name, ...(x.aliases || [])]);
+    // the units already on the stage patch: each becomes its own card, named after its block (SPK-1, SPK-2…)
+    let pd = null; try { pd = await get('/api/patch'); } catch (e) { pd = null; }
+    const blocks = pd ? pd.doc.gear.filter((g) => g.device_id === v.id) : [];
+    const bare = (x) => String(x || '').replace(/\s+#\d+$/, '').trim();
+    const taken = all.filter((x) => x.id !== v.id).flatMap((x) => [x.name, ...(x.aliases || [])]);
+    const free = (nm) => nm && !taken.some((t) => Tags.norm(t) === Tags.norm(nm));
     const tagLike = Tags.norm(v.name) === Tags.norm(Tags.suggest(v.kind || 'other', [], { model: v.model })) || /^[A-Z]{1,6}(-[A-Z]{1,4})?-?\d+[A-Z]?$/i.test(v.name.trim());
+    const nameFor = (i) => {   // i: 1-based unit
+      const ut = (v.unit_tags || [])[i - 1];   // each piece already has its tag: it becomes that card's name
+      if (ut && free(ut)) return ut;
+      const b = blocks[i - 1] && bare(blocks[i - 1].name);
+      if (b && free(b)) return b;
+      if (i === 1) return v.name;
+      let name = tagLike || blocks.length ? Tags.suggest(v.kind || 'other', taken, { model: v.model }) : v.name + ' ' + i;
+      while (!free(name)) name += '+';
+      return name;
+    };
+    const first = nameFor(1); taken.push(first);
     const ids = [v.id];
     for (let i = 2; i <= n; i++) {
-      let name = tagLike ? Tags.suggest(v.kind || 'other', taken, { model: v.model }) : v.name + ' ' + i;
-      while (taken.some((t) => Tags.norm(t) === Tags.norm(name))) name += '+';
-      taken.push(name);
-      ids.push((await call('POST', '/api/devices', { name, aliases: [], kind: v.kind, category: v.category, make: v.make, model: v.model, location: v.location, bucket: v.bucket, notes: v.notes, inputs: v.inputs, outputs: v.outputs, qty: 1 })).id);
+      const name = nameFor(i); taken.push(name);
+      ids.push((await call('POST', '/api/devices', { name, aliases: [], kind: v.kind, category: v.category, make: v.make, model: v.model, location: v.location, bucket: v.bucket, notes: v.notes, inputs: v.inputs, outputs: v.outputs, qty: 1, power_w: v.power_w == null ? undefined : v.power_w })).id);
     }
-    await call('PUT', '/api/devices/' + v.id, { ...v, qty: 1 });
+    await call('PUT', '/api/devices/' + v.id, { ...(await get('/api/devices/' + v.id)).device, name: first, qty: 1, unit_tags: [] });
+    // the 2nd, 3rd… blocks on the stage patch now point at their own cards
+    if (blocks.length > 1) {
+      const doc = pd.doc;
+      let k = 0;
+      doc.gear.forEach((g) => { if (g.device_id === v.id) { if (k > 0 && ids[k]) g.device_id = ids[k]; k++; } });
+      try { await call('PUT', '/api/patch', { doc, baseVersion: pd.version, note: 'Split ' + v.name + ' into separate cards' }); } catch (e) { toast('Cards split, but the stage patch was not updated: ' + e.message, 'bad'); }
+    }
     // they were split on purpose: the Gear Locker does not suggest combining them again
     try { await call('PUT', '/api/devices/dupe-skip', { ids }); } catch (e) { /* only a suggestion */ }
-    forgetDevices(); toast('Split into ' + n + ' cards', 'ok'); route();
+    forgetDevices(); toast('Split into ' + n + ' cards' + (blocks.length > 1 ? '; the stage patch follows' : ''), 'ok'); route();
   } catch (e) { toast(e.message, 'bad'); }
 }
 /** Combine: identical cards become one card with their quantities added (the others merge into it). */
@@ -459,7 +489,7 @@ async function viewDevice(id) {
   app.innerHTML = `<div class="page dev">
     <div class="crumbs"><a href="#/">Home</a><span>/</span><a href="#/gear">Gear Locker</a></div>
     <div class="devhead">${pic ? '<a href="#dphoto" class="devphotoa" id="dpa"><img class="devphoto" src="/uploads/' + esc(pic.photo) + '" alt=""' + (pic.rack ? ' style="object-position:' + Math.round((pic.marks[0].x + pic.marks[0].w / 2) * 100) + '% ' + Math.round((pic.marks[0].y + pic.marks[0].h / 2) * 100) + '%"' : '') + '></a>' : devThumb(v, 84)}
-      <div class="grow"><h1 class="title">${esc(v.name)}${qtyOf(v) > 1 ? ' <span class="qtyb big">×' + qtyOf(v) + '</span>' : ''}</h1><div class="meta" style="margin:0">${esc([v.make, v.model].filter(Boolean).join(' '))}
+      <div class="grow"><h1 class="title">${esc(gearTitle(v))}${qtyOf(v) > 1 ? ' <span class="qtyb big">×' + qtyOf(v) + '</span>' : ''}</h1>${tagChips(v, 'big')}<div class="meta" style="margin:0">${esc(kindLabel(v.kind) || '')}
         <span class="chip">${CAT[v.category] || 'Other'}</span>${v.tech_only ? '<span class="badge tech">Tech only</span>' : ''}</div></div>
       <div class="acts-top">${can('admin') ? '<button class="btn" id="eD">' + icon('edit') + 'Edit</button>' + (qtyOf(v) > 1 ? '<button class="btn" id="spD" title="Make a card for each one, to give each its own details">Split into ' + qtyOf(v) + ' cards</button>' : '') + '<button class="ghost danger" id="xD" title="Delete device">' + icon('trash') + '</button>' : '<button class="btn ghost" id="rD">' + icon('alert') + 'Report a problem</button>'}</div></div>
     ${facts.length ? '<div class="card facts">' + facts.map((f) => '<div class="fact"><span>' + f[0] + '</span><div>' + f[1] + '</div></div>').join('') + '</div>' : ''}
@@ -492,7 +522,9 @@ async function viewDevice(id) {
     $('#eD').addEventListener('click', () => { location.hash = '#/d/' + v.id + '/edit'; });
     const sp = $('#spD'); if (sp) sp.addEventListener('click', () => splitCard(v));
     $('#xD').addEventListener('click', async () => {
-      if (!await confirmBox('Delete ' + v.name + '?', 'The card is removed and pages stop linking to it. The pages themselves do not change.', 'Delete', true)) return;
+      const onPatch = ((d.usedOn || []).find((x) => x.page_id === 'patch') || {}).hits || [];
+      const pt = onPatch.length ? ' On the stage patch as ' + onPatch.map((h) => String(h.text || '').split(' · ')[0]).filter(Boolean).join(', ') + ': ' + (onPatch.length === 1 ? 'the block stays' : 'the blocks stay') + ', unlinked.' : '';
+      if (!await confirmBox('Delete ' + v.name + '?', 'The card is removed and pages stop linking to it. The pages themselves do not change.' + pt, 'Delete', true)) return;
       try { await call('DELETE', '/api/devices/' + v.id); forgetDevices(); toast('Removed from the Gear Locker', 'ok'); location.hash = '#/gear'; } catch (e) { toast(e.message, 'bad'); }
     });
   }
@@ -776,6 +808,7 @@ async function viewDeviceEdit(id) {
         <label class="dfield wide"><span>What is it?</span><select data-k="kind" id="dkind"><option value="">Choose…</option>${GEAR_KIND.map((k) => '<option value="' + k[0] + '"' + (k[0] === d.kind ? ' selected' : '') + '>' + k[1] + '</option>').join('')}</select><em>Sorts it into the right bucket, and lets wireless mics pair with their receiver</em></label>
         <label class="dfield wide"><span>Tag name</span><div class="tagrow"><input data-k="name" value="${esc(d.name)}" placeholder="Like RX-1 or WMIC-1" autocapitalize="characters" spellcheck="false"><button type="button" class="btn" id="dauto" title="Suggest a tag name from what it is">${icon('spark')}Auto label</button></div><em id="dtagnote">What your team calls it; it goes on the label. Auto label suggests one from what it is.</em></label>
         <label class="dfield" id="dqtyw"><span id="dqtyt">Quantity</span><input id="dqty" type="number" min="1" max="999" value="${qtyOf(d)}" inputmode="numeric"><em id="dqtyh"></em></label>
+        <div class="dfield wide hide" id="dutw"><span>Tags, one per piece</span><div class="dtagrow"><input id="dut" value="${esc((d.unit_tags || []).join(', '))}" placeholder="MIC-2, MIC-3"><button type="button" class="btn" id="dutauto">${icon('spark')}Auto label</button></div><em>Each piece's own tag, the way it is labelled. Placing one on the stage patch uses the next tag. The card's title is its make and model.</em></div>
         <label class="dfield wide"><span>Also called</span><input data-k="aliases" value="${esc(d.aliases.join(', '))}" placeholder="Nicknames, comma between"><em>Other names people type, separated by commas. Each one links to this card.</em></label>
         <label class="dfield"><span>Category</span><select data-k="category">${Object.keys(CAT).map((k) => '<option value="' + k + '"' + (k === d.category ? ' selected' : '') + '>' + CAT[k] + '</option>').join('')}</select></label>
         <label class="dfield"><span>Bucket</span><select data-k="bucket"><option value="" id="dbauto">Automatic (${esc(autoBucket({ ...d, kind: d.kind || (DEV.list || []).find((x) => x.id === d.id)?.kind || '' }))})</option>${bucketOrder(DEV.list || []).map((b) => '<option' + (b === d.bucket ? ' selected' : '') + '>' + esc(b) + '</option>').join('')}</select><em>Where it sits in the Gear Locker</em></label>
@@ -884,13 +917,27 @@ async function viewDeviceEdit(id) {
     $('#dqtyh').textContent = each ? 'More than one makes a card for each (' + (d.kind === 'receiver' ? 'RX-1, RX-2' : d.kind === 'iemtx' ? 'IEM-TX1, IEM-TX2' : d.kind === 'bodypack' ? 'IEM-1, IEM-2' : 'WMIC-1, WMIC-2') + '…): each has its own frequency and channel.'
       : 'How many of these you have. One card stands for all of them; on the stage patch each is placed and cabled on its own.';
     if (!each && Number($('#dqty').value) > 999) $('#dqty').value = 999;
+    $('#dutw').classList.toggle('hide', each || (Number($('#dqty').value) || 1) < 2);
   }
   qtyField();
+  // a tag that is a run of numbers (MIC-2–3) follows the quantity: change 2 to 3 and it becomes MIC-2–4 (or the next free run)
+  const unitAuto = () => {
+    const q = Math.max(1, Number($('#dqty').value) || 1);
+    const have = $('#dut').value.split(',').map((x) => x.trim()).filter(Boolean).slice(0, q);
+    const taken = otherNames().concat(have);
+    while (have.length < q) { const t = Tags.suggest(d.kind || 'other', taken, { model: d.model }); have.push(t); taken.push(t); }
+    $('#dut').value = have.join(', '); dirty();
+  };
+  $('#dutauto').addEventListener('click', () => { if (!d.kind) { toast('Pick what it is first, then Auto label', 'bad'); return; } $('#dut').value = ''; unitAuto(); });
+  $('#dut').addEventListener('input', dirty);
+  $('#dqty').addEventListener('input', () => { qtyField(); const q = Number($('#dqty').value) || 1; if (q > 1 && d.kind && !ONE_EACH.includes(d.kind) && $('#dut').value.trim()) unitAuto(); });
   $('#dqty').addEventListener('input', () => dirty());
   // Auto label: a short code from what it is (RX-1, WMIC-2, PA-AMP1…), never one another card already uses
   let autoNamed = false;
-  const otherNames = () => all.filter((x) => String(x.id) !== String(id)).flatMap((x) => [x.name, ...(x.aliases || [])]);
-  const suggestTag = (taken) => Tags.suggest(d.kind || 'other', taken || otherNames(), { model: d.model });
+  const otherNames = () => all.filter((x) => String(x.id) !== String(id)).flatMap((x) => Tags.namesOf(x));
+  // a card standing for several (Quantity 2+) gets a run of numbers, like MIC-2–3, so the next card starts after it
+  // a card standing for several is named by what it is (its make and model); each piece gets its own tag below
+  const suggestTag = (taken) => { const q = Number(($('#dqty') || {}).value) || Number(d.qty) || 1; const mm = [d.make, d.model].filter(Boolean).join(' '); return q > 1 && !ONE_EACH.includes(d.kind) && mm ? mm : Tags.suggest(d.kind || 'other', taken || otherNames(), { model: d.model }); };
   $('#dauto').addEventListener('click', () => {
     if (!d.kind) { toast('Pick what it is first, then Auto label', 'bad'); $('#dkind').focus(); return; }
     const n = $('[data-k=name]');
@@ -957,6 +1004,7 @@ async function viewDeviceEdit(id) {
   const body = () => {
     const b = { ...d };
     b.qty = ONE_EACH.includes(d.kind) ? 1 : Math.max(1, Math.min(999, Math.round(Number($('#dqty').value) || 1)));
+    if (b.qty > 1) b.unit_tags = $('#dut').value.split(',').map((x) => x.trim()).filter(Boolean).slice(0, b.qty); else b.unit_tags = [];
     if (d.kind === 'txmic') { b.capsule_id = /^\d+$/.test(String(d.capsule_id)) ? d.capsule_id : ''; if (d.capsule_id === '__text') b.capsule_typed = true; else delete b.capsule; }
     else delete b.capsule_id;
     delete b.marks;
@@ -976,11 +1024,18 @@ async function viewDeviceEdit(id) {
         const auto = autoNamed || !d.name.trim();
         const taken = otherNames();
         const nameFor = (i) => { if (!auto) return n === 1 ? d.name : d.name + ' ' + i; const t = i === 1 && autoNamed && n === 1 ? d.name : suggestTag(taken); taken.push(t); return t; };
+        // wireless mics with a capsule card: each new mic gets one while the card has room (SM58 head ×4 → four mics)
+        const capCard = d.kind === 'txmic' && /^\d+$/.test(String(d.capsule_id)) ? (DEV.list || []).find((c) => String(c.id) === String(d.capsule_id)) : null;
+        let capLeft = capCard ? Math.max(1, capCard.qty || 1) - (DEV.list || []).filter((m) => m.kind === 'txmic' && m.capsule_card === capCard.id).length : 0;
+        let capGiven = 0;
         for (let i = 1; i <= n; i++) {
-          const one = await call('POST', '/api/devices', { ...body(), name: nameFor(i), ...(n > 1 ? { aliases: [] } : {}), ...(i > 1 && d.kind === 'txmic' && d.capsule_id !== '__text' ? { capsule_id: '' } : {}), ...(i > 1 ? { rack_id: '', power_pdu: '' } : {}) });
+          const cap = d.kind === 'txmic' && d.capsule_id !== '__text' ? (capCard && capLeft > 0 ? { capsule_id: capCard.id } : { capsule_id: '' }) : {};
+          if (capCard && capLeft > 0) { capLeft--; capGiven++; }
+          const one = await call('POST', '/api/devices', { ...body(), name: nameFor(i), ...(n > 1 ? { aliases: [] } : {}), ...cap, ...(i > 1 ? { rack_id: '', power_pdu: '' } : {}) });
           if (i === 1) { x = one; await saveMarks(one.id); }
         }
-        S.dirty = false; forgetDevices(); toast(n === 1 ? 'Added to the Gear Locker' : n + ' added to the Gear Locker', 'ok');
+        S.dirty = false; forgetDevices();
+        toast((n === 1 ? 'Added to the Gear Locker' : n + ' added to the Gear Locker') + (capCard && n > 1 ? '; ' + capGiven + ' of them got a ' + capCard.name + (capGiven < n ? ' (no more free; raise its quantity for the rest)' : '') : ''), 'ok');
         location.hash = n === 1 ? '#/d/' + x.id : '#/gear';
       }
       // next time this model is one pick away, and knows what it is

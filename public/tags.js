@@ -16,7 +16,20 @@
   /** For comparing names: case, spaces, dashes, dots and underscores do not count. */
   const norm = (s) => String(s || '').toLowerCase().replace(/[\s\-_.·/]+/g, '');
   const letter = (n) => { let s = ''; n += 1; while (n > 0) { const r = (n - 1) % 26; s = String.fromCharCode(65 + r) + s; n = Math.floor((n - 1) / 26); } return s; };
-  const takenSet = (taken) => new Set([...(taken || [])].map((t) => norm(t)));
+  /**
+   * A card with a quantity holds a run of numbers: "MIC-2–3" is MIC-2 and MIC-3. expand() lists them; a plain name is
+   * itself. Ranges use an en dash (or "–"/"-" between two numbers), the second number higher, at most 99 apart.
+   */
+  const RANGE = /^(.*\D)(\d+)\s*[–-]\s*(\d+)$/;
+  function expand(name) {
+    const m = RANGE.exec(String(name || '').trim());
+    if (!m) return [String(name || '')];
+    const a = Number(m[2]), b = Number(m[3]);
+    if (!(b > a && b - a < 100)) return [String(name)];
+    const pad = m[2].length > 1 && m[2][0] === '0' ? m[2].length : 0;
+    return Array.from({ length: b - a + 1 }, (_, k) => m[1] + String(a + k).padStart(pad, '0'));
+  }
+  const takenSet = (taken) => new Set([...(taken || [])].flatMap((t) => expand(t)).map((t) => norm(t)));
 
   /**
    * A tag name for a piece of gear. taken: names already used (any iterable); the suggestion avoids them.
@@ -49,6 +62,25 @@
       if (free(base)) return withPerson(base);
     }
     return withPerson(c.code + Date.now() % 1000);
+  }
+
+  /**
+   * A run of n free numbers for a card with a quantity: "MIC-4–5" (n = 1 gives a plain tag). Only for numbered codes.
+   */
+  function suggestRange(kind, taken, n, opts = {}) {
+    n = Math.max(1, Math.min(99, Number(n) || 1));
+    if (n === 1) return suggest(kind, taken, opts);
+    const c = CODES[kind] || CODES.other;
+    if (c.letter || c.model || opts.position) return suggest(kind, taken, opts);
+    const t = takenSet(taken);
+    if (opts.keep) expand(opts.keep).forEach((x) => t.delete(norm(x)));
+    const free = (base) => { const b = norm(base); return ![...t].some((x) => x === b || (x.startsWith(b) && /^[a-z]/.test(x.slice(b.length)))); };
+    for (let s = c.plain ? 2 : 1; s < 999; s++) {
+      let ok = true;
+      for (let k = 0; k < n && ok; k++) ok = free(c.code + (s + k));
+      if (ok) return c.code + s + '–' + (s + n - 1);
+    }
+    return suggest(kind, taken, opts);
   }
 
   /** A cable number: C-001, C-002… the lowest one not already used. */
@@ -104,7 +136,19 @@
     return out;
   }
 
-  const api = { CODES, POSITIONS, CABLE_PREFIX, norm, suggest, cable, cableName, withModel, nearDupes };
+  /**
+   * Every tag a card stands for: its run (MIC-2–3), or for a card with a quantity named with a single number
+   * (MIC-2, qty 2) the numbers it implies (MIC-2, MIC-3), so new cards never reuse them.
+   */
+  function namesOf(card) {
+    if (card.unit_tags && card.unit_tags.length) return [card.name, ...card.unit_tags, ...(card.aliases || [])];
+    const own = expand(card.name);
+    const q = Math.max(1, Number(card.qty) || 1);
+    const m = /^(.*\D)(\d+)$/.exec(String(card.name || '').trim());
+    if (own.length === 1 && q > 1 && m) for (let k = 1; k < q; k++) own.push(m[1] + (Number(m[2]) + k));
+    return own.concat(card.aliases || []);
+  }
+  const api = { CODES, POSITIONS, CABLE_PREFIX, norm, expand, namesOf, suggest, suggestRange, cable, cableName, withModel, nearDupes };
   if (typeof module !== 'undefined' && module.exports) module.exports = api;
   else root.Tags = api;
 })(typeof window !== 'undefined' ? window : globalThis);

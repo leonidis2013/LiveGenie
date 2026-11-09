@@ -19,6 +19,8 @@ const SETUP_SECTIONS = [
     { role: 'speaker', kind: 'speaker', title: 'Speakers' }] }
 ];
 const SETUP_GROUPS = SETUP_SECTIONS.flatMap((s) => s.groups);
+/** Speaker types for the PA wiring: on an amp channel, or powered (fed straight from the processor); top or sub. */
+const SPK_TYPES = [['passive', 'Passive (on an amp)'], ['powered', 'Powered'], ['psub', 'Powered sub'], ['sub', 'Passive sub (on an amp)']];
 
 async function viewGearSetup(qs) {
   if (!can('admin')) { app.innerHTML = '<div class="card empty">Admins can run the guided setup.</div>'; if (!S.state.user) signInDialog(() => route()); return; }
@@ -50,7 +52,7 @@ async function viewGearSetup(qs) {
    * A name typed in stays; an empty one gets the next free tag (never one already in the Gear Locker or made earlier in this run).
    */
   function plan() {
-    const taken = have.map((d) => d.name);
+    const taken = have.flatMap((d) => Tags.namesOf(d));
     const take = (n) => { taken.push(n); return n; };
     const c = st.console;
     const out = { console: null, boxes: [], other: [] };
@@ -77,7 +79,7 @@ async function viewGearSetup(qs) {
   }
 
   /** What one row adds: "Shure SLXD4D ×2 · 2 ch". */
-  const chipText = (o) => [o.make, o.model].filter(Boolean).join(' ') + (o.qty > 1 ? ' ×' + o.qty : '') + (o.n && o.unit ? ' · ' + o.n + ' ' + o.unit : '');
+  const chipText = (o) => [o.make, o.model].filter(Boolean).join(' ') + (o.qty > 1 ? ' ×' + o.qty : '') + (o.n && o.unit ? ' · ' + o.n + ' ' + o.unit : '') + (o.spk ? ' · ' + (SPK_TYPES.find((t) => t[0] === o.spk) || [0, ''])[1].replace(' (on an amp)', '').toLowerCase() : '');
   const makesList = () => '<datalist id="gmakes">' + GearModels.makes().map((m) => '<option value="' + esc(m) + '">').join('') + '</datalist>';
   const haveList = (kinds) => { const h = have.filter((d) => kinds.includes(d.kind)); return h.length ? '<div class="gs-have">' + icon('box') + '<span>Already in the Gear Locker: ' + h.map((d) => '<b>' + esc(Tags.withModel(d.name, d.model)) + '</b>').join(', ') + '</span></div>' : ''; };
 
@@ -139,6 +141,8 @@ async function viewGearSetup(qs) {
                 '<label class="gs-f">Model<input data-nm="model" placeholder="Model number" list="gm-' + g.role + '" value="' + esc(ad.model || '') + '"></label>' +
                 (g.count ? '<label class="gs-f gs-n">' + g.count[1] + '<input data-nm="count" type="number" min="1" max="64" inputmode="numeric" value="' + esc(ad.count || g.count[2]) + '"></label>' : '') +
                 '<label class="gs-f gs-n">How many<input data-nm="qty" type="number" min="1" max="32" inputmode="numeric" value="' + esc(ad.qty || 1) + '"></label>' +
+                // speakers: powered or on an amp, top or sub, decides how the PA is wired
+                (g.role === 'speaker' ? '<label class="gs-f">Type<select data-nm="spk">' + SPK_TYPES.map((t) => '<option value="' + t[0] + '"' + ((ad.spk || 'passive') === t[0] ? ' selected' : '') + '>' + t[1] + '</option>').join('') + '</select></label>' : '') +
                 '<button type="button" class="btn gs-add" data-newadd="' + g.role + '">' + icon('plus') + 'Add</button>' +
               '</div><datalist id="gm-' + g.role + '">' + picks.map((m) => '<option value="' + esc(m.model) + '">' + esc(m.make || '') + '</option>').join('') + '</datalist></div>';
           }).join('') + '</section>').join('') + makesList();
@@ -160,7 +164,7 @@ async function viewGearSetup(qs) {
           ${groups.map((g) => '<div class="gs-rg"><div class="gs-grph">' + g[0] + '</div><ul>' + g[1].join('') + '</ul></div>').join('')}
           <p class="note">Tag names can be changed on each card later. New makes and models go on your list, so next time they are one tap.</p></div>
         <label class="tog ${st.page ? 'on' : ''} gopt"><input type="checkbox" data-opt="page"${st.page ? ' checked' : ''}><span><b>Put it on the stage patch</b><br><span class="note">${lists.length ? lists.join(' · ') + '. Then add your mics and draw the cables.' : 'Draws the console and the rest of your gear on the stage patch.'}</span></span></label>
-        <label class="tog ${st.cables ? 'on' : ''} gopt"><input type="checkbox" data-opt="cables"${st.cables ? ' checked' : ''}${proc.length || amps.length ? '' : ' disabled'}><span><b>Wire up the PA</b><br><span class="note">${proc.length || amps.length ? 'A starting point: ' + esc([p.console.name, ...proc.map((x) => x.name), ...amps.map((x) => x.name), ...spk.map((x) => x.name)].join(' → ')) + '. Check it against your rack.' : 'Add a speaker processor or amplifier to get this'}</span></span></label>`;
+        <label class="tog ${st.cables ? 'on' : ''} gopt"><input type="checkbox" data-opt="cables"${st.cables ? ' checked' : ''}${proc.length || amps.length ? '' : ' disabled'}><span><b>Wire up the PA</b><br><span class="note">${proc.length || amps.length ? 'A starting point: ' + esc([p.console.name, ...proc.map((x) => x.name), ...amps.map((x) => x.name)].join(' → ')) + (spk.length ? '; passive speakers one per amp channel, powered speakers and subs on their own processor outputs' : '') + '. Check it against your rack.' : 'Add a speaker processor or amplifier to get this'}</span></span></label>`;
     }
     app.innerHTML = `<div class="ed gsetup"><div class="crumbs"><a href="#/">Home</a><span>/</span><a href="#/admin/setup">Equipment setup</a><span>/</span><span>Guided setup</span></div>
       <h1 class="title" style="font-size:22px;margin:6px 0 10px">Guided equipment setup</h1>
@@ -244,11 +248,12 @@ async function viewGearSetup(qs) {
       const cnt = row.querySelector('[data-nm=count]');
       const n = g.count ? Math.max(1, Math.min(64, Number(cnt.value) || g.count[2])) : null;
       const qty = Math.max(1, Math.min(32, Number(row.querySelector('[data-nm=qty]').value) || 1));
+      const spkSel = row.querySelector('[data-nm=spk]'), spk = spkSel ? spkSel.value : undefined;
       if (!model) return toast('Type the model', 'bad');
       // the same make, model and count again adds to how many
-      const same = st.other.find((o) => o.role === g.role && lc(o.make) === lc(make) && lc(o.model) === lc(model) && (o.n || null) === n);
+      const same = st.other.find((o) => o.role === g.role && lc(o.make) === lc(make) && lc(o.model) === lc(model) && (o.n || null) === n && o.spk === spk);
       if (same) same.qty = Math.min(32, same.qty + qty);
-      else st.other.push({ key: g.role + ':' + Date.now() + ':' + st.other.length, role: g.role, kind: g.kind, make, model, n, unit: g.unit, qty });
+      else st.other.push({ key: g.role + ':' + Date.now() + ':' + st.other.length, role: g.role, kind: g.kind, make, model, n, unit: g.unit, qty, spk });
       delete st.adding[g.role];
       render();
     }));
@@ -282,7 +287,7 @@ async function viewGearSetup(qs) {
       for (const x of p.boxes) boxIds.push(await post({ name: x.name, kind: 'stagebox', make: x.b.make.trim(), model: x.b.model.trim(), location: x.b.location, inputs: Number(x.b.inputs) || 0, outputs: Number(x.b.outputs) || 0, notes: 'Connected to ' + p.console.name + ' over ' + x.b.link + '.' }));
       const otherIds = [];
       for (const x of p.other) {
-        const o = x.o, d = { name: x.name, kind: o.kind, make: o.make, model: o.model, qty: x.units.length };
+        const o = x.o, d = { name: x.name, kind: o.kind, make: o.make, model: o.model, qty: x.units.length, unit_tags: x.units.length > 1 ? x.units : [] };
         if (o.kind === 'receiver') Object.assign(d, { outputs: o.n || 1, notes: (o.n || 1) + '-channel wireless receiver.' });
         else if (o.kind === 'iemtx') Object.assign(d, { inputs: 2 });
         else if (o.kind === 'processor') Object.assign(d, { inputs: 2, outputs: o.n || 6 });
@@ -310,14 +315,16 @@ async function viewGearSetup(qs) {
         else if (o.kind === 'iemtx') place({ ...base, kind: 'iemtx', mode: 'Stereo' });
         else if (o.kind === 'processor') pg.push(placeUnit({ ...base, kind: 'processor', nin: 2, nout: o.n || 6 }, k));
         else if (o.kind === 'amp') ag.push(placeUnit({ ...base, kind: 'amp', nin: o.n || 2 }, k));
-        else if (o.kind === 'speaker') sg.push(placeUnit({ ...base, kind: 'speaker', group: 'Mains' }, k));
+        else if (o.kind === 'speaker') { const sp = placeUnit({ ...base, kind: 'speaker', group: /sub/.test(o.spk || '') ? 'Subs' : 'Mains' }, k); sp._spk = o.spk || 'passive'; sg.push(sp); }
       }));
       if (st.cables) {
         // a starting point for the PA: console LR → processor → amps → speakers (check it against the rack)
-        const first = pg[0];
-        if (first) { con.feeds = { ...(con.feeds || {}), 0: 'LR', 1: 'LR' }; if (con.outs.length > 1) { P.connect(doc, con, 0, first, 0); P.connect(doc, con, 1, first, 1); } }
-        ag.forEach((a, i) => { const src = first || con; if (src.outs.length) { P.connect(doc, src, (i * 2) % src.outs.length, a, 0); if (a.ins.length > 1) P.connect(doc, src, (i * 2 + 1) % src.outs.length, a, 1); } });
-        sg.forEach((sp, i) => { const a = ag.length ? ag[Math.floor(i / 2) % ag.length] : first; if (a && a.outs.length) P.connect(doc, a, i % a.outs.length, sp, 0); });
+        // one speaker per amp channel (never two in parallel); powered speakers and subs straight off the processor
+        const plan = P.paPlan(con, pg, ag, sg.map((sp) => ({ g: sp, type: sp._spk })));
+        sg.forEach((sp) => { delete sp._spk; });
+        if (pg[0]) con.feeds = { ...(con.feeds || {}), 0: 'LR', 1: 'LR' };
+        plan.links.forEach((l) => P.connect(doc, l.from, l.out, l.to, l.in));
+        if (plan.left.length) toast(plan.left.map((g) => g.name).join(', ') + ': no free amp channel or output for ' + (plan.left.length === 1 ? 'it' : 'them') + '. Wire ' + (plan.left.length === 1 ? 'it' : 'them') + ' on the stage patch.', 'bad');
       }
       await call('PUT', '/api/patch', { doc, baseVersion: cur.version, note: 'Guided setup' });
       toast('Setup done: now add your mics and draw the cables', 'ok');

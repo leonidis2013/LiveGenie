@@ -135,3 +135,10 @@
 .fshared { margin-top:10px; }
 .fsh { display:flex; align-items:center; gap:6px; font-size:12.5px; color:var(--dim); margin-bottom:6px; }
 .fsh a { font-weight:700; }
+
+/* model as the title, tags small under it (0.27.0) */
+.dtags { display:flex !important; flex-wrap:wrap; gap:4px; margin:2px 0 3px; }
+.dtags i { font-style:normal; font:700 11px/1.5 ui-monospace, SFMono-Regular, Menlo, monospace; letter-spacing:.02em; padding:0 6px; border-radius:5px; background:color-mix(in srgb, var(--acc) 14%, transparent); color:var(--fg); white-space:nowrap; }
+.dtags i.miss { background:none; color:var(--dim); font-family:inherit; font-weight:600; }
+.dtags.big { margin:4px 0 6px; } .dtags.big i { font-size:13px; padding:1px 8px; }
+.dtagrow { display:flex; gap:8px; } .dtagrow input { flex:1; min-width:0; }

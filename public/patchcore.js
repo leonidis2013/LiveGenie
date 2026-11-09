@@ -103,6 +103,9 @@
       // a wireless mic or pack kept as a spare (drawn greyed, not counted as in use), and a wireless system shown folded
       if (g0.spare && (g0.kind === 'txmic' || g0.kind === 'bodypack')) g.spare = true;
       if (g0.wlshut && (g0.kind === 'receiver' || g0.kind === 'iemtx')) g.wlshut = true;
+      // unlinked from its Gear Locker card because the card was removed, or is a different kind of gear (shown in the checks until linked again)
+      if (!g.device_id && typeof g0.wrong_card === 'string') g.wrong_card = g0.wrong_card.slice(0, 120);
+      if (!g.device_id && g0.lost_card) g.lost_card = true;
       // the console channel this source is on: its name and colour on the desk (WMIC-1, Kyle; Red)
       if (str(g0.chname, 32).trim()) g.chname = str(g0.chname, 32).trim();
       if (str(g0.chcolor, 24).trim()) g.chcolor = str(g0.chcolor, 24).trim();
@@ -501,6 +504,40 @@
   }
 
   /** Things that look wrong. */
+  /**
+   * The guided setup's starting PA: console L/R into the first processor (or the console's own outputs if there is
+   * none); amps fed from processor outputs, two per amp; passive speakers one per amp channel (never two on a channel);
+   * powered speakers on their own processor outputs; subs on the last outputs, so they sit apart.
+   * speakers: [{ g, type: 'passive'|'powered'|'psub'|'sub' }]. Returns { links: [{from, out, to, in}], left: [blocks not wired] }.
+   */
+  function paPlan(con, procs, amps, speakers) {
+    const links = [], left = [];
+    const first = procs[0] || null;
+    if (first && con.outs.length > 1 && first.ins.length > 1) { links.push({ from: con, out: 0, to: first, in: 0 }, { from: con, out: 1, to: first, in: 1 }); }
+    const src = first || con;
+    const used = new Set(first ? [] : [0, 1].filter((i) => i < con.outs.length));   // without a processor the console's L/R feed the amps first
+    const take = (fromEnd) => { const idx = src.outs.map((_, i) => i); if (fromEnd) idx.reverse(); const i = idx.find((j) => !used.has(j)); if (i == null) return null; used.add(i); return i; };
+    // amps: an input per channel from the source (L/R of the console go in when there is no processor)
+    const ampCh = [];
+    amps.forEach((a, n) => a.ins.forEach((_, c) => {
+      let o;
+      if (!first && n === 0 && c < 2 && c < con.outs.length) o = c; else o = take(false);
+      if (o != null) links.push({ from: src, out: o, to: a, in: c });
+      if (c < a.outs.length) ampCh.push({ a, ch: c });
+    }));
+    // a passive sub gets the last amp channel, passive tops the first ones
+    const subCh = speakers.filter((s) => s.type === 'sub').map(() => ampCh.pop()).filter(Boolean);
+    let ci = 0;
+    for (const s of speakers) {
+      if (s.type === 'psub') { const o = take(true); if (o == null) left.push(s.g); else links.push({ from: src, out: o, to: s.g, in: 0 }); continue; }
+      if (s.type === 'powered') { const o = take(false); if (o == null) left.push(s.g); else links.push({ from: src, out: o, to: s.g, in: 0 }); continue; }
+      const slot = s.type === 'sub' ? subCh.shift() : ampCh[ci++];
+      if (!slot) { left.push(s.g); continue; }
+      links.push({ from: slot.a, out: slot.ch, to: s.g, in: 0 });
+    }
+    return { links, left };
+  }
+
   function checks(doc) {
     const out = [];
     const ix = index(doc);
@@ -536,5 +573,5 @@
   /** Short text for search and the device "used on" list. */
   function searchText(g) { return [g.name, g.use, g.person, g.chname, g.model, g.make, g.capsule, g.freq, g.group, g.phones, g.notes].filter(Boolean).join(' '); }
 
-  return { COLS, CATS, CABLES, KINDS, KIND_ORDER, FIELD_LABELS, DEFAULT_MIXES, STAGES, STAGE_OF, stageOf, tagKey, clean, portsFor, addGear, resize, removeGear, connect, connectNet, netOf, members, hostOf, addMember, assignChannels, chanOf, landing, suggestNames, guessCable, findGear, freeIn, uniqueName, index, upstream, downstream, chainText, inputs, outputs, wireless, inears, cableList, checks, rfChecks, mhz, band, bandColor, searchText, colOf: (g) => (KINDS[g.kind] || KINDS.other).col };
+  return { paPlan, COLS, CATS, CABLES, KINDS, KIND_ORDER, FIELD_LABELS, DEFAULT_MIXES, STAGES, STAGE_OF, stageOf, tagKey, clean, portsFor, addGear, resize, removeGear, connect, connectNet, netOf, members, hostOf, addMember, assignChannels, chanOf, landing, suggestNames, guessCable, findGear, freeIn, uniqueName, index, upstream, downstream, chainText, inputs, outputs, wireless, inears, cableList, checks, rfChecks, mhz, band, bandColor, searchText, colOf: (g) => (KINDS[g.kind] || KINDS.other).col };
 });

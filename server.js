@@ -372,7 +372,7 @@ async function api(req, res, url, user, token) {
       // Admin › Gear check: things marked "doesn't apply" for a card (id:issue)
       let checkSkip = []; if (Auth.atLeast(user, 'admin')) { try { checkSkip = JSON.parse(store.getSetting('gear_check_skip', '[]')) || []; } catch (e) { checkSkip = []; } }
       return send(res, 200, { ok: true, categories: Devices.CATEGORIES, buckets, dupeSkip, checkSkip, devices: devices.list(user).map((d) => ({
-        id: d.id, name: d.name, aliases: d.aliases, category: d.category, make: d.make, model: d.model, location: d.location, bucket: d.bucket, kind: d.kind || pk.get(d.id) || '', qty: d.qty || 1, pair_id: d.pair_id, txtype: d.txtype, capsule: d.capsule, capsule_card: d.capsule_card, freq: d.freq, networked: d.networked, uplink_id: d.networked ? d.uplink_id : null, uplink_port: d.networked ? d.uplink_port : '',
+        id: d.id, name: d.name, aliases: d.aliases, category: d.category, make: d.make, model: d.model, location: d.location, bucket: d.bucket, kind: d.kind || pk.get(d.id) || '', qty: d.qty || 1, pair_id: d.pair_id, txtype: d.txtype, capsule: d.capsule, capsule_card: d.capsule_card, unit_tags: d.unit_tags, freq: d.freq, networked: d.networked, uplink_id: d.networked ? d.uplink_id : null, uplink_port: d.networked ? d.uplink_port : '',
         ips: d.ips, photo: d.photo, marks: d.marks, notes: d.notes, tech_only: d.tech_only, inputs: d.inputs, outputs: d.outputs, files: fileCount.get(d.id) || 0, files_shared: sharedCount.get(d.id) || 0, manual_from: d.manual_from || null,
         rack_id: d.rack_id, rack_u: d.rack_u, rack_h: d.rack_h, rack_side: d.rack_side, shelf_id: d.shelf_id, power_w: d.power_w, power_pdu: d.power_pdu, power_outlet: d.power_outlet, power_max: d.power_max, manual_url: d.manual_url || '' })) });
     }
@@ -413,7 +413,7 @@ async function api(req, res, url, user, token) {
         doc.gear.forEach((g) => { if (g.device_id === Number(b)) g.device_id = into; });
         patch.save(doc, user, null, 'Merged ' + gone + ' into another card');
       }
-      return send(res, 200, { ok: true, id: into });
+      return send(res, 200, { ok: true, id: into, notes: devices.merge.lastNotes || [] });
     }
     if (m === 'GET' && b === 'suggestions') { need(user, 'admin'); return send(res, 200, { ok: true, suggestions: devices.suggestions(user) }); }
     if (m === 'POST' && b === 'import') { need(user, 'admin'); const body = await readJson(req); return send(res, 200, { ok: true, made: devices.importFromLists(body.names, user) }); }
@@ -437,7 +437,18 @@ async function api(req, res, url, user, token) {
         return send(res, 200, { ok: true, device: d, usedOn: used, links, tech: mp.tech, files: adm.filesFor(d.id), sharedFiles: adm.sharedFiles(d.id) });
       }
       if (m === 'PUT') { need(user, 'admin'); devices.edit(b, await readJson(req), user, uploadExists); return send(res, 200, { ok: true }); }
-      if (m === 'DELETE') { need(user, 'admin'); devices.remove(b, user); return send(res, 200, { ok: true }); }
+      if (m === 'DELETE') {
+        need(user, 'admin');
+        devices.remove(b, user);
+        // its blocks on the stage patch stay, unlinked (and flagged in the checks), so nothing new can land on them
+        const cur = patch.get();
+        if (cur.doc.gear.some((g) => g.device_id === Number(b))) {
+          const doc = JSON.parse(JSON.stringify(cur.doc));
+          doc.gear.forEach((g) => { if (g.device_id === Number(b)) { delete g.device_id; g.lost_card = true; } });
+          patch.save(doc, user, null, 'A Gear Locker card was removed; its block stays, unlinked');
+        }
+        return send(res, 200, { ok: true });
+      }
     }
   }
 

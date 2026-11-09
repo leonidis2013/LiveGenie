@@ -546,8 +546,8 @@ function marksView(photo, marks, v) {
   if (!marks.length) return '<div class="mkwrap"><div class="mkpic"><img src="/uploads/' + esc(photo) + '" alt=""></div></div>';
   const where = String(v.location || '').toUpperCase();
   const fallback = [v.make, v.model].filter(Boolean).join(' ') || v.name || '';
-  const boxes = marks.map((m, i) => '<div class="spk" data-mi="' + i + '" style="left:' + (m.x * 100) + '%;top:' + (m.y * 100) + '%;width:' + (m.w * 100) + '%;height:' + (m.h * 100) + '%;--mc:' + MARK_COLORS[m.color || 'blue'] + '">' +
-    (m.tag && !m.label ? '<em class="sptag">' + esc(m.tag) + '</em>' : '') + '</div>').join('');
+  const boxes = marks.map((m, i) => '<div class="spk' + (m.q ? ' quad' : '') + '" data-mi="' + i + '" style="left:' + (m.x * 100) + '%;top:' + (m.y * 100) + '%;width:' + (m.w * 100) + '%;height:' + (m.h * 100) + '%;--mc:' + MARK_COLORS[m.color || 'blue'] + '">' +
+    (m.q ? quadSvg(m) : '') + (m.tag && !m.label ? '<em class="sptag">' + esc(m.tag) + '</em>' : '') + '</div>').join('');
   const caps = marks.map((m, i) => {
     const below = m.y + m.h < 0.62, right = m.x + m.w / 2 > 0.5;
     const style = (below ? 'top:calc(' + ((m.y + m.h) * 100) + '% + 12px);' : 'bottom:calc(' + ((1 - m.y) * 100) + '% + 12px);') + (right ? 'right:' + Math.max(2, (1 - m.x - m.w) * 100) + '%;' : 'left:' + Math.max(2, m.x * 100) + '%;');
@@ -558,6 +558,18 @@ function marksView(photo, marks, v) {
   return '<div class="mkwrap spot"><div class="spstage"><div class="mkpic spotpic"><img src="/uploads/' + esc(photo) + '" alt="">' + boxes +
     (marks.length > 1 ? '<div class="spnav"><button type="button" class="ghost" data-step="-1" aria-label="Previous">‹</button><span class="spn"></span><button type="button" class="ghost" data-step="1" aria-label="Next">›</button></div>' : '') + '</div>' + caps + '</div>' +
     (marks.length > 1 ? '<ol class="mklist">' + marks.map((m, i) => '<li data-mi="' + i + '" style="--mc:' + MARK_COLORS[m.color || 'blue'] + '"><b>' + (i + 1) + '</b><span>' + esc(m.label || m.tag || 'Highlight ' + (i + 1)) + '</span></li>').join('') + '</ol>' : '') + '</div>';
+}
+/**
+ * A skewed highlight (a rack photographed at an angle): drawn in its box as a four-cornered shape, with the rest of
+ * the photo dimmed around the shape itself rather than around the box.
+ */
+function quadSvg(m) {
+  const pt = (p) => (((p.x - m.x) / (m.w || 1)) * 100).toFixed(2) + ' ' + (((p.y - m.y) / (m.h || 1)) * 100).toFixed(2);
+  const poly = 'M' + m.q.map(pt).join(' L') + ' Z';
+  return '<svg class="spq" viewBox="0 0 100 100" preserveAspectRatio="none" aria-hidden="true">' +
+    '<path class="spdim" d="M-100000 -100000 H100100 V100100 H-100000 Z ' + poly + '"/>' +
+    '<path class="spfill" d="' + poly + '"/><path class="spline" d="' + poly + '"/>' +
+    '<path class="spedge" d="M' + pt(m.q[0]) + ' L' + pt(m.q[3]) + '"/></svg>';
 }
 /** "U5–6", "U4 left half", "on the shelf at U8". */
 function rackSpot(v, rack) {

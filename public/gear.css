@@ -142,3 +142,16 @@
 .dtags i.miss { background:none; color:var(--dim); font-family:inherit; font-weight:600; }
 .dtags.big { margin:4px 0 6px; } .dtags.big i { font-size:13px; padding:1px 8px; }
 .dtagrow { display:flex; gap:8px; } .dtagrow input { flex:1; min-width:0; }
+
+/* a skewed highlight (0.28.2): the shape follows a rack photographed at an angle */
+.spk.quad, .spk.quad:hover, .spk.quad.on { border:0; background:none; box-shadow:none; }
+.spk.quad.on::before { display:none; }
+.spq { position:absolute; inset:0; width:100%; height:100%; overflow:visible; pointer-events:none; }
+.spq path { vector-effect:non-scaling-stroke; transition:opacity .25s; }
+.spq .spdim { fill:rgba(0,0,0,.66); fill-rule:evenodd; opacity:0; }
+.spq .spfill { fill:color-mix(in srgb, var(--mc) 12%, transparent); opacity:0; }
+.spq .spline { fill:none; stroke:color-mix(in srgb, var(--mc) 60%, transparent); stroke-width:1; opacity:0; }
+.spq .spedge { fill:none; stroke:#fff; stroke-width:3; stroke-linecap:round; opacity:0; filter:drop-shadow(0 0 4px #fff); }
+.spk.quad:hover .spline { opacity:1; }
+.spk.quad.on .spdim, .spk.quad.on .spfill, .spk.quad.on .spedge { opacity:1; }
+.spk.quad.on .spline { opacity:1; stroke:var(--mc); stroke-width:2; filter:drop-shadow(0 0 6px var(--mc)); }

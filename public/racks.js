@@ -196,7 +196,7 @@ async function viewRack(id, mode) {
    * (patch panels, custom items, cable managers, drawers, a shelf with nothing on it…). Each has a key (g12 / iab3) for its spot.
    */
   function photoEntries() {
-    const g = gearRows().filter((x) => x.rack_u || x.shelf_id).map((x) => ({ key: 'g' + x.id, u: x.rack_u || (items.find((y) => y.id === x.shelf_id) || {}).u || 99, side: x.rack_side || '', name: x.name, title: tagModel(x), mark: rackMark(x, rack), grid: () => { const m = rackMark({ ...x, notes: '' }, { ...rack, spots: {} }); return { x: m.x, y: m.y, w: m.w, h: m.h }; } }));
+    const g = gearRows().filter((x) => x.rack_u || x.shelf_id).map((x) => ({ key: 'g' + x.id, u: x.rack_u || (items.find((y) => y.id === x.shelf_id) || {}).u || 99, side: x.rack_side || '', name: x.name, title: tagModel(x), mark: rackMark(x, rack), grid: () => { const m = rackMark({ ...x, notes: '' }, { ...rack, spots: {} }); return { x: m.x, y: m.y, w: m.w, h: m.h, q: m.q }; } }));
     const it = items.filter((x) => x.type !== 'shelf' || !gear.some((y) => y.shelf === x.id)).map((x) => {
       const title = x.label || RackCore.ITEM_TYPES[x.type];
       const grid = () => RackCore.region(rack.rails, rack.units, x.u, x.h, '');
@@ -560,7 +560,7 @@ function adjustSpots(rack, rows, done) {
   // rows: { key, name, title, grid() } for gear and the rack's own pieces
   const boxOf = (g) => spots[g.key] || g.grid();
   let cur = rows.length ? rows[0].key : null;
-  modal('<h3>Adjust spots</h3><p class="note">Drag a box to where that piece of gear really is in the photo, and drag its corner to resize. Handy when there is a gap between pieces, or gear sits a hole off the U lines.</p>' +
+  modal('<h3>Adjust spots</h3><p class="note">Drag a spot to where that piece of gear really is in the photo. Drag any of its four corners to fit it: corners move on their own, so a spot can lean with a photo taken at an angle.</p>' +
     '<div class="sjwrap"><div class="lupic sjpic" id="sjp"><img src="/uploads/' + esc(rack.photo) + '" alt="" draggable="false"><div id="sjb"></div><div id="sjg" class="sjg"></div></div>' +
     '<div class="sjlist" id="sjl"></div></div>' +
     '<div class="acts"><label class="tog sjtog"><input type="checkbox" id="sjsnap"' + ((() => { try { return localStorage.getItem('lg-rack-snap'); } catch (e) { return null; } })() === '0' ? '' : ' checked') + '><span>Snap</span></label><button type="button" class="ghost" id="sjall">All back to the grid</button><span class="grow"></span><button type="button" data-close>Cancel</button><button class="primary" id="sjok">Save</button></div>', (w, close) => {
@@ -595,12 +595,25 @@ function adjustSpots(rack, rows, done) {
       guides(gx, gy);
       return n;
     }
+    /** A spot: its box (for the name tag) holding its four-cornered shape; only the shape catches a drag. */
+    const boxHtml = (g) => {
+      const b = boxOf(g), q = RackCore.quadOf(b), on = g.key === cur, moved = !!spots[g.key];
+      const pt = (p) => (((p.x - b.x) / (b.w || 1)) * 100).toFixed(2) + ',' + (((p.y - b.y) / (b.h || 1)) * 100).toFixed(2);
+      return '<div class="sjbox' + (on ? ' on' : '') + (moved ? ' moved' : '') + '" data-g="' + g.key + '" style="left:' + b.x * 100 + '%;top:' + b.y * 100 + '%;width:' + b.w * 100 + '%;height:' + b.h * 100 + '%">' +
+        '<svg viewBox="0 0 100 100" preserveAspectRatio="none"><polygon class="sjarea" points="' + q.map(pt).join(' ') + '"/></svg><em style="left:calc(' + pt(q[0]).split(',')[0] + '% + 4px);top:calc(' + pt(q[0]).split(',')[1] + '% + 2px)">' + esc(g.name) + '</em></div>';
+    };
+    /** The four corner handles of the spot being adjusted. */
+    const cornersHtml = (g) => { if (!g) return ''; const q = RackCore.quadOf(boxOf(g)); return q.map((p, c) => '<i class="sjc" data-c="' + c + '" style="left:' + p.x * 100 + '%;top:' + p.y * 100 + '%"></i>').join(''); };
+    /** Put a moved shape on screen without repainting everything. */
+    const show = (g) => {
+      const el = $('.sjbox[data-g="' + g.key + '"]', w); if (el) el.outerHTML = boxHtml(g);
+      const q = RackCore.quadOf(boxOf(g)); $$('.sjc', w).forEach((h) => { const p = q[Number(h.dataset.c)]; h.style.left = p.x * 100 + '%'; h.style.top = p.y * 100 + '%'; });
+    };
     function guides(gx, gy) {
       $('#sjg', w).innerHTML = gx.map((x) => '<i class="sjgx" style="left:' + x * 100 + '%"></i>').join('') + gy.map((y) => '<i class="sjgy" style="top:' + y * 100 + '%"></i>').join('');
     }
     const paint = () => {
-      $('#sjb', w).innerHTML = rows.map((g) => { const b = boxOf(g), on = g.key === cur, moved = !!spots[g.key];
-        return '<div class="sjbox' + (on ? ' on' : '') + (moved ? ' moved' : '') + '" data-g="' + g.key + '" style="left:' + b.x * 100 + '%;top:' + b.y * 100 + '%;width:' + b.w * 100 + '%;height:' + b.h * 100 + '%"><em>' + esc(g.name) + '</em>' + (on ? '<i class="sjh" data-h="1"></i>' : '') + '</div>'; }).join('');
+      $('#sjb', w).innerHTML = rows.map((g) => boxHtml(g)).join('') + (cur ? cornersHtml(rows.find((g) => g.key === cur)) : '');
       $('#sjl', w).innerHTML = rows.map((g) => '<button type="button" class="sjrow' + (g.key === cur ? ' on' : '') + '" data-pick="' + g.key + '"><b>' + esc(g.title) + '</b><span>' + (spots[g.key] ? 'Moved by hand · <u data-reset="' + g.key + '">back to the grid</u>' : 'On the grid') + '</span></button>').join('');
       $$('[data-pick]', w).forEach((b) => b.addEventListener('click', (e) => { const r = e.target.closest('[data-reset]'); if (r) { delete spots[r.dataset.reset]; } cur = b.dataset.pick; paint(); }));
     };
@@ -609,22 +622,40 @@ function adjustSpots(rack, rows, done) {
     const at = (e) => { const r = pic.getBoundingClientRect(); return { x: (e.clientX - r.left) / r.width, y: (e.clientY - r.top) / r.height }; };
     const clamp = (v, a, b) => Math.max(a, Math.min(b, v));
     pic.addEventListener('pointerdown', (e) => {
-      const el = e.target.closest('.sjbox'); if (!el) return;
+      const hc = e.target.closest('.sjc');
+      const el = e.target.closest('.sjbox');
+      if (!hc && !el) return;
       e.preventDefault();
-      const g = rows.find((x) => x.key === el.dataset.g); if (!g) return;
+      const g = hc ? rows.find((x) => x.key === cur) : rows.find((x) => x.key === el.dataset.g); if (!g) return;
       if (cur !== g.key) { cur = g.key; paint(); }
-      const p = at(e), b = { ...boxOf(g) };
-      drag = { g, p, b, resize: !!e.target.closest('.sjh') };
+      const p = at(e), b = boxOf(g);
+      drag = { g, p, q: RackCore.quadOf(b).map((x) => ({ ...x })), b: { x: b.x, y: b.y, w: b.w, h: b.h }, corner: hc ? Number(hc.dataset.c) : null };
       pic.setPointerCapture(e.pointerId);
     });
     pic.addEventListener('pointermove', (e) => {
       if (!drag) return;
-      const p = at(e), dx = p.x - drag.p.x, dy = p.y - drag.p.y, b = drag.b;
-      let nb = drag.resize ? { x: b.x, y: b.y, w: clamp(b.w + dx, 0.02, 1 - b.x), h: clamp(b.h + dy, 0.01, 1 - b.y) } : { x: clamp(b.x + dx, 0, 1 - b.w), y: clamp(b.y + dy, 0, 1 - b.h), w: b.w, h: b.h };
-      nb = snapBox(nb, drag.g.key, drag.resize, e.altKey);
-      spots[drag.g.key] = nb;
-      const el = $('.sjbox[data-g="' + drag.g.key + '"]', w);
-      if (el) { el.style.left = nb.x * 100 + '%'; el.style.top = nb.y * 100 + '%'; el.style.width = nb.w * 100 + '%'; el.style.height = nb.h * 100 + '%'; el.classList.add('moved'); }
+      const p = at(e);
+      let q;
+      if (drag.corner != null) {
+        // one corner on its own: catches on the U lines, the rails and the other spots' edges
+        let c = { x: clamp(p.x, 0, 1), y: clamp(p.y, 0, 1) };
+        if ($('#sjsnap', w).checked && !e.altKey) {
+          const others = rows.filter((g) => g.key !== drag.g.key).map((g) => RackCore.quadOf(boxOf(g)));
+          const sx = near(c.x, railX().concat(...others.map((o) => o.map((v) => v.x)))), sy = near(c.y, uLines().concat(...others.map((o) => o.map((v) => v.y))));
+          if (sx != null) c.x = sx; if (sy != null) c.y = sy;
+          guides(sx != null ? [sx] : [], sy != null ? [sy] : []);
+        } else guides([], []);
+        q = drag.q.map((v, k) => (k === drag.corner ? c : v));
+      } else {
+        // the whole spot: moved as one, snapping by the box around it
+        const b = drag.b, dx = p.x - drag.p.x, dy = p.y - drag.p.y;
+        const nb = snapBox({ x: clamp(b.x + dx, 0, 1 - b.w), y: clamp(b.y + dy, 0, 1 - b.h), w: b.w, h: b.h }, drag.g.key, false, e.altKey);
+        q = drag.q.map((v) => ({ x: v.x + nb.x - b.x, y: v.y + nb.y - b.y }));
+      }
+      const bb = RackCore.boundsOf(q);
+      if (bb.w < 0.01 || bb.h < 0.005) return;
+      spots[drag.g.key] = { ...bb, q };
+      show(drag.g);
     });
     const end = () => { if (drag) { drag = null; guides([], []); paint(); } };
     pic.addEventListener('pointerup', end); pic.addEventListener('pointercancel', end);

@@ -1181,6 +1181,16 @@ test('rack photo spots can be moved by hand, and only sensible ones are kept', a
   assert.deepStrictEqual(Object.keys(rack.spots).sort(), ['g12', 'i_ab'], 'bad keys and empty boxes are dropped');
   assert.deepStrictEqual(rack.spots.i_ab, { x: 1, y: 0, w: 0.3, h: 0.1 }, 'clamped to the photo');
   assert.strictEqual(rack.name, 'Spot test rack', 'a spots-only change keeps the rest');
+  // a skewed spot keeps its four corners; its box is worked out from them
+  await admin.put('/api/racks/' + id, { spots: { g12: { q: [{ x: 0.1, y: 0.2 }, { x: 0.8, y: 0.22 }, { x: 0.82, y: 0.3 }, { x: 0.12, y: 0.28 }] }, g14: { q: [{ x: 0.1 }, {}, {}] } } });
+  const sk = ((await admin.get('/api/racks/' + id)).data.rack || {}).spots;
+  assert.deepStrictEqual(Object.keys(sk), ['g12'], 'a shape without four corners is dropped');
+  assert.strictEqual(sk.g12.q.length, 4);
+  assert.deepStrictEqual([sk.g12.x, sk.g12.y, Math.round(sk.g12.w * 100), Math.round(sk.g12.h * 100)], [0.1, 0.2, 72, 10]);
+  // the grid follows the rails: a rack lined up at an angle gives slanted spots
+  const RC = require(path.join(ROOT, 'public', 'rackcore.js'));
+  const reg = RC.region({ tl: { x: 0.1, y: 0.1 }, tr: { x: 0.9, y: 0.2 }, bl: { x: 0.1, y: 0.9 }, br: { x: 0.9, y: 0.8 } }, 8, 1, 1, '');
+  assert.ok(reg.q && reg.q[1].y > reg.q[0].y, 'the top right corner sits lower, like the rails');
   await admin.del('/api/racks/' + id);
 });
 

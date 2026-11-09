@@ -88,13 +88,26 @@
     return lerp(lerp(r.tl, r.tr, across), lerp(r.bl, r.br, across), down);
   }
   /** Where a spot sits on the photo, as a box in fractions of the picture (photos taken at an angle give a slanted rack; the box holds it). */
-  /** Spots moved by hand on the photo: { g12: {x,y,w,h}, … } as fractions of the photo. */
+  /**
+   * Spots moved by hand on the photo: { g12: {x,y,w,h, q?}, … } as fractions of the photo. q: the four corners
+   * (top left, top right, bottom right, bottom left) when the spot is skewed to follow a photo taken at an angle;
+   * x/y/w/h is then the box around them.
+   */
+  const n01 = (x) => Math.max(0, Math.min(1, Math.round((Number(x) || 0) * 10000) / 10000));
+  /** The box around four corners. */
+  const r4 = (v) => Math.round(v * 10000) / 10000;
+  const boundsOf = (q) => { const xs = q.map((p) => p.x), ys = q.map((p) => p.y); const x = Math.min(...xs), y = Math.min(...ys); return { x: r4(x), y: r4(y), w: r4(Math.max(...xs) - x), h: r4(Math.max(...ys) - y) }; };
+  /** A spot's four corners: its own, or its box's. */
+  const quadOf = (b) => (b.q && b.q.length === 4 ? b.q : [{ x: b.x, y: b.y }, { x: b.x + b.w, y: b.y }, { x: b.x + b.w, y: b.y + b.h }, { x: b.x, y: b.y + b.h }]);
   function cleanSpots(o) {
     const out = {};
     for (const [k, v] of Object.entries(o && typeof o === 'object' ? o : {})) {
       if (!/^[gi][\w-]{1,24}$/.test(k) || !v) continue;
-      const n = (x) => Math.max(0, Math.min(1, Number(x) || 0));
-      const b = { x: n(v.x), y: n(v.y), w: n(v.w), h: n(v.h) };
+      let b;
+      if (Array.isArray(v.q) && v.q.length === 4 && v.q.every((p) => p && Number.isFinite(Number(p.x)) && Number.isFinite(Number(p.y)))) {
+        const q = v.q.map((p) => ({ x: n01(p.x), y: n01(p.y) }));
+        b = { ...boundsOf(q), q };
+      } else b = { x: n01(v.x), y: n01(v.y), w: n01(v.w), h: n01(v.h) };
       if (b.w < 0.005 || b.h < 0.005) continue;
       out[k] = b;
       if (Object.keys(out).length >= 400) break;
@@ -105,9 +118,10 @@
   function region(rails, units, u, h, side) {
     const a0 = side === 'R' ? 0.5 : 0, a1 = side === 'L' ? 0.5 : 1;
     const d0 = (u - 1) / units, d1 = (u - 1 + (h || 1)) / units;
-    const pts = [at(rails, a0, d0), at(rails, a1, d0), at(rails, a0, d1), at(rails, a1, d1)];
-    const x0 = Math.min(...pts.map((p) => p.x)), x1 = Math.max(...pts.map((p) => p.x)), y0 = Math.min(...pts.map((p) => p.y)), y1 = Math.max(...pts.map((p) => p.y));
-    return { x: x0, y: y0, w: Math.max(0.005, x1 - x0), h: Math.max(0.005, y1 - y0) };
+    // the four corners follow the rails, so a rack photographed at an angle gives slanted spots
+    const q = [at(rails, a0, d0), at(rails, a1, d0), at(rails, a1, d1), at(rails, a0, d1)];
+    const b = boundsOf(q);
+    return { x: b.x, y: b.y, w: Math.max(0.005, b.w), h: Math.max(0.005, b.h), q };
   }
 
   /** Power: per power strip / PDU, what is plugged into each outlet and the total draw. gear rows carry power_pdu, power_outlet, power_w, qty. */
@@ -120,7 +134,7 @@
     });
   }
 
-  const api = { ITEM_TYPES, MAX_UNITS, int, cells, problems, usage, gaps, DEFAULT_RAILS, cleanRails, cleanSpots, at, region, power };
+  const api = { ITEM_TYPES, MAX_UNITS, int, cells, problems, usage, gaps, DEFAULT_RAILS, cleanRails, cleanSpots, boundsOf, quadOf, at, region, power };
   if (typeof module !== 'undefined' && module.exports) module.exports = api;
   else root.RackCore = api;
 })(typeof window !== 'undefined' ? window : globalThis);

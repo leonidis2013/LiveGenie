@@ -176,3 +176,13 @@
 .sjtog { display:flex; align-items:center; gap:6px; margin-right:6px; }
 .sjtog input { width:auto !important; }
 .sjtog span { line-height:1; }
+
+/* spots as four-cornered shapes (0.28.2): drag the shape to move it, a corner to fit it */
+.sjbox, .sjbox.on, .sjbox.moved { border:0 !important; background:none !important; box-shadow:none !important; pointer-events:none; }
+.sjbox svg { position:absolute; inset:0; width:100%; height:100%; overflow:visible; }
+.sjarea { pointer-events:all; cursor:move; fill:rgba(80,140,255,.08); stroke:rgba(120,170,255,.75); stroke-width:1.5; stroke-dasharray:4 3; vector-effect:non-scaling-stroke; }
+.sjbox.moved .sjarea { stroke-dasharray:none; }
+.sjbox.on { z-index:2; }
+.sjbox.on .sjarea { fill:rgba(76,141,255,.2); stroke:#4c8dff; stroke-width:2; stroke-dasharray:none; }
+.sjc { position:absolute; width:18px; height:18px; margin:-9px 0 0 -9px; border-radius:50%; background:#4c8dff; border:3px solid #fff; cursor:crosshair; z-index:4; box-shadow:0 1px 4px rgba(0,0,0,.5); touch-action:none; }
+@media (pointer:coarse) { .sjc { width:26px; height:26px; margin:-13px 0 0 -13px; } }

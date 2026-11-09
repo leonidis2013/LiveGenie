@@ -16,7 +16,7 @@ const PatchView = (() => {
   // every measure is a multiple of the 10 px grid, so sockets sit on grid lines and cables run straight into them
   /** A wireless system's mini-cards: MINI wide, RFG of radio line between them and the receiver or transmitter; WLH the label over the box. */
   const MINI = 150, RFG = 70, SIDE = MINI + RFG, WLH = 24;
-  const GRID = 10, CW = 300, HEAD = 50, ROW = 20, FOOT = 10, COLGAP = 100, VGAP = 30, LINKY = 30;
+  const GRID = 10, CW = 300, HEAD = 50, ROW = 20, FOOT = 10, COLGAP = 100, VGAP = 30, LINKY = 30, CY = 35;   // CY: the socket on a one-socket card, on its second line
   const KIND_STYLE = { xlr: 'Analog · XLR', link: 'Digital snake', dante: 'Dante · Cat6', usb: 'USB · Thunderbolt', aes: 'AES3', speaker: 'Speaker · NL4', wiem: 'Wired IEM', rf: 'Wireless · RF', net: 'Network · Cat6' };
   /** A short tag for a make: initials for "X & Y" names, the first word of a long one. */
   const makeTag = (m) => { m = String(m || '').trim(); if (/ & /.test(m)) return m.split(/\s*&\s*/).map((w) => w[0] || '').join('&'); return m.length > 10 ? m.split(/\s+/)[0] : m; };
@@ -71,6 +71,8 @@ const PatchView = (() => {
     } else {
       // the radio link of a wireless mic, transmitter or pack is shown by where it sits, not by a socket
       const ins = g.kind === 'bodypack' ? [] : g.ins.map((_, i) => i).filter((i) => open || usedIn(i));
+      // a stage box lists its inputs in console channel order (In 8 on Ch 1 comes first), so the drawing reads by channel
+      if (g.kind === 'stagebox') { const ch = (i) => { const v = P.chanOf(g, i); return v == null ? 1e9 : v; }; ins.sort((a, b) => ch(a) - ch(b) || a - b); }
       const outs = g.kind === 'iemtx' || g.kind === 'txmic' ? [] : g.outs.map((_, j) => j).filter((j) => open || usedOut(j));
       freeIn = g.ins.length - ins.length; freeOut = g.outs.length - outs.length;
       for (let r = 0; r < Math.max(ins.length, outs.length); r++) rows.push({ in: ins[r] != null ? ins[r] : null, out: outs[r] != null ? outs[r] : null });
@@ -101,10 +103,12 @@ const PatchView = (() => {
     }
     if ((!small || g.kind === 'network') && (freeIn || freeOut || (g.open && g.kind !== 'network') || (g.kind === 'network' && g.open && (g.nports || 8) > 8))) rows.push({ more: true, freeIn, freeOut, ports: g.kind === 'network' });
     let netY = null;
-    rows.forEach((r, n) => { const y = HEAD + n * ROW + ROW / 2; if (r.in != null && !r.pack) inY[r.in] = y; if (r.out != null) outY[r.out] = y; if (r.port) portY[r.port] = y; if (r.net) netY = y; });
-    const h = HEAD + rows.length * ROW + (rows.length ? FOOT : 0);
+    // a card with a single socket (a mic, a DI, a speaker) keeps it on its second line: no extra row, a much shorter card
+    const compact = rows.length === 1 && (rows[0].in != null) !== (rows[0].out != null) && !rows[0].member && !sys && !k.link && !['console', 'stagebox', 'network', 'computer', 'interface'].includes(g.kind);
+    rows.forEach((r, n) => { const y = compact ? CY : HEAD + n * ROW + ROW / 2; if (r.in != null && !r.pack) inY[r.in] = y; if (r.out != null) outY[r.out] = y; if (r.port) portY[r.port] = y; if (r.net) netY = y; });
+    const h = compact ? HEAD : HEAD + rows.length * ROW + (rows.length ? FOOT : 0);
     const side = sys && !shut ? (g.kind === 'receiver' ? 'left' : 'right') : null;
-    return { g, k, rows, inY, outY, portY, netY, w: CW, h: Math.max(HEAD + FOOT, h), mem, live, spares, link: !!k.link, small, sys, shut, side, ox: side === 'left' ? -SIDE - 8 : -8, ow: CW + (side ? SIDE : 0) + 16 };
+    return { g, k, rows, inY, outY, portY, netY, w: CW, h: compact ? HEAD : Math.max(HEAD + FOOT, h), compact, mem, live, spares, link: !!k.link, small, sys, shut, side, ox: side === 'left' ? -SIDE - 8 : -8, ow: CW + (side ? SIDE : 0) + 16 };
   }
 
   // ================= placing cards =================
@@ -183,7 +187,21 @@ const PatchView = (() => {
     const CON = inSide.length ? Math.max(...inSide.map(colIn)) : 0;
     const inCols = []; inSide.forEach((id) => { (inCols[colIn(id)] = inCols[colIn(id)] || []).push(id); });
     for (let k = 0; k < inCols.length; k++) inCols[k] = inCols[k] || [];
-    inCols.forEach((col) => col.sort((a, b) => kindRank(a) - kindRank(b) || (g(a).order || 0) - (g(b).order || 0)));
+    // the console channel each card ends up on (its lowest): the order the input side reads in, top to bottom.
+    // Every card along the way counts (a mic, its receiver, a DI, the stage box); a second console's channels come after the first's.
+    const chKey = new Map();
+    try {
+      const cons = doc.gear.filter((x) => x.kind === 'console').map((x) => x.id);
+      P.inputs(doc).forEach((r) => {
+        if (!r.used || r.ch == null || r.pc) return;
+        const k = cons.indexOf(r.console.id) * 1000 + r.ch;
+        const mark = (id) => { const cid = cardIdOf(id); if (models.has(cid) && !(chKey.get(cid) <= k)) chKey.set(cid, k); };
+        r.up.chain.forEach((x) => mark(x.id));
+        if (r.via && r.via.kind === 'stagebox') mark(r.via.id);
+      });
+    } catch (e) { /* a drawing that cannot be traced still arranges */ }
+    const chOf = (id) => (chKey.has(id) ? chKey.get(id) : Infinity);
+    inCols.forEach((col) => col.sort((a, b) => chOf(a) - chOf(b) || kindRank(a) - kindRank(b) || (g(a).order || 0) - (g(b).order || 0)));
     // order: next to what each card connects to in the column beside it (a few sweeps)
     const rank = new Map(); inCols.forEach((col) => col.forEach((id, k) => rank.set(id, k)));
     const ciOf = new Map(); inCols.forEach((col, k) => col.forEach((id) => ciOf.set(id, k)));
@@ -196,7 +214,7 @@ const PatchView = (() => {
           const l = [...nb.get(id)].filter((x) => ciOf.has(x) && (right ? ciOf.get(x) > k : ciOf.get(x) < k)).map((x) => rank.get(x));
           return [id, l.length ? l.reduce((s1, v) => s1 + v, 0) / l.length : n];
         }));
-        col.sort((a, b) => key.get(a) - key.get(b) || rank.get(a) - rank.get(b));
+        col.sort((a, b) => chOf(a) - chOf(b) || key.get(a) - key.get(b) || rank.get(a) - rank.get(b));
         col.forEach((id, n) => rank.set(id, n));
       });
     }
@@ -242,7 +260,8 @@ const PatchView = (() => {
       // order by the mean height of the sockets each card plugs into (a wireless system counts as one block: its outputs),
       // then line each card's first cable up with its socket: cables run nearly straight and never cross inside a column
       const key = new Map(inCols[k].map((id) => { const t = targets(id, k); return [id, t.length ? t.reduce((s1, x) => s1 + x.at, 0) / t.length : Infinity]; }));
-      inCols[k].sort((a, b) => key.get(a) - key.get(b) || rank.get(a) - rank.get(b));
+      // by console channel first (the user reads the input side in channel order); socket height breaks ties and places cards with no channel
+      inCols[k].sort((a, b) => chOf(a) - chOf(b) || key.get(a) - key.get(b) || rank.get(a) - rank.get(b));
       inCols[k].forEach((id, n) => rank.set(id, n));
       stack(inCols[k], k, (id) => { const t = targets(id, k); return t.length ? Math.min(...t.map((x) => x.at - x.own)) : null; });
     }
@@ -656,13 +675,13 @@ const PatchView = (() => {
       '<rect class="cbd" x="' + x + '" y="' + y + '" width="' + w + '" height="' + h + '" rx="10"/>' +
       '<rect class="cdrag" x="' + x + '" y="' + y + '" width="' + w + '" height="' + HEAD + '" rx="10"/>' +
       '<text class="ct" x="' + (x + 12) + '" y="' + (y + 22) + '">' + esc(cut(g.name, chars - (mk ? mk.length + 3 : 0))) + '</text>' +
-      '<text class="cs" x="' + (x + 12) + '" y="' + (y + 39) + '">' + esc(cut(sub, chars + 3)) + '</text>' +
+      '<text class="cs" x="' + (x + 12) + '" y="' + (y + 39) + '">' + esc(cut(sub, m.compact ? Math.floor(chars / 2) : chars + 3)) + '</text>' +
       (mk ? (() => { const mw = mk.length * 6 + 12; return '<g class="mk"><rect x="' + (x + w - 12 - mw) + '" y="' + (y + 10) + '" width="' + mw + '" height="16" rx="4"/><text x="' + (x + w - 12 - mw / 2) + '" y="' + (y + 21.5) + '" text-anchor="middle">' + esc(mk) + '</text></g>'; })() : '') +
       '<title>' + esc(g.name + (sub ? ' · ' + sub : '')) + '</title>';
-    if (m.rows.length) s += '<line class="csep" x1="' + x + '" x2="' + (x + w) + '" y1="' + (y + HEAD - 2) + '" y2="' + (y + HEAD - 2) + '"/>';
+    if (m.rows.length && !m.compact) s += '<line class="csep" x1="' + x + '" x2="' + (x + w) + '" y1="' + (y + HEAD - 2) + '" y2="' + (y + HEAD - 2) + '"/>';
     const half = w / 2;
     m.rows.forEach((r, n) => {
-      const ry = y + HEAD + n * ROW + ROW / 2;
+      const ry = m.compact ? y + CY : y + HEAD + n * ROW + ROW / 2;
       if (r.more) {
         const t = r.freeIn || r.freeOut ? '+ ' + [r.freeIn ? r.freeIn + (r.ports ? ' free port' + (r.freeIn === 1 ? '' : 's') : ' free in') : '', r.freeOut ? r.freeOut + ' free out' : ''].filter(Boolean).join(' · ') + '  ▾' : 'Show used only  ▴';
         s += '<g class="cmore" data-open="' + g.id + '"><rect x="' + (x + 6) + '" y="' + (ry - 9) + '" width="' + (w - 12) + '" height="18" rx="5"/><text x="' + (x + w / 2) + '" y="' + (ry + 4) + '" text-anchor="middle">' + esc(t) + '</text></g>';
@@ -720,22 +739,26 @@ const PatchView = (() => {
         const t = socketText(doc, ix, g, 'in', r.in);
         const used = !!ix.into.get(g.id + ':' + r.in);
         const room = r.out != null ? half - 24 : w - 34;
-        s += '<g class="sk in' + (used ? ' used' : '') + '" data-g="' + g.id + '" data-p="' + r.in + '"><circle class="hitc" cx="' + x + '" cy="' + ry + '" r="9"/><circle class="dot" cx="' + x + '" cy="' + ry + '" r="4.5"/><text x="' + (x + 10) + '" y="' + (ry + 4) + '"><tspan class="pn">' + esc(g.ins[r.in]) + '</tspan>' + (t ? ' ' + esc(cut(t, Math.floor(room / CHW) - g.ins[r.in].length)) : '') + '</text><title>' + esc(g.name + ' ' + g.ins[r.in] + (t ? ': ' + t : ' (free)')) + '</title></g>';
+        const label = m.compact
+          ? '<text x="' + (x + w - 12) + '" y="' + (ry + 4) + '" text-anchor="end">' + (t ? '← ' + esc(cut(t, Math.floor((half - 20) / CHW))) : '<tspan class="pn">' + esc(g.ins[r.in]) + '</tspan>') + '</text>'
+          : '<text x="' + (x + 10) + '" y="' + (ry + 4) + '"><tspan class="pn">' + esc(g.ins[r.in]) + '</tspan>' + (t ? ' ' + esc(cut(t, Math.floor(room / CHW) - g.ins[r.in].length)) : '') + '</text>';
+        s += '<g class="sk in' + (used ? ' used' : '') + '" data-g="' + g.id + '" data-p="' + r.in + '"><circle class="hitc" cx="' + x + '" cy="' + ry + '" r="9"/><circle class="dot" cx="' + x + '" cy="' + ry + '" r="4.5"/>' + label + '<title>' + esc(g.name + ' ' + g.ins[r.in] + (t ? ': ' + t : ' (free)')) + '</title></g>';
         // an empty receiver channel: a clear way to put a transmitter on it
         if (g.kind === 'receiver' && opts.edit && !used) s += '<g class="cadd" data-addtx="' + g.id + ':' + r.in + '"><rect x="' + (x + 50) + '" y="' + (ry - 9) + '" width="' + (half - 30) + '" height="18" rx="5"/><text x="' + (x + 58) + '" y="' + (ry + 4) + '">+ transmitter</text><title>Put a transmitter (and its capsule) on ' + esc(g.ins[r.in]) + '</title></g>';
       }
       if (r.out != null) {
         const t = socketText(doc, ix, g, 'out', r.out);
         const used = !!((ix.from.get(g.id + ':' + r.out) || []).length);
-        const room = r.in != null ? (r.member ? half - 54 : half - 24) : w - 34;
-        s += '<g class="sk out' + (used || (g.feeds || {})[r.out] ? ' used' : '') + '" data-g="' + g.id + '" data-p="' + r.out + '"><circle class="hitc" cx="' + (x + w) + '" cy="' + ry + '" r="9"/><circle class="dot" cx="' + (x + w) + '" cy="' + ry + '" r="4.5"/><text x="' + (x + w - 10) + '" y="' + (ry + 4) + '" text-anchor="end">' + (t && room > 30 ? esc(cut(t, Math.floor(room / CHW) - g.outs[r.out].length)) + ' ' : '') + '<tspan class="pn">' + esc(g.outs[r.out]) + '</tspan></text><title>' + esc(g.name + ' ' + g.outs[r.out] + (t ? ': ' + t : ' (free)')) + '</title></g>';
+        const room = m.compact ? half - 20 : r.in != null ? (r.member ? half - 54 : half - 24) : w - 34;
+        s += '<g class="sk out' + (used || (g.feeds || {})[r.out] ? ' used' : '') + '" data-g="' + g.id + '" data-p="' + r.out + '"><circle class="hitc" cx="' + (x + w) + '" cy="' + ry + '" r="9"/><circle class="dot" cx="' + (x + w) + '" cy="' + ry + '" r="4.5"/><text x="' + (x + w - 10) + '" y="' + (ry + 4) + '" text-anchor="end">' + (m.compact && t ? esc(cut(t, Math.floor(room / CHW))) + ' →' : (t && room > 30 ? esc(cut(t, Math.floor(room / CHW) - g.outs[r.out].length)) + ' ' : '') + '<tspan class="pn">' + esc(g.outs[r.out]) + '</tspan>') + '</text><title>' + esc(g.name + ' ' + g.outs[r.out] + (t ? ': ' + t : ' (free)')) + '</title></g>';
       }
     });
     if (m.link) {
       s += '<rect class="ldot" data-g="' + g.id + '" x="' + (x + w - 5) + '" y="' + (y + LINKY - 5) + '" width="10" height="10" rx="2" transform="rotate(45 ' + (x + w) + ' ' + (y + LINKY) + ')"><title>' + (g.kind === 'computer' || g.kind === 'interface' ? 'USB / Thunderbolt / Dante: drag to ' + (g.kind === 'computer' ? 'an audio interface, a console or a network switch' : 'a computer') : 'Link (SLink, AES50, Dante): drag to a console, stage box or network') + '</title></rect>';
       s += '<rect class="ldot" data-g="' + g.id + '" x="' + (x - 5) + '" y="' + (y + LINKY - 5) + '" width="10" height="10" rx="2" transform="rotate(45 ' + x + ' ' + (y + LINKY) + ')"><title>Link</title></rect>';
     }
-    if (opts.edit) s += '<g class="hand" data-g="' + g.id + '"><circle cx="' + (x + w - 2) + '" cy="' + (y + HEAD - 2) + '" r="9"/><path d="M' + (x + w - 6) + ' ' + (y + HEAD - 2) + 'h8M' + (x + w - 1) + ' ' + (y + HEAD - 6) + 'l4 4-4 4"/><title>Drag onto another card to connect</title></g>';
+    const hy = m.compact ? y + 12 : y + HEAD - 2;
+    if (opts.edit) s += '<g class="hand" data-g="' + g.id + '"><circle cx="' + (x + w - 2) + '" cy="' + hy + '" r="9"/><path d="M' + (x + w - 6) + ' ' + hy + 'h8M' + (x + w - 1) + ' ' + (hy - 4) + 'l4 4-4 4"/><title>Drag onto another card to connect</title></g>';
     return s + '</g>';
   }
 

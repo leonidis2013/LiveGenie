@@ -363,7 +363,7 @@ async function api(req, res, url, user, token) {
   // ----- device library -----
   if (a === 'devices') {
     if (m === 'GET' && !b) {
-      const fileCount = adm.fileCounts();
+      const fileCount = adm.fileCounts(), sharedCount = adm.sharedCounts();
       // what each one is on the stage patch: sorts it into a Gear Locker bucket
       const pk = new Map();
       for (const g of patch.get().doc.gear) if (g.device_id) { if (!pk.has(g.device_id)) pk.set(g.device_id, g.kind); }
@@ -373,7 +373,7 @@ async function api(req, res, url, user, token) {
       let checkSkip = []; if (Auth.atLeast(user, 'admin')) { try { checkSkip = JSON.parse(store.getSetting('gear_check_skip', '[]')) || []; } catch (e) { checkSkip = []; } }
       return send(res, 200, { ok: true, categories: Devices.CATEGORIES, buckets, dupeSkip, checkSkip, devices: devices.list(user).map((d) => ({
         id: d.id, name: d.name, aliases: d.aliases, category: d.category, make: d.make, model: d.model, location: d.location, bucket: d.bucket, kind: d.kind || pk.get(d.id) || '', qty: d.qty || 1, pair_id: d.pair_id, txtype: d.txtype, capsule: d.capsule, freq: d.freq, networked: d.networked, uplink_id: d.networked ? d.uplink_id : null, uplink_port: d.networked ? d.uplink_port : '',
-        ips: d.ips, photo: d.photo, marks: d.marks, notes: d.notes, tech_only: d.tech_only, inputs: d.inputs, outputs: d.outputs, files: fileCount.get(d.id) || 0,
+        ips: d.ips, photo: d.photo, marks: d.marks, notes: d.notes, tech_only: d.tech_only, inputs: d.inputs, outputs: d.outputs, files: fileCount.get(d.id) || 0, files_shared: sharedCount.get(d.id) || 0, manual_from: d.manual_from || null,
         rack_id: d.rack_id, rack_u: d.rack_u, rack_h: d.rack_h, rack_side: d.rack_side, shelf_id: d.shelf_id, power_w: d.power_w, power_pdu: d.power_pdu, power_outlet: d.power_outlet, power_max: d.power_max, manual_url: d.manual_url || '' })) });
     }
     if (m === 'GET' && b === 'models') return send(res, 200, { ok: true, models: devices.models(store.getSetting) });
@@ -434,7 +434,7 @@ async function api(req, res, url, user, token) {
         const onPatch = patch.get().doc.gear.filter((g) => g.device_id === d.id);
         const used = devices.usedOn(d, user);
         if (onPatch.length) used.unshift({ page_id: 'patch', title: 'Stage patch', space_name: 'Drawing', tech_only: false, gear: onPatch[0].id, hits: onPatch.map((g) => ({ label: PatchCoreLib.KINDS[g.kind].label, text: g.name + (g.use ? ' · ' + g.use : '') })) });
-        return send(res, 200, { ok: true, device: d, usedOn: used, links, tech: mp.tech, files: adm.filesFor(d.id) });
+        return send(res, 200, { ok: true, device: d, usedOn: used, links, tech: mp.tech, files: adm.filesFor(d.id), sharedFiles: adm.sharedFiles(d.id) });
       }
       if (m === 'PUT') { need(user, 'admin'); devices.edit(b, await readJson(req), user, uploadExists); return send(res, 200, { ok: true }); }
       if (m === 'DELETE') { need(user, 'admin'); devices.remove(b, user); return send(res, 200, { ok: true }); }

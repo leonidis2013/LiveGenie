@@ -477,7 +477,7 @@ async function viewDevice(id) {
       : '<div class="card empty">Not mentioned on any page yet. Type its name' + (v.aliases.length ? ', a nickname' : '') + (v.ips.length ? ' or its IP' : '') + ' on any page and it links here by itself.</div>'}</div>
   </div>`;
   linkDevices($('#dnotes'));
-  paintFiles($('#dfiles'), v, d.files || []);
+  paintFiles($('#dfiles'), v, d.files || [], d.sharedFiles || []);
   if (pic) {
     $('#dmarks').innerHTML = marksView(pic.photo, pic.marks, pic.card);
     wireMarksView($('#dmarks'));
@@ -644,11 +644,16 @@ function marksEditor(v, done, opts = {}) {
 const fileSize = (n) => (n > 1048576 ? (n / 1048576).toFixed(1) + ' MB' : Math.max(1, Math.round(n / 1024)) + ' KB');
 const fileIcon = (m) => (m === 'application/pdf' ? 'pdf' : /^image\//.test(m) ? 'image' : 'text');
 /** Manuals and documents: files stored in LiveGenie, and the manufacturer's web page if there is one. Same on the card and in Edit. */
-function paintFiles(host, v, files) {
+/** shared: manuals this card can use from other cards (same model, or "same manuals as"), shown read-only under its own. */
+function paintFiles(host, v, files, shared) {
+  shared = shared || host._shared || []; host._shared = shared;
   const web = v.manual_url ? '<div class="row frow">' + icon('link') + '<a class="t" href="' + esc(v.manual_url) + '" target="_blank" rel="noopener"><b>Manufacturer\'s page</b><span>' + esc(v.manual_url.replace(/^https?:\/\//, '').slice(0, 70)) + '</span></a></div>' : '';
   host.innerHTML = (files.length || web ? '<div class="list files">' + web + files.map((f) => '<div class="row frow">' + icon(fileIcon(f.mime)) + '<a class="t" href="/files/' + esc(f.id) + '" target="_blank" rel="noopener"><b>' + esc(f.name) + '</b><span>' + fileSize(f.bytes) + ' · added ' + esc(ago(f.uploaded_at)) + (f.uploaded_by ? ' by ' + esc(f.uploaded_by) : '') + '</span></a>' +
     '<a class="ghost abtn" href="/files/' + esc(f.id) + '?download=1" title="Download">' + icon('download') + '</a>' + (can('admin') ? '<button class="ghost danger" data-fdel="' + esc(f.id) + '" title="Remove">' + icon('trash') + '</button>' : '') + '</div>').join('') + '</div>'
-    : '<div class="card empty" style="padding:16px">' + (can('admin') ? 'No manuals yet. Upload the PDF manual, a quick-start guide or a wiring diagram.' : 'No manuals yet.') + '</div>') +
+    : shared.length ? '' : '<div class="card empty" style="padding:16px">' + (can('admin') ? 'No manuals yet. Upload the PDF manual, a quick-start guide or a wiring diagram, or set it to use another card\'s manuals.' : 'No manuals yet.') + '</div>') +
+    shared.map((sh) => '<div class="fshared"><div class="fsh">' + icon('link') + '<span>' + (sh.why === 'chosen' ? 'Same manuals as ' : 'Same model as ') + '<a href="#/d/' + sh.from.id + '">' + esc(Tags.withModel(sh.from.name, sh.from.model)) + '</a></span></div><div class="list files">' +
+      (sh.manual_url ? '<div class="row frow">' + icon('link') + '<a class="t" href="' + esc(sh.manual_url) + '" target="_blank" rel="noopener"><b>Manufacturer\'s page</b><span>' + esc(sh.manual_url.replace(/^https?:\/\//, '').slice(0, 70)) + '</span></a></div>' : '') +
+      sh.files.map((f) => '<div class="row frow">' + icon(fileIcon(f.mime)) + '<a class="t" href="/files/' + esc(f.id) + '" target="_blank" rel="noopener"><b>' + esc(f.name) + '</b><span>' + fileSize(f.bytes) + '</span></a><a class="ghost abtn" href="/files/' + esc(f.id) + '?download=1" title="Download">' + icon('download') + '</a></div>').join('') + '</div></div>').join('') +
     (can('admin') ? '<div class="adder" style="margin-top:8px"><input type="file" id="fup" class="hide" multiple accept=".pdf,image/*,.txt,.doc,.docx,.xls,.xlsx,.zip"><button type="button" class="btn" id="fupb">' + icon('upload') + 'Upload a manual or document</button><span class="note" id="fmsg"></span></div>' : '');
   $$('[data-fdel]', host).forEach((b) => b.addEventListener('click', async () => {
     const f = files.find((x) => x.id === b.dataset.fdel);
@@ -751,6 +756,7 @@ async function viewDeviceEdit(id) {
   if (!can('admin')) { app.innerHTML = '<div class="card empty">Admins can add and change devices.</div>'; if (!S.state.user) signInDialog(() => route()); return; }
   await loadDevices();
   const full = id ? await get('/api/devices/' + id) : null;
+  await loadDevices();   // for the pickers (pairing, same manuals as)
   const hq = new URLSearchParams(location.hash.split('?')[1] || '');
   const d = full ? full.device : { kind: GEAR_KIND.some((x) => x[0] === hq.get('kind')) ? hq.get('kind') : '', pair_id: hq.get('pair') || '', txtype: '', capsule: '', freq: '', bucket: hq.get('b') || '', inputs: '', outputs: '', uplink_id: '', uplink_port: '', name: '', aliases: [], category: 'audio', make: '', model: '', location: '', ip: '', mac: '', photo: '', manual_url: '', notes: '', tech_only: false };
   setTitle(id ? 'Edit ' + d.name : 'Add gear');
@@ -778,7 +784,8 @@ async function viewDeviceEdit(id) {
         <div class="dfield wide drack" id="drack"></div>
         <div class="dfield wide dpow" id="dpow"></div>
         <div class="dfield wide dman"><span>Manuals and documents</span>${id ? '<div id="dfiles2"></div>' : '<div class="note">Save it first, then upload manuals here.</div>'}
-          <label class="dfield" style="margin-top:8px"><span>Manufacturer's page <span class="note">(optional web address)</span></span><input data-k="manual_url" value="${esc(d.manual_url)}" placeholder="https://…" inputmode="url"></label></div>
+          <label class="dfield" style="margin-top:8px"><span>Manufacturer's page <span class="note">(optional web address)</span></span><input data-k="manual_url" value="${esc(d.manual_url)}" placeholder="https://…" inputmode="url"></label>
+          <label class="dfield" style="margin-top:8px"><span>Same manuals as <span class="note">(optional)</span></span><select id="dmfrom"><option value="">Its own manuals only</option>${(DEV.list || []).filter((x) => String(x.id) !== String(id) && (x.files || x.manual_url)).map((x) => '<option value="' + x.id + '"' + (String(d.manual_from || '') === String(x.id) ? ' selected' : '') + '>' + esc(Tags.withModel(x.name, x.model)) + ' · ' + (x.files ? x.files + ' file' + (x.files === 1 ? '' : 's') : 'web page') + '</option>').join('')}</select><em>Uses that card's manuals here too, so they are uploaded once. Cards of the same make and model share them on their own.</em></label></div>
         <label class="tog dfield wide ${d.networked ? 'on' : ''}"><input type="checkbox" data-k="networked" ${d.networked ? 'checked' : ''}>On the network <em>Has an IP address, a MAC or plugs into a switch</em></label>
         <div class="dnet wide${d.networked ? '' : ' hide'}" id="dnet">
         ${f('ip', 'IP address', '0.0.0.0', { mono: true, mode: 'decimal', hint: 'Addresses in IP lists link here too when the name matches.' })}
@@ -911,7 +918,10 @@ async function viewDeviceEdit(id) {
       });
     });
   });
-  if (id) paintFiles($('#dfiles2'), d, full.files || []);
+  if (id) paintFiles($('#dfiles2'), d, full.files || [], full.sharedFiles || []);
+  // "same manuals as": use another card's manuals instead of uploading them again
+  const msel = $('#dmfrom');
+  if (msel) msel.addEventListener('change', () => { d.manual_from = msel.value ? Number(msel.value) : null; dirty(); });
   const r = Rich.create({ md: d.notes, compact: true, placeholder: 'Settings, quirks, how to reset it, who to call…', onChange: (v) => { d.notes = v; dirty(); } });
   $('#dnotes').appendChild(r.el);
   // highlights are drawn here, in Edit, and saved with the card

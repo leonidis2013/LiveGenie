@@ -37,7 +37,7 @@ function gearIssues(d, ctx) {
   add('pair', wireless && !d.pair_id);
   add('freq', wireless && !d.freq);
   add('io', NEEDS_IO.includes(d.kind) && !Number(d.inputs) && !Number(d.outputs));
-  add('manual', !d.files && !d.manual_url && d.kind !== 'capsule');
+  add('manual', !d.files && !d.files_shared && !d.manual_url && d.kind !== 'capsule');
   add('photo', !d.photo && !(d.rack_id && ctx.rackPhoto.has(d.rack_id)));
   return out;
 }
@@ -86,7 +86,7 @@ async function tabGearCheck(pane, pick) {
     }
     if (id === 'freq') return f('freq', 'Frequency (MHz)', '', 'placeholder="518.200" inputmode="decimal"');
     if (id === 'io') return f('inputs', 'Inputs', d.inputs || '', 'type="number" min="0" max="512" class="sm"') + f('outputs', 'Outputs', d.outputs || '', 'type="number" min="0" max="512" class="sm"');
-    if (id === 'manual') return f('manual_url', 'Manufacturer page', '', 'type="url" placeholder="https://…"') + '<a class="btn sm" href="#/d/' + d.id + '/edit">Upload a manual</a>';
+    if (id === 'manual') return '<label class="gcf"><em>Same manuals as</em><select data-f="manual_from"><option value="">—</option>' + list.filter((x) => x.id !== d.id && (x.files || x.manual_url)).map((x) => '<option value="' + x.id + '">' + esc(tm(x)) + '</option>').join('') + '</select></label>' + f('manual_url', 'or a manufacturer page', '', 'type="url" placeholder="https://…"') + '<a class="btn sm" href="#/d/' + d.id + '/edit">Upload a manual</a>';
     if (id === 'photo') return '<a class="btn sm" href="#/d/' + d.id + '/edit">' + icon('image') + 'Add a photo</a>' + (d.rack_id ? '' : '<span class="note">or put it in a rack that has a photo</span>');
     return '';
   }
@@ -118,6 +118,7 @@ async function tabGearCheck(pane, pick) {
         if (ch.freq) body.freq = ch.freq;
         if (ch.inputs !== undefined) body.inputs = Number(ch.inputs) || 0; if (ch.outputs !== undefined) body.outputs = Number(ch.outputs) || 0;
         if (ch.manual_url) body.manual_url = ch.manual_url;
+        if (ch.manual_from) body.manual_from = Number(ch.manual_from);
         await call('PUT', '/api/devices/' + d.id, body);
         forgetDevices();
         toast(d.name + ' saved', 'ok');

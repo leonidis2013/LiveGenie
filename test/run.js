@@ -825,7 +825,7 @@ test('gear knows what it is: wireless mics pair with a receiver, capsules fit a 
   const dir = fs2.mkdtempSync(path.join(os2.tmpdir(), 'lg-kind-'));
   const DBm = require(path.join(ROOT, 'lib', 'db'));
   const db1 = DBm.open(path.join(dir, 'x.db'));
-  db1.exec('DROP TABLE racks; DROP INDEX uploads_sha; ALTER TABLE uploads DROP COLUMN sha256; ' + ['rack_id', 'rack_u', 'rack_h', 'rack_side', 'shelf_id', 'power_w', 'power_pdu', 'power_outlet', 'power_max'].map((c) => 'ALTER TABLE devices DROP COLUMN ' + c).join('; ')); db1.exec('ALTER TABLE devices DROP COLUMN qty; ALTER TABLE patch DROP COLUMN rev; ALTER TABLE patch_versions DROP COLUMN rev; ALTER TABLE patch_versions DROP COLUMN kind'); db1.exec(['kind', 'pair_id', 'txtype', 'capsule', 'freq'].map((c) => 'ALTER TABLE devices DROP COLUMN ' + c).join('; ')); db1.prepare('UPDATE schema_version SET v = 12').run();
+  db1.exec('DROP TABLE racks; DROP INDEX uploads_sha; ALTER TABLE uploads DROP COLUMN sha256; ' + ['rack_id', 'rack_u', 'rack_h', 'rack_side', 'shelf_id', 'power_w', 'power_pdu', 'power_outlet', 'power_max'].map((c) => 'ALTER TABLE devices DROP COLUMN ' + c).join('; ')); db1.exec('ALTER TABLE devices DROP COLUMN manual_from; ALTER TABLE devices DROP COLUMN qty; ALTER TABLE patch DROP COLUMN rev; ALTER TABLE patch_versions DROP COLUMN rev; ALTER TABLE patch_versions DROP COLUMN kind'); db1.exec(['kind', 'pair_id', 'txtype', 'capsule', 'freq'].map((c) => 'ALTER TABLE devices DROP COLUMN ' + c).join('; ')); db1.prepare('UPDATE schema_version SET v = 12').run();
   db1.prepare("INSERT INTO settings (key, value) VALUES ('gear_models', ?)").run(JSON.stringify([{ kind: 'speaker', make: 'Brand', model: 'Col 70' }]));
   db1.prepare("INSERT INTO devices (name, aliases, category, make, model, location, ip, mac, photo, manual_url, notes, created_at, updated_at) VALUES ('Brand Col 70', '[]', 'audio', 'Brand', 'COL 70', '', '', '', '', '', '', 1, 1)").run();
   db1.close();
@@ -1007,6 +1007,27 @@ test('pictures: the same picture uploaded again is stored once; removing unused 
   assert.strictEqual((await admin.post('/api/admin/storage/clean', { ids: [used, a1.id] })).data.removed, 2, 'no longer used once the card and rack are gone');
 });
 
+test('manuals are shared: same make and model, or "same manuals as" another card', async () => {
+  const a = (await admin.post('/api/devices', { name: 'Share A', make: 'Shure', model: 'ZZ9' })).data.id;
+  const b = (await admin.post('/api/devices', { name: 'Share B', make: 'shure', model: 'zz9' })).data.id;
+  const c = (await admin.post('/api/devices', { name: 'Share C', make: 'Other', model: 'Q1', manual_from: a })).data.id;
+  const up = await admin.post('/api/devices/' + a + '/files', Buffer.from('%PDF-1.4\n% shared manual ' + Date.now() + '\n%%EOF'), { raw: true, type: 'application/pdf', headers: { 'x-filename': 'zz9.pdf' } });
+  assert.ok(up.status === 200 || up.status === 201, 'upload ' + up.status);
+  const gb = (await admin.get('/api/devices/' + b)).data;
+  assert.strictEqual(gb.files.length, 0);
+  assert.strictEqual(gb.sharedFiles[0].why, 'model', 'same model, any capitals');
+  assert.strictEqual(gb.sharedFiles[0].files.length, 1);
+  const gc = (await admin.get('/api/devices/' + c)).data;
+  assert.strictEqual(gc.sharedFiles[0].why, 'chosen');
+  const row = (await admin.get('/api/devices')).data.devices.find((x) => x.id === c);
+  assert.strictEqual(row.files_shared, 1, 'the list knows it has a manual');
+  assert.strictEqual((await admin.put('/api/devices/' + c, { ...(await admin.get('/api/devices/' + c)).data.device, manual_from: c })).status, 400, 'not itself');
+  await admin.del('/api/files/' + gb.sharedFiles[0].files[0].id);   // leave no file behind for the backup test
+  await admin.del('/api/devices/' + a);
+  assert.strictEqual((await admin.get('/api/devices/' + c)).data.device.manual_from, null, 'removing the source clears the link');
+  for (const id of [b, c]) await admin.del('/api/devices/' + id);
+});
+
 test('gear check: "doesn\'t apply" is remembered per card and check, admins only', async () => {
   let r = await admin.put('/api/devices/check-skip', { key: '12:power' });
   assert.ok(r.data.checkSkip.includes('12:power'));
@@ -1035,7 +1056,7 @@ test('checklists that were on pages move to To do, keeping their ticks and log',
   const DBm = require(path.join(ROOT, 'lib', 'db'));
   // a database from before 0.20: back to migration 10, then a page with a checklist and a tick
   const db1 = DBm.open(path.join(dir, 'x.db'));
-  db1.exec('DROP TABLE racks; DROP INDEX uploads_sha; ALTER TABLE uploads DROP COLUMN sha256; ' + ['rack_id', 'rack_u', 'rack_h', 'rack_side', 'shelf_id', 'power_w', 'power_pdu', 'power_outlet', 'power_max'].map((c) => 'ALTER TABLE devices DROP COLUMN ' + c).join('; ')); db1.exec('ALTER TABLE devices DROP COLUMN qty; ALTER TABLE patch DROP COLUMN rev; ALTER TABLE patch_versions DROP COLUMN rev; ALTER TABLE patch_versions DROP COLUMN kind'); db1.exec('DROP TABLE todo_lists; ALTER TABLE devices DROP COLUMN networked; ' + ['kind', 'pair_id', 'txtype', 'capsule', 'freq'].map((c) => 'ALTER TABLE devices DROP COLUMN ' + c).join('; ')); db1.prepare('UPDATE schema_version SET v = 10').run();
+  db1.exec('DROP TABLE racks; DROP INDEX uploads_sha; ALTER TABLE uploads DROP COLUMN sha256; ' + ['rack_id', 'rack_u', 'rack_h', 'rack_side', 'shelf_id', 'power_w', 'power_pdu', 'power_outlet', 'power_max'].map((c) => 'ALTER TABLE devices DROP COLUMN ' + c).join('; ')); db1.exec('ALTER TABLE devices DROP COLUMN manual_from; ALTER TABLE devices DROP COLUMN qty; ALTER TABLE patch DROP COLUMN rev; ALTER TABLE patch_versions DROP COLUMN rev; ALTER TABLE patch_versions DROP COLUMN kind'); db1.exec('DROP TABLE todo_lists; ALTER TABLE devices DROP COLUMN networked; ' + ['kind', 'pair_id', 'txtype', 'capsule', 'freq'].map((c) => 'ALTER TABLE devices DROP COLUMN ' + c).join('; ')); db1.prepare('UPDATE schema_version SET v = 10').run();
   db1.prepare("INSERT INTO spaces (slug, name) VALUES ('audio', 'Audio')").run();
   const blocks = [{ type: 'text', md: 'Before' }, { type: 'checklist', id: 'abc12345', title: 'Desk check', items: ['Faders down', 'Scenes loaded'], schedule: [] }];
   db1.prepare("INSERT INTO pages (space_id, title, blocks, version, created_at, updated_at) VALUES (1, 'Sunday desk', ?, 1, 1, 1)").run(JSON.stringify(blocks));

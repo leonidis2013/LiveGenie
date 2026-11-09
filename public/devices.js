@@ -21,7 +21,7 @@ const ONE_EACH = ['txmic', 'receiver', 'iemtx', 'bodypack'];
 const qtyOf = (d) => (d && !ONE_EACH.includes(d.kind) ? Math.max(1, d.qty || 1) : 1);
 const kindLabel = (k) => (GEAR_KIND.find((x) => x[0] === k) || [0, ''])[1];
 /** What each kind pairs with, and how the card says it. */
-const GEAR_PAIR = { txmic: { with: 'receiver', label: 'Receiver', add: 'Add a wireless mic', list: 'Wireless mics' }, capsule: { with: 'txmic', label: 'Fits on', add: 'Add a capsule', list: 'Capsules' }, bodypack: { with: 'iemtx', label: 'Transmitter', add: 'Add an in-ear pack', list: 'In-ear packs' } };
+const GEAR_PAIR = { txmic: { with: 'receiver', label: 'Receiver', add: 'Add a wireless mic', list: 'Wireless mics' }, bodypack: { with: 'iemtx', label: 'Transmitter', add: 'Add an in-ear pack', list: 'In-ear packs' } };
 const PAIR_CHILD = { receiver: 'txmic', iemtx: 'bodypack' };
 const TX_KINDS = ['Handheld', 'Bodypack', 'Headset', 'Lavalier', 'Instrument', 'Other'];
 const BUCKET_OF_KIND = { capsule: 'Capsules', mic: 'Wired mics', di: 'Wired mics', txmic: 'Wireless mics', receiver: 'Receivers', source: 'Other', iemtx: 'In-ears', bodypack: 'In-ears', headamp: 'In-ears',
@@ -182,7 +182,9 @@ function gearLine(d, list) {
   const kids = PAIR_CHILD[d.kind] ? list.filter((x) => x.kind === PAIR_CHILD[d.kind] && x.pair_id === d.id).length : 0;
   // most useful first (what it is, what it pairs with), make and model last, since a narrow card cuts the end off
   const parts = [KIND_SHORT[d.kind] || '', d.kind === 'txmic' ? d.txtype : ''];
-  if (mate) parts.push((d.kind === 'capsule' ? 'in ' : 'on ') + tagModel(mate));
+  if (mate) parts.push('on ' + tagModel(mate));
+  // a capsule card: which mics it is in, out of how many there are
+  if (d.kind === 'capsule') { const on = list.filter((x) => x.kind === 'txmic' && x.capsule_card === d.id); parts.push(on.length ? 'in ' + on.map((x) => x.name).join(', ') + (d.qty > 1 ? ' (' + on.length + ' of ' + d.qty + ')' : '') : (d.qty > 1 ? d.qty + ' spare' : 'spare')); }
   if (PAIR_CHILD[d.kind]) parts.push(kids ? kids + ' ' + (d.kind === 'receiver' ? 'wireless mic' : 'pack') + (kids === 1 ? '' : 's') : 'none paired');
   if (showMm) parts.push(mm);
   return parts.filter(Boolean).join(' · ') || CAT[d.category] || '';
@@ -434,7 +436,8 @@ async function viewDevice(id) {
     ['What it is', esc(kindLabel(v.kind) + (v.txtype ? ' · ' + v.txtype : ''))],
     ['Quantity', qtyOf(v) > 1 ? qtyOf(v) + ' <span class="note">one card for all of them</span>' : ''],
     [GEAR_PAIR[v.kind] ? GEAR_PAIR[v.kind].label : '', mate ? dl(mate) : ''],
-    ['Capsule', (() => { const c = v.kind === 'txmic' && all.find((x) => x.kind === 'capsule' && x.pair_id === v.id); return c ? dl(c) : esc(v.capsule); })()],
+    ['Capsule', (() => { const c = v.kind === 'txmic' && v.capsule_card && all.find((x) => x.id === v.capsule_card); return c ? dl(c) : esc(v.capsule); })()],
+    ['In mics', (() => { if (v.kind !== 'capsule') return ''; const on = all.filter((x) => x.kind === 'txmic' && x.capsule_card === v.id); return on.length ? on.map(dl).join(', ') + (v.qty > 1 ? ' <span class="note">' + on.length + ' of ' + v.qty + ' in use</span>' : '') : '<span class="note">' + (v.qty > 1 ? 'All ' + v.qty + ' spare' : 'Spare') + '</span>'; })()],
     ['Location', esc(v.location)],
     ['Rack', rack ? '<a href="#/racks/' + rack.id + '">' + esc(rack.name) + '</a> · ' + esc(rackSpot(v, rack)) : ''],
     ['Power', (() => {
@@ -804,15 +807,18 @@ async function viewDeviceEdit(id) {
   const all = DEV.list || [];
   /** The wireless part: what it pairs with, transmitter type, capsule, frequency. Only for the kinds that have them. */
   // the capsule in a wireless mic: one of the capsule cards in the Gear Locker, a new one, or just typed
-  const fitted = id ? all.find((x) => x.kind === 'capsule' && String(x.pair_id) === String(id)) : null;
+  const fitted = d.capsule_card ? all.find((x) => x.id === d.capsule_card) : null;
   if (d.capsule_id === undefined) d.capsule_id = fitted ? String(fitted.id) : d.capsule ? '__text' : '';
   const capField = (models) => {
     const caps = all.filter((x) => x.kind === 'capsule');
-    const holder = (c) => { const h = c.pair_id && String(c.pair_id) !== String(id) && all.find((x) => x.id === c.pair_id); return h ? ' · now on ' + h.name : ''; };
+    // how many of each capsule card are free; a full one can't be picked (it is never taken off another mic)
+    const using = (c) => all.filter((x) => x.kind === 'txmic' && x.capsule_card === c.id && String(x.id) !== String(id));
+    const left = (c) => Math.max(1, c.qty || 1) - using(c).length;
+    const note = (c) => { const u = using(c); const n = Math.max(1, c.qty || 1); return n > 1 ? ' · ' + Math.max(0, left(c)) + ' of ' + n + ' free' : u.length ? ' · on ' + u[0].name : ''; };
     return '<label class="dfield"><span>Capsule</span><select data-cap>' +
-      '<option value="">None</option>' + caps.map((c) => '<option value="' + c.id + '"' + (String(c.id) === String(d.capsule_id) ? ' selected' : '') + '>' + esc(tagModel(c) + holder(c)) + '</option>').join('') +
+      '<option value="">None</option>' + caps.map((c) => { const mine = String(c.id) === String(d.capsule_id); return '<option value="' + c.id + '"' + (mine ? ' selected' : '') + (!mine && left(c) <= 0 ? ' disabled' : '') + '>' + esc(tagModel(c) + note(c)) + '</option>'; }).join('') +
       '<option value="__new">+ New capsule…</option><option value="__text"' + (d.capsule_id === '__text' ? ' selected' : '') + '>Type it (not a Gear Locker card)</option></select>' +
-      '<em>' + (caps.length ? 'The capsule in it now. Pick another when you swap it; it moves off the mic it was on.' : 'Add your capsules here as you go; each gets its own card.') + '</em></label>' +
+      '<em>' + (caps.length ? 'The capsule in it now. A capsule card with a quantity (SM58 head ×4) can go in that many mics; a full one shows greyed out.' : 'Add your capsules here as you go; one card can stand for several of the same capsule.') + '</em></label>' +
       (d.capsule_id === '__text' ? '<label class="dfield"><span>Capsule or mic</span><input data-w="capsule" value="' + esc(d.capsule) + '" placeholder="Capsule model, or the lav or headset" list="dcaps"><datalist id="dcaps">' + models.map((m) => '<option value="' + esc(m.model) + '">' + esc(m.make || '') + '</option>').join('') + '</datalist></label>' : '');
   };
   const newCapsule = () => new Promise((done) => {
@@ -830,7 +836,7 @@ async function viewDeviceEdit(id) {
         try {
           const r = await call('POST', '/api/devices', { name, kind: 'capsule', category: 'audio', make, model });
           if (model) GearModels.add([{ kind: 'capsule', make, model }]);
-          all.push({ id: r.id, name, kind: 'capsule', make, model, pair_id: null }); forgetDevices(); close(); done(String(r.id));
+          all.push({ id: r.id, name, kind: 'capsule', make, model, qty: 1, pair_id: null }); forgetDevices(); close(); done(String(r.id));
         } catch (err) { toast(err.message, 'bad'); }
       });
       // closed without adding: put the picker back

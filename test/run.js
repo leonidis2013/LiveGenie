@@ -796,23 +796,31 @@ test('gear knows what it is: wireless mics pair with a receiver, capsules fit a 
   const odd = (await admin.post('/api/devices', { name: 'Odd', kind: 'bogus' })).data.id;
   const one = async (id) => (await admin.get('/api/devices/' + id)).data.device;
   let t = await one(tx);
-  assert.deepStrictEqual([t.kind, t.pair_id, t.txtype, t.capsule, t.freq], ['txmic', rx, 'Handheld', 'Spare head', '518.2']);
-  t = await one(cap); assert.deepStrictEqual([t.kind, t.pair_id, t.freq], ['capsule', tx, ''], 'a capsule has no frequency');
+  assert.deepStrictEqual([t.kind, t.pair_id, t.txtype, t.capsule, t.freq], ['txmic', rx, 'Handheld', 'Head A', '518.2']);
+  t = await one(cap); assert.deepStrictEqual([t.kind, t.pair_id, t.freq], ['capsule', null, ''], 'a capsule pairs with nothing itself and has no frequency');
   t = await one(mic); assert.deepStrictEqual([t.pair_id, t.txtype], [null, ''], 'a wired mic pairs with nothing');
   assert.strictEqual((await one(odd)).kind, '');
   const row = (await admin.get('/api/devices')).data.devices.find((x) => x.id === tx);
   assert.deepStrictEqual([row.kind, row.pair_id], ['txmic', rx], 'the list carries the kind and pairing');
   // a mic holds one capsule card: picking one fits it (and takes it off another mic), and the mic shows its make and model
+  // capsules: the mic points at a capsule card; a card with a quantity sits on that many mics, never taken from one
   const capA = (await admin.post('/api/devices', { name: 'Cap A', kind: 'capsule', make: 'Brand', model: 'K9' })).data.id;
   const tx2 = (await admin.post('/api/devices', { name: 'Test HH 2', kind: 'txmic', capsule_id: capA })).data.id;
-  assert.deepStrictEqual([(await one(capA)).pair_id, (await one(tx2)).capsule], [tx2, 'Brand K9']);
-  await admin.put('/api/devices/' + tx, { ...(await one(tx)), capsule_id: capA });
-  assert.deepStrictEqual([(await one(capA)).pair_id, (await one(tx)).capsule, (await one(tx2)).capsule], [tx, 'Brand K9', ''], 'it moved off the other mic');
+  assert.deepStrictEqual([(await one(tx2)).capsule_card, (await one(tx2)).capsule], [capA, 'Brand K9']);
+  let rr = await admin.put('/api/devices/' + tx, { ...(await one(tx)), capsule_id: capA });
+  assert.strictEqual(rr.status, 400, 'one capsule, already on a mic: refused, not stolen');
+  assert.ok(/in use/.test(rr.data.error));
+  assert.strictEqual((await one(tx2)).capsule_card, capA, 'still on the first mic');
+  await admin.put('/api/devices/' + capA, { ...(await one(capA)), qty: 2 });
+  rr = await admin.put('/api/devices/' + tx, { ...(await one(tx)), capsule_id: capA });
+  assert.strictEqual(rr.status, 200, 'two of them: the second mic gets one');
+  assert.deepStrictEqual([(await one(tx)).capsule_card, (await one(tx2)).capsule_card], [capA, capA]);
+  assert.strictEqual((await admin.post('/api/devices', { name: 'Test HH 3', kind: 'txmic', capsule_id: capA })).status, 400, 'a third is refused');
   await admin.put('/api/devices/' + tx, { ...(await one(tx)), capsule_id: '' });
-  assert.deepStrictEqual([(await one(capA)).pair_id, (await one(tx)).capsule], [null, ''], 'none takes it out');
-  await admin.put('/api/devices/' + capA, { ...(await one(capA)), pair_id: tx2 });
-  assert.strictEqual((await one(capA)).pair_id, tx2, 'fitting from the capsule card works too');
-  await admin.del('/api/devices/' + capA); await admin.del('/api/devices/' + tx2);
+  assert.deepStrictEqual([(await one(tx)).capsule_card, (await one(tx)).capsule], [null, ''], 'none takes it out');
+  await admin.del('/api/devices/' + capA);
+  assert.deepStrictEqual([(await one(tx2)).capsule_card, (await one(tx2)).capsule], [null, ''], 'removing the capsule card clears the mics');
+  await admin.del('/api/devices/' + tx2);
   // an edit that leaves the kind out keeps it
   await admin.put('/api/devices/' + tx, { ...(await one(tx)), kind: undefined, name: 'Test HH 1' });
   assert.strictEqual((await one(tx)).kind, 'txmic');
@@ -825,7 +833,7 @@ test('gear knows what it is: wireless mics pair with a receiver, capsules fit a 
   const dir = fs2.mkdtempSync(path.join(os2.tmpdir(), 'lg-kind-'));
   const DBm = require(path.join(ROOT, 'lib', 'db'));
   const db1 = DBm.open(path.join(dir, 'x.db'));
-  db1.exec('DROP TABLE racks; DROP INDEX uploads_sha; ALTER TABLE uploads DROP COLUMN sha256; ' + ['rack_id', 'rack_u', 'rack_h', 'rack_side', 'shelf_id', 'power_w', 'power_pdu', 'power_outlet', 'power_max'].map((c) => 'ALTER TABLE devices DROP COLUMN ' + c).join('; ')); db1.exec('ALTER TABLE devices DROP COLUMN manual_from; ALTER TABLE devices DROP COLUMN qty; ALTER TABLE patch DROP COLUMN rev; ALTER TABLE patch_versions DROP COLUMN rev; ALTER TABLE patch_versions DROP COLUMN kind'); db1.exec(['kind', 'pair_id', 'txtype', 'capsule', 'freq'].map((c) => 'ALTER TABLE devices DROP COLUMN ' + c).join('; ')); db1.prepare('UPDATE schema_version SET v = 12').run();
+  db1.exec('DROP TABLE racks; DROP INDEX uploads_sha; ALTER TABLE uploads DROP COLUMN sha256; ' + ['rack_id', 'rack_u', 'rack_h', 'rack_side', 'shelf_id', 'power_w', 'power_pdu', 'power_outlet', 'power_max'].map((c) => 'ALTER TABLE devices DROP COLUMN ' + c).join('; ')); db1.exec('ALTER TABLE devices DROP COLUMN capsule_card; ALTER TABLE devices DROP COLUMN manual_from; ALTER TABLE devices DROP COLUMN qty; ALTER TABLE patch DROP COLUMN rev; ALTER TABLE patch_versions DROP COLUMN rev; ALTER TABLE patch_versions DROP COLUMN kind'); db1.exec(['kind', 'pair_id', 'txtype', 'capsule', 'freq'].map((c) => 'ALTER TABLE devices DROP COLUMN ' + c).join('; ')); db1.prepare('UPDATE schema_version SET v = 12').run();
   db1.prepare("INSERT INTO settings (key, value) VALUES ('gear_models', ?)").run(JSON.stringify([{ kind: 'speaker', make: 'Brand', model: 'Col 70' }]));
   db1.prepare("INSERT INTO devices (name, aliases, category, make, model, location, ip, mac, photo, manual_url, notes, created_at, updated_at) VALUES ('Brand Col 70', '[]', 'audio', 'Brand', 'COL 70', '', '', '', '', '', '', 1, 1)").run();
   db1.close();
@@ -1056,7 +1064,7 @@ test('checklists that were on pages move to To do, keeping their ticks and log',
   const DBm = require(path.join(ROOT, 'lib', 'db'));
   // a database from before 0.20: back to migration 10, then a page with a checklist and a tick
   const db1 = DBm.open(path.join(dir, 'x.db'));
-  db1.exec('DROP TABLE racks; DROP INDEX uploads_sha; ALTER TABLE uploads DROP COLUMN sha256; ' + ['rack_id', 'rack_u', 'rack_h', 'rack_side', 'shelf_id', 'power_w', 'power_pdu', 'power_outlet', 'power_max'].map((c) => 'ALTER TABLE devices DROP COLUMN ' + c).join('; ')); db1.exec('ALTER TABLE devices DROP COLUMN manual_from; ALTER TABLE devices DROP COLUMN qty; ALTER TABLE patch DROP COLUMN rev; ALTER TABLE patch_versions DROP COLUMN rev; ALTER TABLE patch_versions DROP COLUMN kind'); db1.exec('DROP TABLE todo_lists; ALTER TABLE devices DROP COLUMN networked; ' + ['kind', 'pair_id', 'txtype', 'capsule', 'freq'].map((c) => 'ALTER TABLE devices DROP COLUMN ' + c).join('; ')); db1.prepare('UPDATE schema_version SET v = 10').run();
+  db1.exec('DROP TABLE racks; DROP INDEX uploads_sha; ALTER TABLE uploads DROP COLUMN sha256; ' + ['rack_id', 'rack_u', 'rack_h', 'rack_side', 'shelf_id', 'power_w', 'power_pdu', 'power_outlet', 'power_max'].map((c) => 'ALTER TABLE devices DROP COLUMN ' + c).join('; ')); db1.exec('ALTER TABLE devices DROP COLUMN capsule_card; ALTER TABLE devices DROP COLUMN manual_from; ALTER TABLE devices DROP COLUMN qty; ALTER TABLE patch DROP COLUMN rev; ALTER TABLE patch_versions DROP COLUMN rev; ALTER TABLE patch_versions DROP COLUMN kind'); db1.exec('DROP TABLE todo_lists; ALTER TABLE devices DROP COLUMN networked; ' + ['kind', 'pair_id', 'txtype', 'capsule', 'freq'].map((c) => 'ALTER TABLE devices DROP COLUMN ' + c).join('; ')); db1.prepare('UPDATE schema_version SET v = 10').run();
   db1.prepare("INSERT INTO spaces (slug, name) VALUES ('audio', 'Audio')").run();
   const blocks = [{ type: 'text', md: 'Before' }, { type: 'checklist', id: 'abc12345', title: 'Desk check', items: ['Faders down', 'Scenes loaded'], schedule: [] }];
   db1.prepare("INSERT INTO pages (space_id, title, blocks, version, created_at, updated_at) VALUES (1, 'Sunday desk', ?, 1, 1, 1)").run(JSON.stringify(blocks));

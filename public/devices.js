@@ -513,7 +513,7 @@ async function viewDevice(id) {
       : '<div class="card empty">Not mentioned on any page yet. Type its name' + (v.aliases.length ? ', a nickname' : '') + (v.ips.length ? ' or its IP' : '') + ' on any page and it links here by itself.</div>'}</div>
   </div>`;
   linkDevices($('#dnotes'));
-  paintFiles($('#dfiles'), v, d.files || [], d.sharedFiles || []);
+  paintFiles($('#dfiles'), v, d.files || [], d.sharedFiles || [], { view: true });
   if (pic) {
     $('#dmarks').innerHTML = marksView(pic.photo, pic.marks, pic.card);
     wireMarksView($('#dmarks'));
@@ -695,16 +695,19 @@ const fileSize = (n) => (n > 1048576 ? (n / 1048576).toFixed(1) + ' MB' : Math.m
 const fileIcon = (m) => (m === 'application/pdf' ? 'pdf' : /^image\//.test(m) ? 'image' : 'text');
 /** Manuals and documents: files stored in LiveGenie, and the manufacturer's web page if there is one. Same on the card and in Edit. */
 /** shared: manuals this card can use from other cards (same model, or "same manuals as"), shown read-only under its own. */
-function paintFiles(host, v, files, shared) {
+/** The manuals list. opts.view: the card's page, read only (uploading and removing live in Edit). */
+function paintFiles(host, v, files, shared, opts) {
   shared = shared || host._shared || []; host._shared = shared;
+  opts = opts || host._opts || {}; host._opts = opts;
+  const edit = can('admin') && !opts.view;
   const web = v.manual_url ? '<div class="row frow">' + icon('link') + '<a class="t" href="' + esc(v.manual_url) + '" target="_blank" rel="noopener"><b>Manufacturer\'s page</b><span>' + esc(v.manual_url.replace(/^https?:\/\//, '').slice(0, 70)) + '</span></a></div>' : '';
   host.innerHTML = (files.length || web ? '<div class="list files">' + web + files.map((f) => '<div class="row frow">' + icon(fileIcon(f.mime)) + '<a class="t" href="/files/' + esc(f.id) + '" target="_blank" rel="noopener"><b>' + esc(f.name) + '</b><span>' + fileSize(f.bytes) + ' · added ' + esc(ago(f.uploaded_at)) + (f.uploaded_by ? ' by ' + esc(f.uploaded_by) : '') + '</span></a>' +
-    '<a class="ghost abtn" href="/files/' + esc(f.id) + '?download=1" title="Download">' + icon('download') + '</a>' + (can('admin') ? '<button class="ghost danger" data-fdel="' + esc(f.id) + '" title="Remove">' + icon('trash') + '</button>' : '') + '</div>').join('') + '</div>'
-    : shared.length ? '' : '<div class="card empty" style="padding:16px">' + (can('admin') ? 'No manuals yet. Upload the PDF manual, a quick-start guide or a wiring diagram, or set it to use another card\'s manuals.' : 'No manuals yet.') + '</div>') +
+    '<a class="ghost abtn" href="/files/' + esc(f.id) + '?download=1" title="Download">' + icon('download') + '</a>' + (edit ? '<button class="ghost danger" data-fdel="' + esc(f.id) + '" title="Remove">' + icon('trash') + '</button>' : '') + '</div>').join('') + '</div>'
+    : shared.length ? '' : '<div class="card empty" style="padding:16px">' + (edit ? 'No manuals yet. Upload the PDF manual, a quick-start guide or a wiring diagram, or set it to use another card\'s manuals.' : can('admin') ? 'No manuals yet. Tap Edit to upload one.' : 'No manuals yet.') + '</div>') +
     shared.map((sh) => '<div class="fshared"><div class="fsh">' + icon('link') + '<span>' + (sh.why === 'chosen' ? 'Same manuals as ' : 'Same model as ') + '<a href="#/d/' + sh.from.id + '">' + esc(Tags.withModel(sh.from.name, sh.from.model)) + '</a></span></div><div class="list files">' +
       (sh.manual_url ? '<div class="row frow">' + icon('link') + '<a class="t" href="' + esc(sh.manual_url) + '" target="_blank" rel="noopener"><b>Manufacturer\'s page</b><span>' + esc(sh.manual_url.replace(/^https?:\/\//, '').slice(0, 70)) + '</span></a></div>' : '') +
       sh.files.map((f) => '<div class="row frow">' + icon(fileIcon(f.mime)) + '<a class="t" href="/files/' + esc(f.id) + '" target="_blank" rel="noopener"><b>' + esc(f.name) + '</b><span>' + fileSize(f.bytes) + '</span></a><a class="ghost abtn" href="/files/' + esc(f.id) + '?download=1" title="Download">' + icon('download') + '</a></div>').join('') + '</div></div>').join('') +
-    (can('admin') ? '<div class="adder" style="margin-top:8px"><input type="file" id="fup" class="hide" multiple accept=".pdf,image/*,.txt,.doc,.docx,.xls,.xlsx,.zip"><button type="button" class="btn" id="fupb">' + icon('upload') + 'Upload a manual or document</button><span class="note" id="fmsg"></span></div>' : '');
+    (edit ? '<div class="adder" style="margin-top:8px"><input type="file" id="fup" class="hide" multiple accept=".pdf,image/*,.txt,.doc,.docx,.xls,.xlsx,.zip"><button type="button" class="btn" id="fupb">' + icon('upload') + 'Upload a manual or document</button><span class="note" id="fmsg"></span></div>' : '');
   $$('[data-fdel]', host).forEach((b) => b.addEventListener('click', async () => {
     const f = files.find((x) => x.id === b.dataset.fdel);
     if (!await confirmBox('Remove ' + f.name + '?', 'It is deleted from LiveGenie (older backups still have it).', 'Remove', true)) return;

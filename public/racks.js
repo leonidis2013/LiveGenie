@@ -561,11 +561,43 @@ function adjustSpots(rack, rows, done) {
   const boxOf = (g) => spots[g.key] || g.grid();
   let cur = rows.length ? rows[0].key : null;
   modal('<h3>Adjust spots</h3><p class="note">Drag a box to where that piece of gear really is in the photo, and drag its corner to resize. Handy when there is a gap between pieces, or gear sits a hole off the U lines.</p>' +
-    '<div class="sjwrap"><div class="lupic sjpic" id="sjp"><img src="/uploads/' + esc(rack.photo) + '" alt="" draggable="false"><div id="sjb"></div></div>' +
+    '<div class="sjwrap"><div class="lupic sjpic" id="sjp"><img src="/uploads/' + esc(rack.photo) + '" alt="" draggable="false"><div id="sjb"></div><div id="sjg" class="sjg"></div></div>' +
     '<div class="sjlist" id="sjl"></div></div>' +
-    '<div class="acts"><button type="button" class="ghost" id="sjall">All back to the grid</button><span class="grow"></span><button type="button" data-close>Cancel</button><button class="primary" id="sjok">Save</button></div>', (w, close) => {
+    '<div class="acts"><label class="tog sjtog"><input type="checkbox" id="sjsnap"' + ((() => { try { return localStorage.getItem('lg-rack-snap'); } catch (e) { return null; } })() === '0' ? '' : ' checked') + '><span>Snap</span></label><button type="button" class="ghost" id="sjall">All back to the grid</button><span class="grow"></span><button type="button" data-close>Cancel</button><button class="primary" id="sjok">Save</button></div>', (w, close) => {
     w.classList.add('mwide', 'mkmodal');
     const pic = $('#sjp', w);
+    /**
+     * Snap: while dragging, a box's edges catch on the U lines, the rails and the edges of the other boxes
+     * (within about 1% of the photo), and a guide line shows what it caught. Off with the tick, or hold Alt (Option).
+     */
+    const THR = 0.012;
+    const uLines = () => { const out = []; for (let u = 0; u <= rack.units; u++) out.push(RackCore.at(rack.rails, 0.5, u / rack.units).y); return out; };
+    const railX = () => { const out = []; for (let k = 0; k <= 4; k++) { const d = k / 4; out.push(RackCore.at(rack.rails, 0, d).x, RackCore.at(rack.rails, 1, d).x, RackCore.at(rack.rails, 0.5, d).x); } return out; };
+    const near = (v, list) => { let best = null; list.forEach((c) => { if (Math.abs(c - v) <= THR && (best == null || Math.abs(c - v) < Math.abs(best - v))) best = c; }); return best; };
+    function snapBox(b, key, resize, off) {
+      const on = $('#sjsnap', w).checked && !off;
+      if (!on) { guides([], []); return b; }
+      const others = rows.filter((g) => g.key !== key).map((g) => boxOf(g));
+      const ys = uLines().concat(...others.map((o) => [o.y, o.y + o.h]));
+      const xs = railX().concat(...others.map((o) => [o.x, o.x + o.w]));
+      const gx = [], gy = [];
+      const n = { ...b };
+      if (resize) {
+        const r = near(b.x + b.w, xs); if (r != null && r - b.x > 0.02) { n.w = r - b.x; gx.push(r); }
+        const bt = near(b.y + b.h, ys); if (bt != null && bt - b.y > 0.01) { n.h = bt - b.y; gy.push(bt); }
+      } else {
+        const t = near(b.y, ys), bt = near(b.y + b.h, ys);
+        if (t != null && (bt == null || Math.abs(t - b.y) <= Math.abs(bt - b.y - b.h))) { n.y = t; gy.push(t); } else if (bt != null) { n.y = bt - b.h; gy.push(bt); }
+        const l = near(b.x, xs), r = near(b.x + b.w, xs);
+        if (l != null && (r == null || Math.abs(l - b.x) <= Math.abs(r - b.x - b.w))) { n.x = l; gx.push(l); } else if (r != null) { n.x = r - b.w; gx.push(r); }
+      }
+      n.x = clamp(n.x, 0, 1 - n.w); n.y = clamp(n.y, 0, 1 - n.h);
+      guides(gx, gy);
+      return n;
+    }
+    function guides(gx, gy) {
+      $('#sjg', w).innerHTML = gx.map((x) => '<i class="sjgx" style="left:' + x * 100 + '%"></i>').join('') + gy.map((y) => '<i class="sjgy" style="top:' + y * 100 + '%"></i>').join('');
+    }
     const paint = () => {
       $('#sjb', w).innerHTML = rows.map((g) => { const b = boxOf(g), on = g.key === cur, moved = !!spots[g.key];
         return '<div class="sjbox' + (on ? ' on' : '') + (moved ? ' moved' : '') + '" data-g="' + g.key + '" style="left:' + b.x * 100 + '%;top:' + b.y * 100 + '%;width:' + b.w * 100 + '%;height:' + b.h * 100 + '%"><em>' + esc(g.name) + '</em>' + (on ? '<i class="sjh" data-h="1"></i>' : '') + '</div>'; }).join('');
@@ -588,13 +620,15 @@ function adjustSpots(rack, rows, done) {
     pic.addEventListener('pointermove', (e) => {
       if (!drag) return;
       const p = at(e), dx = p.x - drag.p.x, dy = p.y - drag.p.y, b = drag.b;
-      const nb = drag.resize ? { x: b.x, y: b.y, w: clamp(b.w + dx, 0.02, 1 - b.x), h: clamp(b.h + dy, 0.01, 1 - b.y) } : { x: clamp(b.x + dx, 0, 1 - b.w), y: clamp(b.y + dy, 0, 1 - b.h), w: b.w, h: b.h };
+      let nb = drag.resize ? { x: b.x, y: b.y, w: clamp(b.w + dx, 0.02, 1 - b.x), h: clamp(b.h + dy, 0.01, 1 - b.y) } : { x: clamp(b.x + dx, 0, 1 - b.w), y: clamp(b.y + dy, 0, 1 - b.h), w: b.w, h: b.h };
+      nb = snapBox(nb, drag.g.key, drag.resize, e.altKey);
       spots[drag.g.key] = nb;
       const el = $('.sjbox[data-g="' + drag.g.key + '"]', w);
       if (el) { el.style.left = nb.x * 100 + '%'; el.style.top = nb.y * 100 + '%'; el.style.width = nb.w * 100 + '%'; el.style.height = nb.h * 100 + '%'; el.classList.add('moved'); }
     });
-    const end = () => { if (drag) { drag = null; paint(); } };
+    const end = () => { if (drag) { drag = null; guides([], []); paint(); } };
     pic.addEventListener('pointerup', end); pic.addEventListener('pointercancel', end);
+    $('#sjsnap', w).addEventListener('change', (e) => { try { localStorage.setItem('lg-rack-snap', e.target.checked ? '1' : '0'); } catch (er) { /* private mode */ } });
     $('#sjall', w).addEventListener('click', () => { Object.keys(spots).forEach((k) => delete spots[k]); paint(); });
     $('#sjok', w).addEventListener('click', async () => {
       // keep only spots for gear still in the rack

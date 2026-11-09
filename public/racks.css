@@ -168,3 +168,11 @@
 
 /* edit mode banner (0.25.4) */
 .rkmode { margin:4px 0 10px; padding:8px 12px; border-radius:10px; background:color-mix(in srgb, var(--acc) 12%, transparent); border:1px solid color-mix(in srgb, var(--acc) 35%, transparent); }
+
+/* snap guides while adjusting spots (0.25.6) */
+.sjg { position:absolute; inset:0; pointer-events:none; z-index:3; }
+.sjgx { position:absolute; top:0; bottom:0; width:0; border-left:1.5px dashed #ff4fd8; }
+.sjgy { position:absolute; left:0; right:0; height:0; border-top:1.5px dashed #ff4fd8; }
+.sjtog { display:flex; align-items:center; gap:6px; margin-right:6px; }
+.sjtog input { width:auto !important; }
+.sjtog span { line-height:1; }

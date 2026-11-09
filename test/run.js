@@ -1007,6 +1007,16 @@ test('pictures: the same picture uploaded again is stored once; removing unused 
   assert.strictEqual((await admin.post('/api/admin/storage/clean', { ids: [used, a1.id] })).data.removed, 2, 'no longer used once the card and rack are gone');
 });
 
+test('gear check: "doesn\'t apply" is remembered per card and check, admins only', async () => {
+  let r = await admin.put('/api/devices/check-skip', { key: '12:power' });
+  assert.ok(r.data.checkSkip.includes('12:power'));
+  assert.ok((await admin.get('/api/devices')).data.checkSkip.includes('12:power'), 'listed with the gear');
+  assert.strictEqual((await admin.put('/api/devices/check-skip', { key: 'nope' })).status, 400);
+  assert.strictEqual((await vol.put('/api/devices/check-skip', { key: '12:ip' })).status, 403);
+  r = await admin.put('/api/devices/check-skip', { key: '12:power', on: false });
+  assert.ok(!r.data.checkSkip.includes('12:power'), 'and can be undone');
+});
+
 test('rack photo spots can be moved by hand, and only sensible ones are kept', async () => {
   const r = await admin.post('/api/racks', { name: 'Spot test rack', units: 6 });
   const id = r.data.id || (r.data.rack && r.data.rack.id);

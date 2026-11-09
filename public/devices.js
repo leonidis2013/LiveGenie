@@ -61,7 +61,7 @@ async function loadDevices(force) {
   if (!force && DEV.list && Date.now() - DEV.at < 30000) return DEV.list;
   if (DEV.loading) return DEV.loading;
   DEV.loading = get('/api/devices').then((d) => {
-    DEV.list = d.devices; DEV.buckets = [...new Set((d.buckets || []).map((b) => (b in BUCKET_RENAMED ? BUCKET_RENAMED[b] : b)).filter(Boolean))]; DEV.dupeSkip = new Set(d.dupeSkip || []); DEV.at = Date.now();
+    DEV.list = d.devices; DEV.buckets = [...new Set((d.buckets || []).map((b) => (b in BUCKET_RENAMED ? BUCKET_RENAMED[b] : b)).filter(Boolean))]; DEV.dupeSkip = new Set(d.dupeSkip || []); DEV.checkSkip = new Set(d.checkSkip || []); DEV.at = Date.now();
     DEV.dm = DevMatch.build(d.devices);
     return DEV.list;
   }).catch(() => DEV.list || []).finally(() => { DEV.loading = null; });

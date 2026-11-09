@@ -1012,7 +1012,7 @@ async function viewSearch(q) {
 // ----- settings -----
 const TABS = [['display', 'Display', 'sun', 'user'], ['account', 'Account', 'user', 'user'], ['about', 'About', 'spark', 'user']];
 const ADMIN_TABS = [
-  ['spaces', 'Spaces', 'list'], ['people', 'People', 'users'], ['problems', 'Problems', 'alert'], ['todo', 'To do lists', 'check'], ['checklog', 'Checklist log', 'clock'], ['setup', 'Equipment setup', 'spark'],
+  ['spaces', 'Spaces', 'list'], ['people', 'People', 'users'], ['problems', 'Problems', 'alert'], ['todo', 'To do lists', 'check'], ['checklog', 'Checklist log', 'clock'], ['setup', 'Equipment setup', 'spark'], ['gearcheck', 'Gear check', 'check'],
   ['church', 'Church', 'image'], ['notify', 'Notifications', 'bell'], ['backups', 'Backups', 'box'], ['storage', 'Storage', 'image'], ['trash', 'Trash', 'trash'], ['activity', 'Activity', 'clock'], ['reset', 'Reset', 'restore']
 ];
 
@@ -1026,7 +1026,7 @@ async function viewAdmin(tab) {
     <div class="setup adminv"><div class="side">${ADMIN_TABS.map((t) => '<button data-tab="' + t[0] + '" class="' + (t[0] === tab ? 'on' : '') + '">' + icon(t[2]) + t[1] + (t[0] === 'problems' && n ? '<em class="cnt bad">' + n + '</em>' : '') + '</button>').join('')}</div><div class="pane" id="pane"></div></div>`;
   $$('[data-tab]').forEach((b) => b.addEventListener('click', () => { location.hash = '#/admin/' + b.dataset.tab; }));
   const pane = $('#pane');
-  await ({ spaces: tabSpaces, people: tabUsers, problems: tabProblems, todo: tabTodoLists, checklog: tabChecklog, setup: tabGearSetup, church: tabChurch, notify: tabNotify, backups: tabBackups, storage: tabStorage, trash: tabTrash, activity: tabActivity, reset: tabReset }[tab])(pane);
+  await ({ spaces: tabSpaces, people: tabUsers, problems: tabProblems, todo: tabTodoLists, checklog: tabChecklog, setup: tabGearSetup, gearcheck: tabGearCheck, church: tabChurch, notify: tabNotify, backups: tabBackups, storage: tabStorage, trash: tabTrash, activity: tabActivity, reset: tabReset }[tab])(pane);
 }
 
 async function viewSettings(tab) {

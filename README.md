@@ -4,7 +4,7 @@
 
 The Rolling Hills Community Church AVL knowledge base: one web app where volunteers find how our system works, how to run a service and how to fix what broke. Part of the Live series (LiveMic, LiveCompanion, LivePi, LiveVoice).
 
-Version 0.25.6 · © 2026 Jerod Ulicki
+Version 0.26.0 · © 2026 Jerod Ulicki
 
 ## What it does
 
@@ -118,7 +118,8 @@ Run it on the TrueNAS host and reach it from the AVL and office VLANs through th
 | 0.11.0 | Phone layout (bottom tabs, + button, bottom sheets, To do screen) and desktop layout (sidebar with spaces and pages, On this page outline) |
 | 0.12.0 | Phone sign in: tap your name, PIN pad, and QR code sign in from a signed-in computer |
 | 0.13.0 | Stage patch: one visual signal-flow drawing for the whole system (equipment pane, drag to connect, follow a signal, overview and sockets, cable styles, checks), with the input, output, wireless, in-ear and cable lists and the PDF made from it; old patch lists moved onto it |
-| 0.25.6 | Adjust spots snaps: while dragging or resizing a box on the rack photo, its edges catch on the U lines, the rails and the other boxes, with a guide line showing what it caught. A Snap switch turns it off (remembered), or hold Alt / Option for a moment (this release) |
+| 0.26.0 | **Admin › Gear check:** every Gear Locker card that is missing something, grouped by what is missing (not plugged into a power strip or sequencer, what it is, make or model, IP address, location, watts, wireless pairing, frequency, inputs and outputs; manual and photo as nice to have), with a completeness score and the fields to fill it right there, one Save per card. **Doesn't apply** hides a card from one check for good (this release) |
+| 0.25.6 | Adjust spots snaps: while dragging or resizing a box on the rack photo, its edges catch on the U lines, the rails and the other boxes, with a guide line showing what it caught. A Snap switch turns it off (remembered), or hold Alt / Option for a moment |
 | 0.25.5 | Rack print cleaned up: one letter page for most racks with a proper header (church, rack, location, date, and U / used / free / pieces / power at a glance), the rack drawn large with notes and a power summary beside it, and a full-width list top to bottom including free space, outlets, watts and IP addresses; no more blank second page. Patch panels, custom items, cable managers and other rack pieces now have their own spots on the rack photo too, and can be adjusted like gear |
 | 0.25.4 | Racks have a clear **view mode** and **edit mode**, like the stage patch: a rack opens in view mode (look, tap gear, step through the photo, Print), and admins tap **Edit** to arrange it (toolbar, Gear Locker list, drag and resize, power outlets, Details, Photo, Adjust spots, Line up the photo); changes save as you go and **Done** goes back to view mode |
 | 0.25.3 | Photo spotlight shows one label, not two: the caption carries the name (with the tag in front when it adds something), and the small tag on the box only shows when there is no caption title |

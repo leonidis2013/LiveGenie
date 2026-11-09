@@ -369,14 +369,26 @@ async function api(req, res, url, user, token) {
       for (const g of patch.get().doc.gear) if (g.device_id) { if (!pk.has(g.device_id)) pk.set(g.device_id, g.kind); }
       let buckets = []; try { buckets = JSON.parse(store.getSetting('gear_buckets', '[]')); } catch (e) { /* default */ }
       const dupeSkip = Auth.atLeast(user, 'admin') ? devices.dupeSkip(store.getSetting) : [];
-      return send(res, 200, { ok: true, categories: Devices.CATEGORIES, buckets, dupeSkip, devices: devices.list(user).map((d) => ({
+      // Admin › Gear check: things marked "doesn't apply" for a card (id:issue)
+      let checkSkip = []; if (Auth.atLeast(user, 'admin')) { try { checkSkip = JSON.parse(store.getSetting('gear_check_skip', '[]')) || []; } catch (e) { checkSkip = []; } }
+      return send(res, 200, { ok: true, categories: Devices.CATEGORIES, buckets, dupeSkip, checkSkip, devices: devices.list(user).map((d) => ({
         id: d.id, name: d.name, aliases: d.aliases, category: d.category, make: d.make, model: d.model, location: d.location, bucket: d.bucket, kind: d.kind || pk.get(d.id) || '', qty: d.qty || 1, pair_id: d.pair_id, txtype: d.txtype, capsule: d.capsule, freq: d.freq, networked: d.networked, uplink_id: d.networked ? d.uplink_id : null, uplink_port: d.networked ? d.uplink_port : '',
         ips: d.ips, photo: d.photo, marks: d.marks, notes: d.notes, tech_only: d.tech_only, inputs: d.inputs, outputs: d.outputs, files: fileCount.get(d.id) || 0,
-        rack_id: d.rack_id, rack_u: d.rack_u, rack_h: d.rack_h, rack_side: d.rack_side, shelf_id: d.shelf_id, power_w: d.power_w, power_pdu: d.power_pdu, power_outlet: d.power_outlet, power_max: d.power_max })) });
+        rack_id: d.rack_id, rack_u: d.rack_u, rack_h: d.rack_h, rack_side: d.rack_side, shelf_id: d.shelf_id, power_w: d.power_w, power_pdu: d.power_pdu, power_outlet: d.power_outlet, power_max: d.power_max, manual_url: d.manual_url || '' })) });
     }
     if (m === 'GET' && b === 'models') return send(res, 200, { ok: true, models: devices.models(store.getSetting) });
     if (m === 'POST' && b === 'models') { need(user, 'admin'); const body = await readJson(req); return send(res, 200, { ok: true, models: devices.saveModels(body.add, body.remove, user, store.getSetting, store.setSetting) }); }
     if (m === 'PUT' && b === 'buckets') { need(user, 'admin'); const body = await readJson(req); return send(res, 200, { ok: true, buckets: devices.setBuckets(body.buckets, body.renames, user, store.setSetting) }); }
+    if (m === 'PUT' && b === 'check-skip') {
+      need(user, 'admin');
+      const body = await readJson(req);
+      const key = String(body.key || '');
+      if (!/^\d{1,9}:[a-z]{2,12}$/.test(key)) throw new Store.UserError('Bad key');
+      let cur = []; try { cur = JSON.parse(store.getSetting('gear_check_skip', '[]')) || []; } catch (e) { cur = []; }
+      cur = cur.filter((k) => k !== key); if (body.on !== false) cur.push(key);
+      store.setSetting('gear_check_skip', JSON.stringify(cur.slice(-2000)));
+      return send(res, 200, { ok: true, checkSkip: cur });
+    }
     if (m === 'PUT' && b === 'dupe-skip') { need(user, 'admin'); const body = await readJson(req); return send(res, 200, { ok: true, dupeSkip: devices.addDupeSkip(body.ids, user, store.getSetting, store.setSetting) }); }
     if (m === 'POST' && b && /^\d+$/.test(b) && c === 'combine') {
       need(user, 'admin');

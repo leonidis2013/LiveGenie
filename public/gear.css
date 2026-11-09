@@ -107,3 +107,26 @@
 
 /* captions scale with the photo they sit on (--pw, set from its width), not the window: a narrow rack photo got huge titles */
 .spcap { max-width:min(70%, 420px); }
+
+/* Admin › Gear check (0.26.0) */
+.gcsum { padding:14px 16px; }
+.gcbar { height:8px; border-radius:99px; background:var(--inset); overflow:hidden; }
+.gcbar i { display:block; height:100%; background:var(--ok); border-radius:99px; }
+.gcpct { margin:8px 0 10px; color:var(--dim); } .gcpct b { color:var(--fg); font-size:18px; }
+.gcchips { display:flex; flex-wrap:wrap; gap:6px; }
+.gcchip { display:inline-flex; align-items:center; gap:6px; padding:6px 10px; border-radius:99px; border:1px solid var(--line); background:var(--card); font-size:13px; }
+.gcchip em { font-style:normal; font-size:11px; font-weight:800; min-width:18px; padding:1px 6px; border-radius:99px; background:color-mix(in srgb, var(--warn, #e0a03a) 25%, transparent); }
+.gcchip.on { border-color:var(--acc); background:color-mix(in srgb, var(--acc) 14%, var(--card)); }
+.gcchip.zero { opacity:.5; } .gcchip.zero em { background:var(--inset); }
+.gclist { display:flex; flex-direction:column; }
+.gcrow { display:flex; flex-wrap:wrap; gap:8px 12px; align-items:flex-end; padding:10px 0; border-top:1px solid var(--line); }
+.gcrow:first-child { border-top:0; }
+.gcname { flex:1 1 200px; min-width:0; display:flex; flex-direction:column; text-decoration:none; color:inherit; align-self:center; }
+.gcname span { font-size:12px; color:var(--dim); }
+.gcfields { display:flex; flex-wrap:wrap; gap:8px; align-items:flex-end; flex:2 1 320px; }
+.gcf { display:flex; flex-direction:column; gap:3px; flex:1 1 140px; min-width:0; }
+.gcf.sm, .gcf:has(input.sm) { flex:0 1 90px; }
+.gcf em { font-style:normal; font-size:11px; font-weight:700; color:var(--dim); }
+.gcacts { display:flex; gap:6px; align-items:center; }
+.gcnice { align-self:center; font-size:11px; font-weight:700; color:var(--dim); text-transform:uppercase; letter-spacing:.08em; margin-left:8px; }
+.gcchip.on { color:var(--fg); font-weight:700; }

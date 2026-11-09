@@ -4,7 +4,7 @@
 
 The Rolling Hills Community Church AVL knowledge base: one web app where volunteers find how our system works, how to run a service and how to fix what broke. Part of the Live series (LiveMic, LiveCompanion, LivePi, LiveVoice).
 
-Version 0.28.4 · © 2026 Jerod Ulicki
+Version 0.28.5 · © 2026 Jerod Ulicki
 
 ## What it does
 
@@ -123,7 +123,8 @@ Run it on the TrueNAS host and reach it from the AVL and office VLANs through th
 | 0.28.1 | **Auto-arrange reads by console channel:** sources run top to bottom in channel order (wireless on Ch 1–4 sit above wired mics on Ch 5+), and a stage box lists its inputs in channel order too, so cables stay straight. **Smaller cards:** a card with one socket (a mic, a DI, a speaker) shows where it plugs in on its second line ("SB-A In 5 →"), with no extra row |
 | 0.28.2 | **Skewed rack spots:** in Adjust spots each spot has four corners that move on their own, so a highlight can lean with a rack photographed at an angle; drag the shape to move it, snapping still works on corners. Spots on the grid follow the lined-up rails, so they lean with the photo from the start; the spotlight dims around the shape itself |
 | 0.28.3 | **Manuals are uploaded and removed in Edit:** a gear card's page lists its manuals read only (open and download); Upload and Remove live in the card's Edit form |
-| 0.28.4 | **Net sockets only on networked gear:** on the stage patch, gear linked to a Gear Locker card shows a Net socket only when its card is ticked "On the network" (a switch always has one; a network cable already drawn keeps its socket) (this release) |
+| 0.28.4 | **Net sockets only on networked gear:** on the stage patch, gear linked to a Gear Locker card shows a Net socket only when its card is ticked "On the network" (a switch always has one; a network cable already drawn keeps its socket) |
+| 0.28.5 | **Easier to read stage patch:** an **Aa** button by the zoom buttons steps the drawing's text through Normal, Large and Larger (each viewer keeps their own choice; the PDF prints at the size on screen); socket names, cable labels and card subtitles have more contrast (this release) |
 | 0.26.2 | Capsules with quantities: a wireless mic points at its capsule card, so one card (SM58 head ×3) can sit in up to that many mics. The picker shows how many are free and greys out a full one; nothing is ever taken off another mic. The capsule card lists the mics it is in |
 | 0.26.1 | **Manuals uploaded once:** a manual on one card shows on every card of the same make and model ("Same model as RX-1 (SLXD4)"), and any card can be set to **Same manuals as** another card (for close models, like an SLXD4 and an SLXD4D). Gear check counts shared manuals, and can set Same manuals as right there |
 | 0.26.0 | **Admin › Gear check:** every Gear Locker card that is missing something, grouped by what is missing (not plugged into a power strip or sequencer, what it is, make or model, IP address, location, watts, wireless pairing, frequency, inputs and outputs; manual and photo as nice to have), with a completeness score and the fields to fill it right there, one Save per card. **Doesn't apply** hides a card from one check for good |

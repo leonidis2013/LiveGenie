@@ -20,7 +20,11 @@ const PatchView = (() => {
   const KIND_STYLE = { xlr: 'Analog · XLR', link: 'Digital snake', dante: 'Dante · Cat6', usb: 'USB · Thunderbolt', aes: 'AES3', speaker: 'Speaker · NL4', wiem: 'Wired IEM', rf: 'Wireless · RF', net: 'Network · Cat6' };
   /** A short tag for a make: initials for "X & Y" names, the first word of a long one. */
   const makeTag = (m) => { m = String(m || '').trim(); if (/ & /.test(m)) return m.split(/\s*&\s*/).map((w) => w[0] || '').join('&'); return m.length > 10 ? m.split(/\s+/)[0] : m; };
-  const CHW = 7;   // average width of a letter on a card (11.5 px text), for shortening names so they never run into each other
+  let CHW = 7;   // average width of a letter on a card (11.5 px text), for shortening names so they never run into each other
+  /** Text size on the drawing (each viewer picks theirs): letters get bigger, cards keep their size, so long names shorten sooner. */
+  const TEXT_SIZES = [1, 1.15, 1.3];
+  let TS = 1;
+  const setTextSize = (n) => { TS = TEXT_SIZES.includes(n) ? n : 1; CHW = 7 * TS; };
   const cut = (s, n) => { s = String(s || ''); return n < 2 ? '' : s.length > n ? s.slice(0, Math.max(1, n - 1)) + '…' : s; };
   const key = (v) => String(v || '').trim().toLowerCase();
   const snap = (v) => Math.round(v / GRID) * GRID;
@@ -673,7 +677,7 @@ const PatchView = (() => {
     const g = m.g, cat = (P.KINDS[g.kind] || P.KINDS.other).cat;
     const x = p.x, y = p.y, w = m.w, h = m.h;
     const sub = cardSub(doc, ix, m);
-    const chars = Math.floor(w / 8.6);
+    const chars = Math.floor(w / (8.6 * TS));
     const mk = g.make ? cut(makeTag(g.make).toUpperCase(), 10) : '';
     let s = '<g class="pcard cat-' + cat + (m.sys ? ' wsys' : '') + '" data-g="' + g.id + '"' + (m.mem.length ? ' data-m="' + m.mem.map((x) => x.g.id).join(',') + '"' : '') + '>' + sysBox(doc, m, p) +
       '<rect class="cbg" x="' + x + '" y="' + y + '" width="' + w + '" height="' + h + '" rx="10"/>' +
@@ -962,6 +966,7 @@ const PatchView = (() => {
       snap: true, cache: null, drag: null, placeAt: null
     };
     try { st.snap = localStorage.getItem('lg-psnap') !== '0'; } catch (e) { /* private mode */ }
+    try { setTextSize(Number(localStorage.getItem('lg-ptext')) || 1); } catch (e) { setTextSize(1); }
     const canEdit = data.canEdit;
     const wide = () => matchMedia('(min-width: 1024px)').matches;
     app.innerHTML = `<div class="patchv">
@@ -986,7 +991,7 @@ const PatchView = (() => {
         <span class="note" id="psave"></span><span class="grow"></span>
         <span class="note phint">Drag a card to move it · drag the background to pick several (Shift-click adds, Ctrl+A all) · space-drag, right-drag or scroll to pan · drag <b>→</b> onto a card to connect</span></div>
       <div class="pmain"><div class="pcanvas" id="pcv"><svg id="psvg"><g id="pvp"></g><path id="ptmp" class="ptmp" d=""/><rect id="pmq" class="pmq" x="0" y="0" width="0" height="0"/></svg>
-        <div class="pzoom"><button id="pzi" aria-label="Zoom in" data-tip="Zoom in">+</button><button id="pzo" aria-label="Zoom out" data-tip="Zoom out">−</button><button id="pzf" aria-label="Fit" data-tip="Fit">⤢</button></div>
+        <div class="pzoom"><button id="pzi" aria-label="Zoom in" data-tip="Zoom in">+</button><button id="pzo" aria-label="Zoom out" data-tip="Zoom out">−</button><button id="pzf" aria-label="Fit" data-tip="Fit">⤢</button><button id="pzt" class="pzt" aria-label="Text size" data-tip="Text size">Aa</button></div>
         <div class="pkey hide" id="pkey"></div>
         <div class="pselchip hide" id="pselchip"></div>
         <button class="fab padd hide" id="padd" aria-label="Add equipment">${icon('plus')}</button></div>
@@ -1025,7 +1030,10 @@ const PatchView = (() => {
         kinds.map(([k, v]) => '<span class="kk"><svg width="30" height="10"><g class="pe pe-' + k + '"><path class="ln" d="M1 5h27"/></g></svg>' + esc(v) + '</span>').join('') + (wl ? '<span class="kk">' + WL_KEY + 'Wireless system · RF</span>' : '') + '</div>';
       $('#pkt', el).addEventListener('click', () => { try { localStorage.setItem('lg-pkey', el.classList.contains('shut') ? 'open' : 'shut'); } catch (e) { /* private mode */ } paintKey(); });
     }
+    /** Aa: Normal → Large → Larger → Normal. */
+    const paintTextSize = () => { svg.style.setProperty('--pts', String(TS)); const b = $('#pzt'); if (b) { b.dataset.tip = 'Text size: ' + ['Normal', 'Large', 'Larger'][TEXT_SIZES.indexOf(TS)]; b.classList.toggle('on', TS > 1); } };
     function paintDrawing() {
+      paintTextSize();
       D = draw(st.doc, { edit: st.edit, drag: st.drag, cache: st.cache });
       st.cache = D.routes;
       vp.innerHTML = D.svg;
@@ -1184,6 +1192,12 @@ const PatchView = (() => {
     $('#pzi').addEventListener('click', () => { const r = svg.getBoundingClientRect(); zoomAt(1.25, r.left + r.width / 2, r.top + r.height / 2); });
     $('#pzo').addEventListener('click', () => { const r = svg.getBoundingClientRect(); zoomAt(0.8, r.left + r.width / 2, r.top + r.height / 2); });
     $('#pzf').addEventListener('click', () => fit());
+    $('#pzt').addEventListener('click', () => {
+      setTextSize(TEXT_SIZES[(TEXT_SIZES.indexOf(TS) + 1) % TEXT_SIZES.length]);
+      try { localStorage.setItem('lg-ptext', String(TS)); } catch (e) { /* private mode */ }
+      st.cache = null; paintDrawing(); apply();
+      toast('Text size: ' + ['Normal', 'Large', 'Larger'][TEXT_SIZES.indexOf(TS)]);
+    });
 
     // ---------- moving cards: grid, smart guides ----------
     function guidesFor(ids, dx, dy, free) {

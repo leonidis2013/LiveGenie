@@ -2,7 +2,7 @@
  * Admin › Gear check: every Gear Locker card that is missing something, grouped by what is missing, with the fields
  * to fill it right there (one Save per card). "Doesn't apply" hides a card from one check for good (a passive speaker
  * needs no power, a DI has no IP). Checks: power, what it is, make and model, IP, location, watts, wireless pairing,
- * frequency, inputs and outputs, manual, photo.
+ * frequency, inputs and outputs, software (computers), manual, photo.
  */
 const GEAR_CHECKS = [
   { id: 'power', label: 'Not plugged in', why: 'Gear in a rack, or gear that needs power, with no power strip or sequencer outlet set.' },
@@ -14,15 +14,16 @@ const GEAR_CHECKS = [
   { id: 'watts', label: 'Watts', why: 'Plugged into a strip, but how much power it draws is not set, so the strip total is short.' },
   { id: 'pair', label: 'Not paired', why: 'A wireless mic or in-ear pack with no receiver or transmitter.' },
   { id: 'freq', label: 'Frequency', why: 'A wireless mic or in-ear pack with no frequency.' },
-  { id: 'io', label: 'Inputs and outputs', why: 'A console, stage box, receiver, processor or amp with no inputs or outputs set.' },
+  { id: 'io', label: 'Inputs and outputs', why: 'A console, stage box, audio interface, receiver, processor or amp with no inputs or outputs set.' },
   // nice to have: shown, but not counted against "complete"
+  { id: 'software', label: 'Software', extra: true, why: 'A computer with no software listed (LiveProfessor, OBS, ProPresenter…), so the stage patch cannot say what it runs.' },
   { id: 'manual', label: 'Manual', extra: true, why: 'No manual uploaded and no manufacturer page.' },
   { id: 'photo', label: 'Photo', extra: true, why: 'No photo of its own, and not in a rack with a photo.' }
 ];
 /** Gear that plugs into the wall. Mics, capsules, packs (batteries), passive DIs and most speakers do not. */
 const NEEDS_POWER = ['console', 'stagebox', 'receiver', 'iemtx', 'processor', 'amp', 'network', 'computer', 'headamp'];
 const qtyOfCard = (d) => (['txmic', 'receiver', 'iemtx', 'bodypack'].includes(d.kind) ? 1 : Math.max(1, Number(d.qty) || 1));
-const NEEDS_IO = ['console', 'stagebox', 'receiver', 'processor', 'amp', 'iemtx'];
+const NEEDS_IO = ['console', 'stagebox', 'interface', 'receiver', 'processor', 'amp', 'iemtx'];
 
 /** What each card is missing (issue ids), not counting ones marked "doesn't apply". */
 function gearIssues(d, ctx) {
@@ -40,6 +41,7 @@ function gearIssues(d, ctx) {
   add('pair', wireless && !d.pair_id);
   add('freq', wireless && !d.freq);
   add('io', NEEDS_IO.includes(d.kind) && !Number(d.inputs) && !Number(d.outputs));
+  add('software', d.kind === 'computer' && !(d.software || []).length);
   add('manual', !d.files && !d.files_shared && !d.manual_url && d.kind !== 'capsule');
   add('photo', !d.photo && !(d.rack_id && ctx.rackPhoto.has(d.rack_id)));
   return out;
@@ -96,6 +98,7 @@ async function tabGearCheck(pane, pick) {
     }
     if (id === 'freq') return f('freq', 'Frequency (MHz)', '', 'placeholder="518.200" inputmode="decimal"');
     if (id === 'io') return f('inputs', 'Inputs', d.inputs || '', 'type="number" min="0" max="512" class="sm"') + f('outputs', 'Outputs', d.outputs || '', 'type="number" min="0" max="512" class="sm"');
+    if (id === 'software') return f('software', 'Software (comma between)', '', 'list="gcsw" placeholder="LiveProfessor, OBS"') + '<datalist id="gcsw">' + (typeof PatchCore !== 'undefined' ? PatchCore.SOFTWARE : []).map((x) => '<option value="' + esc(x) + '">').join('') + '</datalist>';
     if (id === 'manual') return '<label class="gcf"><em>Same manuals as</em><select data-f="manual_from"><option value="">—</option>' + list.filter((x) => x.id !== d.id && (x.files || x.manual_url)).map((x) => '<option value="' + x.id + '">' + esc(tm(x)) + '</option>').join('') + '</select></label>' + f('manual_url', 'or a manufacturer page', '', 'type="url" placeholder="https://…"') + '<a class="btn sm" href="#/d/' + d.id + '/edit">Upload a manual</a>';
     if (id === 'photo') return '<a class="btn sm" href="#/d/' + d.id + '/edit">' + icon('image') + 'Add a photo</a>' + (d.rack_id ? '' : '<span class="note">or put it in a rack that has a photo</span>');
     return '';
@@ -129,6 +132,7 @@ async function tabGearCheck(pane, pick) {
         if (ch.pair_id) body.pair_id = Number(ch.pair_id);
         if (ch.freq) body.freq = ch.freq;
         if (ch.inputs !== undefined) body.inputs = Number(ch.inputs) || 0; if (ch.outputs !== undefined) body.outputs = Number(ch.outputs) || 0;
+        if (ch.software) body.software = ch.software.split(',').map((x) => x.trim()).filter(Boolean);
         if (ch.manual_url) body.manual_url = ch.manual_url;
         if (ch.manual_from) body.manual_from = Number(ch.manual_from);
         await call('PUT', '/api/devices/' + d.id, body);

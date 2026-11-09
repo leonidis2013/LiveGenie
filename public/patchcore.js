@@ -29,7 +29,7 @@
     net: { label: 'Network', color: '#6f6cf6' }
   };
   const CABLES = {
-    xlr: { label: 'Analog · XLR' }, link: { label: 'Digital snake · SLink, AES50' }, dante: { label: 'Dante · Cat6' }, aes: { label: 'AES3 · 110 Ω' },
+    xlr: { label: 'Analog · XLR' }, link: { label: 'Digital snake · SLink, AES50' }, dante: { label: 'Dante · Cat6' }, usb: { label: 'USB · Thunderbolt' }, aes: { label: 'AES3 · 110 Ω' },
     speaker: { label: 'Speaker · NL4' }, wiem: { label: 'Wired IEM' }, rf: { label: 'Wireless · RF' }, net: { label: 'Network · Cat6' }
   };
   const nums = (prefix, k) => Array.from({ length: Math.max(0, Math.min(128, Number(k) || 0)) }, (_, i) => prefix + (i + 1));
@@ -49,7 +49,8 @@
     stagebox: { label: 'Stage box', col: 2, cat: 'io', ports: (g) => ({ ins: nums('In ', g.nin || 16), outs: nums('Out ', g.nout || 8) }), fields: ['model'], counts: 'both', link: true, card: true },
     network: { label: 'Network switch', col: 3, cat: 'net', ports: () => ({ ins: [], outs: [] }), fields: ['model'], counts: 'ports', link: true, card: true },
     console: { label: 'Console', col: 4, cat: 'console', ports: (g) => ({ ins: nums('In ', g.nin || 16), outs: nums('Out ', g.nout || 12) }), fields: ['model', 'localstart', 'mixes'], counts: 'both', link: true, card: true },
-    computer: { label: 'Computer · recorder', col: 4, cat: 'computer', ports: (g) => ({ ins: nums('In ', g.nin || 2), outs: nums('Out ', g.nout || 2) }), fields: ['model', 'use'], counts: 'both', link: true },
+    computer: { label: 'Computer', col: 4, cat: 'computer', ports: (g) => ({ ins: nums('In ', g.nin || 0), outs: nums('Out ', g.nout || 0) }), fields: ['model', 'use', 'software'], counts: 'both', link: true, card: true },
+    interface: { label: 'Audio interface', col: 2, cat: 'computer', ports: (g) => ({ ins: nums('In ', g.nin == null ? 2 : g.nin), outs: nums('Out ', g.nout == null ? 2 : g.nout) }), fields: ['model'], counts: 'both', link: true, card: true },
     processor: { label: 'Speaker processor', col: 5, cat: 'pa', ports: (g) => ({ ins: g.nin === 1 ? ['In'] : Array.from({ length: Math.min(8, g.nin || 2) }, (_, i) => 'In ' + 'ABCDEFGH'[i]), outs: nums('Out ', g.nout || 6) }), fields: ['model'], counts: 'both', pass: 'all', card: true },
     amp: { label: 'Amplifier', col: 6, cat: 'pa', ports: (g) => { const c = ['Ch A', 'Ch B', 'Ch C', 'Ch D'].slice(0, g.nin || 2); return { ins: c, outs: c.slice() }; }, fields: ['model'], counts: 'ch', pass: 'same', card: true },
     iemtx: { label: 'IEM transmitter', col: 6, cat: 'iem', ports: (g) => ({ ins: g.mode === 'Mono' ? ['In'] : ['L', 'R'], outs: ['RF'] }), fields: ['model', 'mode', 'freq'], counts: false, pass: 'rf', card: true },
@@ -59,18 +60,22 @@
     bodypack: { label: 'IEM pack', col: 7, cat: 'iem', ports: () => ({ ins: ['RF'], outs: [] }), fields: ['use', 'person', 'model', 'phones'], counts: false, member: 'iemtx' },
     other: { label: 'Other', col: 4, cat: 'computer', ports: (g) => ({ ins: nums('In ', g.nin == null ? 1 : g.nin), outs: nums('Out ', g.nout == null ? 1 : g.nout) }), fields: ['model', 'use'], counts: 'both', pass: 'all' }
   };
-  const FIELD_LABELS = { use: 'Used for', person: 'Who uses it', txtype: 'Transmitter type', capmake: 'Capsule make', model: 'Model', capsule: 'Capsule', freq: 'Frequency', mode: 'Mode', phones: 'Earphones', start: 'Console input for In 1', localstart: 'Channel for local In 1', mixes: 'Mixes' };
+  const FIELD_LABELS = { use: 'Used for', person: 'Who uses it', txtype: 'Transmitter type', capmake: 'Capsule make', model: 'Model', capsule: 'Capsule', freq: 'Frequency', mode: 'Mode', phones: 'Earphones', start: 'Console input for In 1', localstart: 'Channel for local In 1', mixes: 'Mixes', software: 'Software', usbch: 'USB audio channels' };
+  /** Software people run on a computer at church (suggestions; anything can be typed). */
+  const SOFTWARE = ['LiveProfessor', 'OBS', 'ProPresenter', 'Bitfocus Companion', 'Dante Virtual Soundcard', 'Dante Controller', 'Reaper', 'Waves SuperRack', 'vMix'];
+  const USB_TYPES = ['USB', 'Thunderbolt', 'USB-C'];
+  const chn = (v) => (Number(v) >= 0 && Number.isFinite(Number(v)) ? Math.min(256, Math.floor(Number(v))) : null);
 
   /**
    * The signal stage each kind sits in, left to right: sources, stage I/O, console, processing, amps, outputs.
    * Network gear (switches, computers) has its own lane ('net').
    */
   const STAGES = ['Sources', 'Stage I/O', 'Console', 'Processing', 'Amps', 'Outputs'];
-  const STAGE_OF = { mic: 0, di: 0, source: 0, txmic: 0, receiver: 0, stagebox: 1, console: 2, processor: 3, other: 3, amp: 4, headamp: 4, speaker: 5, wedge: 5, iemtx: 5, bodypack: 5, network: 'net', computer: 'net' };
+  const STAGE_OF = { mic: 0, di: 0, source: 0, txmic: 0, receiver: 0, stagebox: 1, console: 2, processor: 3, other: 3, amp: 4, headamp: 4, speaker: 5, wedge: 5, iemtx: 5, bodypack: 5, network: 'net', computer: 'net', interface: 1 };
   const stageOf = (g) => (STAGE_OF[g && g.kind] != null ? STAGE_OF[g.kind] : 3);
 
   /** Kinds in the order the "New gear" form offers them. Makes and models come from the team's own list (it starts empty). */
-  const KIND_ORDER = ['console', 'stagebox', 'receiver', 'txmic', 'mic', 'di', 'source', 'iemtx', 'bodypack', 'headamp', 'processor', 'amp', 'speaker', 'wedge', 'network', 'computer', 'other'];
+  const KIND_ORDER = ['console', 'stagebox', 'receiver', 'txmic', 'mic', 'di', 'source', 'iemtx', 'bodypack', 'headamp', 'processor', 'amp', 'speaker', 'wedge', 'network', 'computer', 'interface', 'other'];
 
   const str = (v, n) => String(v == null ? '' : v).slice(0, n || 200);
   const key = (v) => String(v || '').trim().toLowerCase();
@@ -119,6 +124,9 @@
       g.outs = (Array.isArray(g0.outs) ? g0.outs : portsFor(g0).outs).slice(0, 128).map((x) => str(x, 24));
       g.feeds = {};
       if (g0.feeds && typeof g0.feeds === 'object') for (const [k, v] of Object.entries(g0.feeds)) if (Number(k) >= 0 && Number(k) < g.outs.length && String(v || '').trim()) g.feeds[Number(k)] = str(v, 40).trim();
+      if (g0.kind === 'computer' && Array.isArray(g0.software)) { const sw = [...new Set(g0.software.map((x) => str(x, 40).trim()).filter(Boolean))].slice(0, 20); if (sw.length) g.software = sw; }
+      if (g0.kind === 'console' && Number(g0.usbch) >= 1) g.usbch = Math.min(256, Math.floor(Number(g0.usbch)));
+      if (g0.kind === 'computer' && Array.isArray(g0.routes)) g._routes = g0.routes.slice(0, 64);
       if (g.kind === 'stagebox') {
         g.chmap = {};
         if (g0.chmap && typeof g0.chmap === 'object') for (const [k, v] of Object.entries(g0.chmap)) if (Number(k) >= 0 && Number(k) < g.ins.length && Number(v) >= 1) g.chmap[Number(k)] = Math.min(512, Math.floor(Number(v)));
@@ -145,6 +153,8 @@
         const nc = { id: nid, a: a.id, ap: 'net', b: b.id, bp: 'net', kind: 'net' };
         if (port) nc.port = port;
         for (const f of ['label', 'length', 'notes']) if (c0[f] != null && String(c0[f]).trim()) nc[f] = str(c0[f], f === 'notes' ? 500 : 60).trim();
+        // a computer on Dante (a virtual soundcard): how many channels each way, and where they go
+        if (a.kind === 'computer') audioFields(c0, nc, true);
         out.cables.push(nc);
         continue;
       }
@@ -159,8 +169,11 @@
       let id = str(c0.id, 24).replace(/[^\w-]/g, '');
       if (!id || cids.has(id)) id = 'c' + Math.random().toString(36).slice(2, 9);
       cids.add(id);
-      const c = { id, a: a.id, ap, b: b.id, bp, kind: CABLES[c0.kind] && c0.kind !== 'net' ? c0.kind : guessCable(a, ap, b, bp) };
+      let kind = CABLES[c0.kind] && c0.kind !== 'net' ? c0.kind : guessCable(a, ap, b, bp);
+      if (kind === 'usb' && !usbOk(a, ap, b, bp)) kind = guessCable(a, ap, b, bp);
+      const c = { id, a: a.id, ap, b: b.id, bp, kind };
       for (const f of ['label', 'length', 'notes']) if (c0[f] != null && String(c0[f]).trim()) c[f] = str(c0[f], f === 'notes' ? 500 : 60).trim();
+      if ((kind === 'usb' || kind === 'dante') && ap === 'link' && (a.kind === 'computer' || b.kind === 'computer')) audioFields(c0, c, kind === 'dante');
       out.cables.push(c);
     }
     // an older stage box said "In 1 is console input N": its used inputs keep their channels, the rest stay free to assign
@@ -168,12 +181,48 @@
       g.ins.forEach((_, i) => { if (out.cables.some((c) => c.b === g.id && c.bp === i)) g.chmap[i] = g._start + i; });
       delete g._start;
     }
+    // a computer's routes: audio in on one of its links, through an app, out on another (or ending in the app)
+    for (const g of out.gear) if (g._routes) {
+      const mine = new Set(out.cables.filter((c) => (c.a === g.id || c.b === g.id) && isAudio(c)).map((c) => c.id));
+      const rs = [];
+      for (const r0 of g._routes) {
+        if (!r0 || !mine.has(r0.fc)) continue;
+        const fs = Math.max(1, Math.floor(Number(r0.fs)) || 1), fe = Math.max(fs, Math.min(fs + 127, Math.floor(Number(r0.fe)) || fs));
+        const r = { fc: r0.fc, fs, fe };
+        if (str(r0.app, 40).trim()) r.app = str(r0.app, 40).trim();
+        if (r0.tc && mine.has(r0.tc)) { r.tc = r0.tc; r.ts = Math.max(1, Math.floor(Number(r0.ts)) || 1); }
+        rs.push(r);
+      }
+      delete g._routes;
+      if (rs.length) g.routes = rs;
+    }
+    for (const g of out.gear) delete g._routes;
     return out;
+  }
+  /** Channel counts on a USB or Dante link to a computer: chin = to the computer, chout = from it; ret = console channel the first return lands on. */
+  function audioFields(c0, c, dante) {
+    const i = chn(c0.chin), o = chn(c0.chout);
+    if (i != null) c.chin = i; if (o != null) c.chout = o;
+    if (Number(c0.ret) >= 1) c.ret = Math.min(512, Math.floor(Number(c0.ret)));
+    if (Number(c0.snd) > 1) c.snd = Math.min(512, Math.floor(Number(c0.snd)));
+    if (!dante && USB_TYPES.includes(c0.usbtype)) c.usbtype = c0.usbtype;
+    if (dante && c0.dto && typeof c0.dto === 'string') c.dto = str(c0.dto, 24).replace(/[^\w-]/g, '');
+  }
+  /** A cable that carries a computer's audio: USB, a Dante link, or its network cable once it has Dante channels. */
+  const isAudio = (c) => c.kind === 'usb' || (c.kind === 'dante' && c.ap === 'link') || (c.ap === 'net' && (c.chin > 0 || c.chout > 0));
+  /** A USB or Thunderbolt cable joins a computer to an audio interface or a console (or two computers). */
+  function usbOk(a, ap, b, bp) {
+    if (ap !== 'link' || bp !== 'link') return false;
+    const k = [a.kind, b.kind];
+    return k.includes('computer') && k.every((x) => x === 'computer' || x === 'interface' || x === 'console');
   }
 
   /** The cable type a new connection most likely is. */
   function guessCable(a, ap, b, bp) {
-    if (ap === 'link' || bp === 'link') return (a.kind === 'network' || b.kind === 'network') ? 'dante' : 'link';
+    if (ap === 'link' || bp === 'link') {
+      if (usbOk(a, ap, b, bp)) return 'usb';
+      return (a.kind === 'network' || b.kind === 'network' || a.kind === 'computer' || b.kind === 'computer') ? 'dante' : 'link';
+    }
     if (a.kind === 'txmic' || a.kind === 'iemtx') return 'rf';
     if (a.kind === 'amp' && (b.kind === 'speaker' || b.kind === 'wedge')) return 'speaker';
     if (a.kind === 'headamp') return 'wiem';
@@ -193,6 +242,8 @@
     const g = { id: uid('g'), kind, name: uniqueName(doc, String(item.name || item.model || KINDS[kind].label).trim()) };
     for (const f of ['make', 'model', 'group', 'use', 'person', 'txtype', 'capsule', 'capmake', 'freq', 'mode', 'phones', 'notes', 'localstart', 'device_id', 'x', 'y', 'chname', 'chcolor', 'namelen']) if (item[f] != null && item[f] !== '') g[f] = item[f];
     if (Array.isArray(item.colors) && item.colors.length) g.colors = item.colors.slice();
+    if (kind === 'computer' && Array.isArray(item.software) && item.software.length) g.software = item.software.map(String).filter(Boolean).slice(0, 20);
+    if (kind === 'console' && Number(item.usbch) >= 1) g.usbch = Math.min(256, Math.floor(Number(item.usbch)));
     if (item.spare && (kind === 'txmic' || kind === 'bodypack')) g.spare = true;
     if (kind === 'console') g.mixes = (item.mixes || DEFAULT_MIXES).slice();
     if (kind === 'iemtx' && !g.mode) g.mode = 'Stereo';
@@ -277,6 +328,13 @@
     else doc.cables = doc.cables.filter((c) => !(c.a === a.id && c.b === b.id && c.ap === 'link' && c.bp === 'link'));
     const c = { id: uid('c'), a: a.id, ap, b: b.id, bp, kind: (extra && extra.kind) || guessCable(a, ap, b, bp) };
     if (extra) for (const f of ['label', 'length', 'notes']) if (extra[f]) c[f] = extra[f];
+    if (c.kind === 'usb' && !usbOk(a, ap, b, bp)) c.kind = guessCable(a, ap, b, bp);
+    if (c.kind === 'usb' || (c.kind === 'dante' && (a.kind === 'computer' || b.kind === 'computer'))) {
+      // channel counts start from the far end: an interface's sockets, or the console's USB audio channels
+      const end = a.kind === 'computer' ? b : a;
+      const d = end.kind === 'interface' ? { chin: end.ins.length, chout: end.outs.length } : end.kind === 'console' && end.usbch ? { chin: end.usbch, chout: end.usbch } : c.kind === 'usb' ? { chin: 2, chout: 2 } : {};
+      audioFields({ ...d, usbtype: 'USB', ...(extra || {}) }, c, c.kind === 'dante');
+    }
     doc.cables.push(c);
     return c;
   }
@@ -331,7 +389,47 @@
       const l = (links.get(a) || []).find((x) => x.other === b) || (links.get(a) || []).find((x) => G.get(x.other) && G.get(x.other).kind === 'network');
       return l ? (l.c.label || CABLES[l.c.kind].label.split(' · ')[0]) : '';
     };
-    return { G, into, from, links, consolesOf, linkName };
+    // a computer's audio links: USB to an interface or console, Dante over a link or its network cable
+    const audio = new Map(), audioBy = new Map(), audioAt = new Map();
+    for (const c of doc.cables) {
+      if (!isAudio(c)) continue;
+      const A = G.get(c.a), B = G.get(c.b); if (!A || !B) continue;
+      const comp = A.kind === 'computer' ? A : B.kind === 'computer' ? B : null;
+      if (!comp) continue;
+      let end = comp === A ? B : A;
+      if (c.ap === 'net' || end.kind === 'network') end = danteEnd(doc, G, links, c, comp);
+      const how = c.kind === 'usb' ? (c.usbtype && c.usbtype !== 'USB-C' ? c.usbtype : 'USB') : 'Dante';
+      const L = { c, comp, end, how, chin: c.chin != null ? c.chin : c.kind === 'usb' ? 2 : 0, chout: c.chout != null ? c.chout : c.kind === 'usb' ? 2 : 0 };
+      if (!audio.has(comp.id)) audio.set(comp.id, []); audio.get(comp.id).push(L);
+      audioBy.set(c.id, L);
+      if (end) { if (!audioAt.has(end.id)) audioAt.set(end.id, []); audioAt.get(end.id).push(L); }
+    }
+    return { G, into, from, links, consolesOf, linkName, audio, audioBy, audioAt };
+  }
+  /**
+   * Where a computer's Dante channels go: the gear picked on the cable ("Dante to"), or the one console (else stage box)
+   * on the same network. null when there is no single obvious one.
+   */
+  function danteEnd(doc, G, links, c, comp) {
+    if (c.dto && G.get(c.dto) && G.get(c.dto) !== comp) return G.get(c.dto);
+    const cands = danteCandidates(doc, G, links, c, comp);
+    const cons = cands.filter((g) => g.kind === 'console');
+    if (cons.length === 1) return cons[0];
+    if (!cons.length && cands.length === 1) return cands[0];
+    return null;
+  }
+  /** Consoles and stage boxes on the same Dante network as a computer's cable. */
+  function danteCandidates(doc, G, links, c, comp) {
+    const sw = G.get(c.a === comp.id ? c.b : c.a);
+    if (!sw || sw.kind !== 'network') return [];
+    const seen = new Set([sw.id]), out = new Map(), q = [sw.id];
+    const ok = (g) => g && g !== comp && (g.kind === 'console' || g.kind === 'stagebox');
+    while (q.length) {
+      const id = q.shift();
+      for (const { other } of links.get(id) || []) { const g = G.get(other); if (!g || seen.has(other)) continue; seen.add(other); if (ok(g)) out.set(g.id, g); else if (g.kind === 'network') q.push(other); }
+      for (const x of doc.cables) if (x.ap === 'net' && x.b === id) { const g = G.get(x.a); if (ok(g)) out.set(g.id, g); }
+    }
+    return [...out.values()];
   }
 
   /** What feeds an input socket, walked back to where the sound starts. */
@@ -345,10 +443,125 @@
       if (g.kind === 'receiver') { r.receiver = g; r.rxch = g.ins[c.ap] || ''; c = ix.into.get(g.id + ':' + c.ap); continue; }
       if (g.kind === 'txmic') { r.tx = g; r.src = g; r.source = g.use || ''; r.person = g.person || ''; r.mic = g.name; r.capsule = g.capsule || ''; r.freq = g.freq || ''; break; }
       if (g.kind === 'mic' || g.kind === 'di' || g.kind === 'source') { r.source = g.use || (g.kind === 'source' ? g.name : ''); r.mic = (g.model && g.model !== g.name ? g.model : g.name) + (g.outs.length > 1 ? ' ' + g.outs[c.ap] : ''); r.model = g.model || ''; r.person = g.person || ''; r.src = g; break; }
+      if (g.kind === 'interface') {
+        // an interface output plays what a computer sends back over USB
+        const j = c.ap + 1;
+        const L = (ix.audioAt.get(g.id) || []).find((x) => j <= x.chout && routeOut(x.comp, x.c.id, j));
+        if (L) { const u = returnUp(pcBack(doc, ix, L, j, 1)); r.chain = u.chain.concat(r.chain); Object.assign(r, { source: u.source, person: u.person, mic: u.mic, pc: u.pc, orig: u.orig }); }
+        else { r.source = r.source || g.name; r.mic = r.mic || g.name; }
+        break;
+      }
       if (g.kind === 'amp' || g.kind === 'processor' || g.kind === 'other' || g.kind === 'computer') { r.source = r.source || g.name; r.mic = r.mic || g.name; break; }
       break;
     }
     return r;
+  }
+
+  // ---------- through a computer ----------
+  /*
+   * A computer's audio travels on its links (ix.audio): USB n to the computer carries an interface's In n, or a console's
+   * channel (n + snd - 1); USB n from the computer plays on the interface's Out n, or lands on console channel (ret + n - 1).
+   * Dante links work the same way. Routes say what the computer does in between: link channels in, through an app, out on a link.
+   * A channel with no route (or a route with no way out) ends in the computer: recorded or streamed.
+   */
+  const routeIn = (comp, cid, ch) => (comp.routes || []).find((r) => r.fc === cid && ch >= r.fs && ch <= r.fe) || null;
+  const routeOut = (comp, cid, ch) => (comp.routes || []).find((r) => r.tc === cid && ch >= r.ts && ch <= r.ts + (r.fe - r.fs)) || null;
+  /** "USB 1-2" */
+  const linkCh = (L, a, b) => (L ? L.how : '?') + ' ' + (b != null && b > a ? a + '-' + b : a);
+  /** What a link channel to the computer starts as: a console channel, or an interface or stage box input (socket index). */
+  const sendOf = (L, ch) => (L.end && L.end.kind === 'console' ? { chan: ch + (L.c.snd || 1) - 1 } : { inp: ch - 1 });
+  /** Where a link channel from the computer lands: a console channel, or an interface or stage box output (socket index). */
+  function arrive(L, ch) {
+    if (!L.end) return null;
+    if (L.end.kind === 'console') return { g: L.end, chan: L.c.ret ? L.c.ret + ch - 1 : null };
+    return { g: L.end, out: ch - 1 < L.end.outs.length ? ch - 1 : null };
+  }
+  /**
+   * Audio leaving gear `end` into a computer: a console channel (end is a console) or input socket ch-1 (an interface
+   * or stage box). One step per link it is on: { L, ch, comp, app, to, toCh, at, next }.
+   */
+  function pcForward(doc, ix, end, ch, depth) {
+    depth = depth || 0;
+    const out = [];
+    if (!end || depth > 4) return out;
+    for (const L of ix.audioAt.get(end.id) || []) {
+      const lc = end.kind === 'console' ? ch - (L.c.snd || 1) + 1 : ch;
+      if (lc < 1 || lc > L.chin) continue;
+      const r = routeIn(L.comp, L.c.id, lc);
+      const st = { L, ch: lc, comp: L.comp, app: (r && r.app) || '', routed: !!r, next: [] };
+      if (r && r.tc) {
+        const L2 = ix.audioBy.get(r.tc), ch2 = r.ts + (lc - r.fs);
+        if (L2 && ch2 <= L2.chout) {
+          st.to = L2; st.toCh = ch2; st.at = arrive(L2, ch2);
+          if (st.at && st.at.chan) st.next = pcForward(doc, ix, L2.end, st.at.chan, depth + 1);
+        }
+      }
+      out.push(st);
+    }
+    return out;
+  }
+  /** "USB 1 → MacBook (LiveProfessor) → USB 1 → SQ-5 ch 33"; a channel with no way out ends in its app. */
+  function forwardText(steps) {
+    return steps.map((s) => linkCh(s.L, s.ch) + ' → ' + s.comp.name + (s.app ? ' (' + s.app + ')' : '') +
+      (s.to ? ' → ' + linkCh(s.to, s.toCh) + (s.at ? ' → ' + s.at.g.name + (s.at.chan ? ' ch ' + s.at.chan : s.at.out != null ? ' ' + s.at.g.outs[s.at.out] : s.at.g.kind === 'console' ? ' (no channel set)' : '') : '') + (s.next.length ? ' → ' + forwardText(s.next) : '')
+        : ' · ' + (s.app ? 'recorded / streamed in ' + s.app : 'ends here'))).join('; ');
+  }
+  /** Where a channel from the computer (fromPC ch on link L) comes from: the route and what is on the channel it takes. */
+  function pcBack(doc, ix, L, ch, depth) {
+    const r = routeOut(L.comp, L.c.id, ch);
+    if (!r) return null;
+    const L1 = ix.audioBy.get(r.fc), ch1 = r.fs + (ch - r.ts);
+    const res = { app: r.app || '', comp: L.comp, from: L1, ch: ch1, to: L, toCh: ch, up: { chain: [] } };
+    if (L1 && L1.end && (depth || 0) < 4) {
+      const s = sendOf(L1, ch1);
+      res.up = s.chan != null ? channelUp(doc, ix, L1.end, s.chan, (depth || 0) + 1) : upstream(doc, ix, L1.end.id, s.inp);
+      res.at = s.chan != null ? L1.end.name + ' ch ' + s.chan : L1.end.name + ' ' + (L1.end.ins[s.inp] || 'In ' + ch1);
+    }
+    return res;
+  }
+  /** What is on a console channel: a stage box input, a local input, or a computer's return. */
+  function channelUp(doc, ix, con, ch, depth) {
+    for (const sb of doc.gear.filter((g) => g.kind === 'stagebox' && ix.consolesOf(g.id).includes(con))) {
+      const i = sb.ins.findIndex((_, k) => chanOf(sb, k) === ch);
+      if (i >= 0) { const u = upstream(doc, ix, sb.id, i); if (u.chain.length) u.chain = u.chain.concat([sb]); return u; }
+    }
+    const i = ch - (con.localstart || 1);
+    if (i >= 0 && i < con.ins.length && ix.into.get(con.id + ':' + i)) return upstream(doc, ix, con.id, i);
+    if ((depth || 0) < 4) for (const L of ix.audioAt.get(con.id) || []) if (L.c.ret && ch >= L.c.ret && ch < L.c.ret + L.chout) {
+      const b = pcBack(doc, ix, L, ch - L.c.ret + 1, (depth || 0) + 1);
+      if (b) return returnUp(b);
+    }
+    return { chain: [] };
+  }
+  /** An upstream() result for audio coming back from a computer. */
+  function returnUp(b) {
+    if (!b) return { chain: [] };
+    const o = b.up || { chain: [] };
+    const what = o.source || o.mic || b.at || linkCh(b.from, b.ch);
+    return { chain: o.chain.concat(b.from && b.from.end ? [b.from.end] : [], [b.comp]), source: what + (b.app ? ' · via ' + b.app : ' · via ' + b.comp.name), person: o.person || '', mic: o.mic || '', orig: o.src || o.orig || null, pc: b };
+  }
+  /** A route as words: "USB 1-2 → LiveProfessor → USB 1-2", or "USB 1-8 → OBS" when it ends there. */
+  function routeText(ix, r) {
+    const a = ix.audioBy.get(r.fc), b = r.tc ? ix.audioBy.get(r.tc) : null;
+    const n = r.fe - r.fs;
+    const end = (L) => (L && L.end ? ' (' + L.end.name + ')' : '');
+    return linkCh(a, r.fs, r.fe) + end(a) + ' → ' + (r.app || 'computer') + (b ? ' → ' + linkCh(b, r.ts, r.ts + n) + end(b) : '');
+  }
+  /** "USB · 18 in / 20 out", "NET · Dante 16/16": what a computer's audio link carries. */
+  function audioLabel(L) {
+    if (!L) return '';
+    if (L.c.ap === 'net') return 'NET · Dante ' + L.chin + '/' + L.chout;
+    if (L.how === 'Dante') return 'Dante ' + L.chin + '/' + L.chout;
+    return (L.c.usbtype === 'Thunderbolt' ? 'TB' : 'USB') + ' · ' + L.chin + ' in / ' + L.chout + ' out';
+  }
+  /** Every computer with its software, audio links and routes (for the panes and the PDF). */
+  function computers(doc) {
+    const ix = index(doc);
+    return doc.gear.filter((g) => g.kind === 'computer' || g.kind === 'interface').map((g) => ({
+      g, software: g.software || [],
+      links: g.kind === 'computer' ? (ix.audio.get(g.id) || []).map((L) => ({ L, text: audioLabel(L), to: L.end ? L.end.name : '' })) : (ix.audioAt.get(g.id) || []).map((L) => ({ L, text: audioLabel(L), to: L.comp.name })),
+      routes: (g.routes || []).map((r) => routeText(ix, r))
+    }));
   }
 
   /** Everything a socket feeds, followed through processors and amps to the speakers or IEM packs. */
@@ -384,6 +597,11 @@
         const u = upstream(doc, ix, con.id, i);
         if (u.chain.length) rows.push({ console: con, ch: ls + i, via: con, port: 'Local ' + p, link: '', up: u, used: true });
       });
+      // what computers send back: a return channel with a route lands on a console channel (ret on its cable)
+      for (const L of ix.audioAt.get(con.id) || []) for (let j = 1; j <= L.chout; j++) {
+        const b = pcBack(doc, ix, L, j, 0);
+        if (b) rows.push({ console: con, ch: L.c.ret ? L.c.ret + j - 1 : null, via: L.comp, port: L.how + ' ' + j, link: L.how, up: returnUp(b), used: true, pc: L });
+      }
     }
     rows.sort((a, b) => a.console.name.localeCompare(b.console.name) || (a.ch == null) - (b.ch == null) || (a.ch || 0) - (b.ch || 0));
     return rows;
@@ -563,7 +781,16 @@
       if (s.chname && con.namelen && s.chname.length > con.namelen) out.push({ level: 'warn', text: con.name + ' ch ' + (r.ch == null ? '?' : r.ch) + ': "' + s.chname + '" is ' + s.chname.length + ' letters; the ' + con.name + ' shows ' + con.namelen + '.', gear: [s.id] });
       if (s.chcolor && con.colors && !con.colors.some((c) => key(c) === key(s.chcolor))) out.push({ level: 'warn', text: con.name + ' ch ' + (r.ch == null ? '?' : r.ch) + ': ' + s.chcolor + ' is not one of the ' + con.name + "'s colours.", gear: [s.id] });
     });
-    ins.filter((r) => r.used && r.ch == null).forEach((r) => out.push({ level: 'warn', text: r.via.name + ' ' + r.port + (r.up.source ? ' (' + r.up.source + ')' : '') + ' is not on a ' + r.console.name + ' channel yet. Assign it on the stage box.', gear: [r.via.id] }));
+    ins.filter((r) => r.used && r.ch == null && r.pc).forEach((r) => out.push({ level: 'warn', text: r.via.name + ' ' + r.port + ' back to ' + r.console.name + ' (' + r.up.source + ') lands on no channel yet. Set "Returns on channel" on its ' + r.pc.how + ' cable.', gear: [r.via.id, r.console.id] }));
+    for (const g of doc.gear.filter((x) => x.kind === 'computer')) {
+      for (const L of ix.audio.get(g.id) || []) if (!L.end) out.push({ level: 'note', text: g.name + ' is on Dante (' + L.chin + '/' + L.chout + '): which console or stage box are its channels with? Set "Dante to" on its network cable.', gear: [g.id] });
+      for (const r of g.routes || []) {
+        const a = ix.audioBy.get(r.fc), b = r.tc && ix.audioBy.get(r.tc);
+        if (a && r.fe > a.chin) out.push({ level: 'warn', text: g.name + ': ' + routeText(ix, r) + ' uses ' + a.how + ' ' + r.fe + ', but the link carries ' + a.chin + ' channels to it.', gear: [g.id] });
+        if (b && r.ts + (r.fe - r.fs) > b.chout) out.push({ level: 'warn', text: g.name + ': ' + routeText(ix, r) + ' sends past ' + b.how + ' ' + b.chout + ', the last channel back.', gear: [g.id] });
+      }
+    }
+    ins.filter((r) => r.used && r.ch == null && !r.pc).forEach((r) => out.push({ level: 'warn', text: r.via.name + ' ' + r.port + (r.up.source ? ' (' + r.up.source + ')' : '') + ' is not on a ' + r.console.name + ' channel yet. Assign it on the stage box.', gear: [r.via.id] }));
     doc.gear.filter((g) => g.kind === 'stagebox' && !ix.consolesOf(g.id).length).forEach((g) => out.push({ level: 'warn', text: g.name + ' is not linked to a console. Draw its link to the console.', gear: [g.id] }));
     doc.gear.filter((g) => g.kind === 'txmic' && !(ix.from.get(g.id + ':0') || []).length).forEach((g) => out.push({ level: 'note', text: g.name + ' is not on a receiver channel yet.', gear: [g.id] }));
     doc.gear.filter((g) => g.kind === 'bodypack' && !ix.into.get(g.id + ':0')).forEach((g) => out.push({ level: 'note', text: g.name + ' is not paired with an IEM transmitter yet.', gear: [g.id] }));
@@ -573,5 +800,5 @@
   /** Short text for search and the device "used on" list. */
   function searchText(g) { return [g.name, g.use, g.person, g.chname, g.model, g.make, g.capsule, g.freq, g.group, g.phones, g.notes].filter(Boolean).join(' '); }
 
-  return { paPlan, COLS, CATS, CABLES, KINDS, KIND_ORDER, FIELD_LABELS, DEFAULT_MIXES, STAGES, STAGE_OF, stageOf, tagKey, clean, portsFor, addGear, resize, removeGear, connect, connectNet, netOf, members, hostOf, addMember, assignChannels, chanOf, landing, suggestNames, guessCable, findGear, freeIn, uniqueName, index, upstream, downstream, chainText, inputs, outputs, wireless, inears, cableList, checks, rfChecks, mhz, band, bandColor, searchText, colOf: (g) => (KINDS[g.kind] || KINDS.other).col };
+  return { SOFTWARE, USB_TYPES, isAudio, usbOk, danteCandidates, pcForward, forwardText, pcBack, channelUp, routeText, audioLabel, computers, paPlan, COLS, CATS, CABLES, KINDS, KIND_ORDER, FIELD_LABELS, DEFAULT_MIXES, STAGES, STAGE_OF, stageOf, tagKey, clean, portsFor, addGear, resize, removeGear, connect, connectNet, netOf, members, hostOf, addMember, assignChannels, chanOf, landing, suggestNames, guessCable, findGear, freeIn, uniqueName, index, upstream, downstream, chainText, inputs, outputs, wireless, inears, cableList, checks, rfChecks, mhz, band, bandColor, searchText, colOf: (g) => (KINDS[g.kind] || KINDS.other).col };
 });

@@ -16,8 +16,13 @@ const SETUP_SECTIONS = [
   { title: 'PA', note: 'From the console to the speakers.', groups: [
     { role: 'processor', kind: 'processor', title: 'Speaker processors', count: ['nout', 'Outputs', 6], unit: 'out' },
     { role: 'amp', kind: 'amp', title: 'Amplifiers', count: ['nin', 'Channels', 2], unit: 'ch' },
-    { role: 'speaker', kind: 'speaker', title: 'Speakers' }] }
+    { role: 'speaker', kind: 'speaker', title: 'Speakers' }] },
+  { title: 'Computers', note: 'Optional: computers that record, stream or run plugins, and their audio interfaces. Routes through them are set on the stage patch.', groups: [
+    { role: 'computer', kind: 'computer', title: 'Computers', computer: true },
+    { role: 'interface', kind: 'interface', title: 'Audio interfaces', count: ['nin', 'Inputs and outputs', 2], unit: 'in/out' }] }
 ];
+/** How a computer from the guided setup gets its audio. */
+const PC_CONN = [['', 'Not connected yet'], ['console', 'USB to the console'], ['interface', 'USB to an audio interface']];
 const SETUP_GROUPS = SETUP_SECTIONS.flatMap((s) => s.groups);
 /** Speaker types for the PA wiring: on an amp channel, or powered (fed straight from the processor); top or sub. */
 const SPK_TYPES = [['passive', 'Passive (on an amp)'], ['powered', 'Powered'], ['psub', 'Powered sub'], ['sub', 'Passive sub (on an amp)']];
@@ -60,7 +65,7 @@ async function viewGearSetup(qs) {
     for (const b of st.boxes) out.boxes.push({ b, name: take(b.name.trim() || Tags.suggest('stagebox', taken)) });
     // wireless (receivers, in-ears): a card for each. Processors, amps, speakers: one card with a quantity,
     // named after its make and model, and each unit gets its own tag on the stage patch (SPK-1, SPK-2)
-    const each = ['receiver', 'iemtx', 'txmic', 'bodypack'];
+    const each = ['receiver', 'iemtx', 'txmic', 'bodypack', 'computer', 'interface'];
     for (const o of st.other) {
       if (each.includes(o.kind) || o.qty === 1) { for (let i = 0; i < o.qty; i++) { const n = take(Tags.suggest(o.kind, taken)); out.other.push({ o, name: n, units: [n] }); } continue; }
       let card = [o.make, o.model].filter(Boolean).join(' ') || Tags.suggest(o.kind, taken);
@@ -79,7 +84,8 @@ async function viewGearSetup(qs) {
   }
 
   /** What one row adds: "Shure SLXD4D ×2 · 2 ch". */
-  const chipText = (o) => [o.make, o.model].filter(Boolean).join(' ') + (o.qty > 1 ? ' ×' + o.qty : '') + (o.n && o.unit ? ' · ' + o.n + ' ' + o.unit : '') + (o.spk ? ' · ' + (SPK_TYPES.find((t) => t[0] === o.spk) || [0, ''])[1].replace(' (on an amp)', '').toLowerCase() : '');
+  const chipText = (o) => [o.make, o.model].filter(Boolean).join(' ') + (o.qty > 1 ? ' ×' + o.qty : '') + (o.n && o.unit ? ' · ' + o.n + ' ' + o.unit : '') + (o.spk ? ' · ' + (SPK_TYPES.find((t) => t[0] === o.spk) || [0, ''])[1].replace(' (on an amp)', '').toLowerCase() : '') +
+    (o.sw && o.sw.length ? ' · ' + o.sw.join(', ') : '') + (o.conn ? ' · ' + (PC_CONN.find((t) => t[0] === o.conn) || [0, ''])[1] : '');
   const makesList = () => '<datalist id="gmakes">' + GearModels.makes().map((m) => '<option value="' + esc(m) + '">').join('') + '</datalist>';
   const haveList = (kinds) => { const h = have.filter((d) => kinds.includes(d.kind)); return h.length ? '<div class="gs-have">' + icon('box') + '<span>Already in the Gear Locker: ' + h.map((d) => '<b>' + esc(Tags.withModel(d.name, d.model)) + '</b>').join(', ') + '</span></div>' : ''; };
 
@@ -142,6 +148,8 @@ async function viewGearSetup(qs) {
                 (g.count ? '<label class="gs-f gs-n">' + g.count[1] + '<input data-nm="count" type="number" min="1" max="64" inputmode="numeric" value="' + esc(ad.count || g.count[2]) + '"></label>' : '') +
                 '<label class="gs-f gs-n">How many<input data-nm="qty" type="number" min="1" max="32" inputmode="numeric" value="' + esc(ad.qty || 1) + '"></label>' +
                 // speakers: powered or on an amp, top or sub, decides how the PA is wired
+                (g.computer ? '<label class="gs-f">Software<input data-nm="sw" list="gs-sw" placeholder="LiveProfessor, OBS" value="' + esc(ad.sw || '') + '"></label><datalist id="gs-sw">' + PatchCore.SOFTWARE.map((x) => '<option value="' + esc(x) + '">').join('') + '</datalist>' +
+                  '<label class="gs-f">Connects<select data-nm="conn">' + PC_CONN.map((t) => '<option value="' + t[0] + '"' + ((ad.conn || '') === t[0] ? ' selected' : '') + '>' + t[1] + '</option>').join('') + '</select></label>' : '') +
                 (g.role === 'speaker' ? '<label class="gs-f">Type<select data-nm="spk">' + SPK_TYPES.map((t) => '<option value="' + t[0] + '"' + ((ad.spk || 'passive') === t[0] ? ' selected' : '') + '>' + t[1] + '</option>').join('') + '</select></label>' : '') +
                 '<button type="button" class="btn gs-add" data-newadd="' + g.role + '">' + icon('plus') + 'Add</button>' +
               '</div><datalist id="gm-' + g.role + '">' + picks.map((m) => '<option value="' + esc(m.model) + '">' + esc(m.make || '') + '</option>').join('') + '</datalist></div>';
@@ -249,11 +257,13 @@ async function viewGearSetup(qs) {
       const n = g.count ? Math.max(1, Math.min(64, Number(cnt.value) || g.count[2])) : null;
       const qty = Math.max(1, Math.min(32, Number(row.querySelector('[data-nm=qty]').value) || 1));
       const spkSel = row.querySelector('[data-nm=spk]'), spk = spkSel ? spkSel.value : undefined;
+      const swIn = row.querySelector('[data-nm=sw]'), sw = swIn ? swIn.value.split(',').map((y) => y.trim()).filter(Boolean) : undefined;
+      const connSel = row.querySelector('[data-nm=conn]'), conn = connSel ? connSel.value : undefined;
       if (!model) return toast('Type the model', 'bad');
       // the same make, model and count again adds to how many
-      const same = st.other.find((o) => o.role === g.role && lc(o.make) === lc(make) && lc(o.model) === lc(model) && (o.n || null) === n && o.spk === spk);
+      const same = st.other.find((o) => o.role === g.role && lc(o.make) === lc(make) && lc(o.model) === lc(model) && (o.n || null) === n && o.spk === spk && String(o.sw || '') === String(sw || '') && o.conn === conn);
       if (same) same.qty = Math.min(32, same.qty + qty);
-      else st.other.push({ key: g.role + ':' + Date.now() + ':' + st.other.length, role: g.role, kind: g.kind, make, model, n, unit: g.unit, qty, spk });
+      else st.other.push({ key: g.role + ':' + Date.now() + ':' + st.other.length, role: g.role, kind: g.kind, make, model, n, unit: g.unit, qty, spk, sw, conn });
       delete st.adding[g.role];
       render();
     }));
@@ -292,6 +302,8 @@ async function viewGearSetup(qs) {
         else if (o.kind === 'iemtx') Object.assign(d, { inputs: 2 });
         else if (o.kind === 'processor') Object.assign(d, { inputs: 2, outputs: o.n || 6 });
         else if (o.kind === 'amp') Object.assign(d, { inputs: o.n || 2, outputs: o.n || 2 });
+        else if (o.kind === 'computer') Object.assign(d, { category: 'computer', networked: true, software: o.sw || [] });
+        else if (o.kind === 'interface') Object.assign(d, { inputs: o.n || 2, outputs: o.n || 2 });
         otherIds.push(await post(d));
       }
       forgetDevices();
@@ -306,7 +318,7 @@ async function viewGearSetup(qs) {
         const sb = place({ kind: 'stagebox', name: x.name, make: x.b.make, model: x.b.model, nin: Number(x.b.inputs) || 0, nout: Number(x.b.outputs) || 0, device_id: boxIds[i] });
         if (!doc.cables.some((k) => k.ap === 'link' && ((k.a === sb.id && k.b === con.id) || (k.b === sb.id && k.a === con.id)))) P.connect(doc, sb, 'link', con, 'link', { label: x.b.link });
       });
-      const pg = [], ag = [], sg = [];
+      const pg = [], ag = [], sg = [], pcs = [], ais = [];
       // a card with a quantity: one block per unit (the k-th one already on the drawing is kept)
       const placeUnit = (item, k) => doc.gear.filter((g) => g.device_id === item.device_id)[k] || P.findGear(doc, item.name) || P.addGear(doc, item);
       p.other.forEach((x, i) => x.units.forEach((unit, k) => {
@@ -315,8 +327,17 @@ async function viewGearSetup(qs) {
         else if (o.kind === 'iemtx') place({ ...base, kind: 'iemtx', mode: 'Stereo' });
         else if (o.kind === 'processor') pg.push(placeUnit({ ...base, kind: 'processor', nin: 2, nout: o.n || 6 }, k));
         else if (o.kind === 'amp') ag.push(placeUnit({ ...base, kind: 'amp', nin: o.n || 2 }, k));
+        else if (o.kind === 'computer') pcs.push({ g: place({ ...base, kind: 'computer', software: o.sw || [] }), conn: o.conn });
+        else if (o.kind === 'interface') ais.push(place({ ...base, kind: 'interface', nin: o.n || 2, nout: o.n || 2 }));
         else if (o.kind === 'speaker') { const sp = placeUnit({ ...base, kind: 'speaker', group: /sub/.test(o.spk || '') ? 'Subs' : 'Mains' }, k); sp._spk = o.spk || 'passive'; sg.push(sp); }
       }));
+      // computers: a USB cable to the console, or to the next audio interface not yet on one
+      const onUsb = (g) => doc.cables.some((k) => k.kind === 'usb' && (k.a === g.id || k.b === g.id));
+      pcs.forEach(({ g, conn }) => {
+        if (onUsb(g) && conn) return;
+        if (conn === 'console') P.connect(doc, g, 'link', con, 'link', { kind: 'usb' });
+        else if (conn === 'interface') { const ai = ais.find((x) => !onUsb(x)); if (ai) P.connect(doc, g, 'link', ai, 'link', { kind: 'usb' }); else toast(g.name + ': no audio interface left to plug into. Add one, or connect it on the stage patch.', 'bad'); }
+      });
       if (st.cables) {
         // a starting point for the PA: console LR → processor → amps → speakers (check it against the rack)
         // one speaker per amp channel (never two in parallel); powered speakers and subs straight off the processor

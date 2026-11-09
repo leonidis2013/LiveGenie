@@ -8,7 +8,7 @@
   const CODES = {
     mic: { code: 'MIC-' }, txmic: { code: 'WMIC-' }, capsule: { code: 'CAP-' }, receiver: { code: 'RX-' }, di: { code: 'DI-' }, source: { code: 'SRC-' },
     iemtx: { code: 'IEM-TX' }, bodypack: { code: 'IEM-' }, headamp: { code: 'HP-' }, console: { code: 'FOH ', model: true }, stagebox: { code: 'SB-', letter: true },
-    processor: { code: 'PA-PROC' , plain: true }, amp: { code: 'PA-AMP' }, speaker: { code: 'SPK-' }, wedge: { code: 'WEDGE-' }, network: { code: 'SW-' }, power: { code: 'PWR-' }, computer: { code: 'PC-' }, other: { code: 'GEAR-' }
+    processor: { code: 'PA-PROC' , plain: true }, amp: { code: 'PA-AMP' }, speaker: { code: 'SPK-' }, wedge: { code: 'WEDGE-' }, network: { code: 'SW-' }, power: { code: 'PWR-' }, computer: { code: 'PC-' }, interface: { code: 'AI-' }, other: { code: 'GEAR-' }
   };
   /** Speaker positions an admin can pick instead of a number. */
   const POSITIONS = ['PA-L', 'PA-R', 'SUB-1', 'SUB-2', 'FILL-L', 'FILL-R', 'DELAY-1'];
@@ -94,10 +94,10 @@
    * A cable name that says what the cable does.
    *   in:  the input it plugs into — IN-A12 (stage box A input 12), IN-L03 (console local input 3), IN-M03 (a second console);
    *        cables further back in a chain (instrument → DI → box) add .1, .2…: IN-A12.1
-   *   out / spk / lnk / net: counted per prefix — OUT-001, SPK-002, LNK-001, NET-004.
-   * info: { type: 'in'|'out'|'spk'|'lnk'|'net', at: 'A' | 'L' | 'M'…, input: 12, back: 0 }. Never returns a name in taken.
+   *   out / spk / lnk / net / usb: counted per prefix — OUT-001, SPK-002, LNK-001, NET-004, USB-001.
+   * info: { type: 'in'|'out'|'spk'|'lnk'|'net'|'usb', at: 'A' | 'L' | 'M'…, input: 12, back: 0 }. Never returns a name in taken.
    */
-  const CABLE_PREFIX = { in: 'IN-', out: 'OUT-', spk: 'SPK-', lnk: 'LNK-', net: 'NET-' };
+  const CABLE_PREFIX = { in: 'IN-', out: 'OUT-', spk: 'SPK-', lnk: 'LNK-', net: 'NET-', usb: 'USB-' };
   function cableName(info, taken) {
     const t = takenSet(taken);
     const type = CABLE_PREFIX[info && info.type] ? info.type : 'out';

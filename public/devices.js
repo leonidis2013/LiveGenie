@@ -11,11 +11,11 @@ const DEV = { list: null, at: 0, dm: null, loading: null, buckets: [] };
  * Gear Locker buckets. Gear sorts itself by what it is (its kind on the stage patch, else its model and category);
  * an admin can move a piece to another bucket, rename, reorder or add buckets.
  */
-const AUTO_BUCKETS = ['Wired mics', 'Wireless mics', 'Receivers', 'Capsules', 'In-ears', 'Stage I/O', 'Mixing', 'Processing', 'Amps', 'Speakers', 'Video', 'Lighting', 'Network', 'Computers', 'Power', 'Other'];
+const AUTO_BUCKETS = ['Wired mics', 'Wireless mics', 'Receivers', 'Capsules', 'In-ears', 'Stage I/O', 'Mixing', 'Processing', 'Amps', 'Speakers', 'Video', 'Lighting', 'Network', 'Computers & interfaces', 'Power', 'Other'];
 /** What a piece of gear is, in the order the "What is it?" list shows them. Same words as the stage patch. */
 const GEAR_KIND = [['mic', 'Microphone'], ['txmic', 'Wireless mic (handheld or pack)'], ['capsule', 'Mic capsule or head'], ['receiver', 'Wireless receiver'], ['di', 'DI box'], ['source', 'Instrument or playback'],
   ['iemtx', 'In-ear transmitter'], ['bodypack', 'In-ear pack'], ['headamp', 'Headphone amp'], ['console', 'Mixer'], ['stagebox', 'Stage box'], ['processor', 'Processor'], ['amp', 'Amplifier'], ['speaker', 'Speaker'], ['wedge', 'Wedge or monitor'],
-  ['network', 'Network'], ['computer', 'Computer'], ['power', 'Power strip or PDU'], ['other', 'Something else']];
+  ['network', 'Network'], ['computer', 'Computer'], ['interface', 'Audio interface'], ['power', 'Power strip or PDU'], ['other', 'Something else']];
 /** Gear with its own frequency, person or channel: one card each, never a quantity. */
 const ONE_EACH = ['txmic', 'receiver', 'iemtx', 'bodypack'];
 const qtyOf = (d) => (d && !ONE_EACH.includes(d.kind) ? Math.max(1, d.qty || 1) : 1);
@@ -25,7 +25,7 @@ const GEAR_PAIR = { txmic: { with: 'receiver', label: 'Receiver', add: 'Add a wi
 const PAIR_CHILD = { receiver: 'txmic', iemtx: 'bodypack' };
 const TX_KINDS = ['Handheld', 'Bodypack', 'Headset', 'Lavalier', 'Instrument', 'Other'];
 const BUCKET_OF_KIND = { capsule: 'Capsules', mic: 'Wired mics', di: 'Wired mics', txmic: 'Wireless mics', receiver: 'Receivers', source: 'Other', iemtx: 'In-ears', bodypack: 'In-ears', headamp: 'In-ears',
-  stagebox: 'Stage I/O', network: 'Network', console: 'Mixing', computer: 'Computers', processor: 'Processing', amp: 'Amps', speaker: 'Speakers', wedge: 'Speakers', power: 'Power' };
+  stagebox: 'Stage I/O', network: 'Network', console: 'Mixing', computer: 'Computers & interfaces', interface: 'Computers & interfaces', processor: 'Processing', amp: 'Amps', speaker: 'Speakers', wedge: 'Speakers', power: 'Power' };
 function autoBucket(d) {
   if (d.kind && BUCKET_OF_KIND[d.kind]) return BUCKET_OF_KIND[d.kind];
   // its type on your model list, else plain words in its name
@@ -42,10 +42,10 @@ function autoBucket(d) {
   if (/\bdsp\b|processor|crossover/.test(t)) return 'Processing';
   if (/amplifier|\bamp\b/.test(t)) return 'Amps';
   if (/speaker|\bsub\b|subwoofer|wedge|monitor|column|line ?array|\bpa\b|cabinet/.test(t)) return 'Speakers';
-  return { video: 'Video', lighting: 'Lighting', network: 'Network', computer: 'Computers', power: 'Power', audio: 'Other', other: 'Other' }[d.category] || 'Other';
+  return { video: 'Video', lighting: 'Lighting', network: 'Network', computer: 'Computers & interfaces', power: 'Power', audio: 'Other', other: 'Other' }[d.category] || 'Other';
 }
 /** Older names for a bucket, so gear filed under them lands in the new one ('' = sort it automatically again). */
-const BUCKET_RENAMED = { 'Speakers & monitors': 'Speakers', 'Mics & wireless': '' };
+const BUCKET_RENAMED = { 'Speakers & monitors': 'Speakers', 'Mics & wireless': '', Computers: 'Computers & interfaces' };
 const bucketOf = (d) => { let b = d.bucket || ''; if (b in BUCKET_RENAMED) b = BUCKET_RENAMED[b]; return b || autoBucket(d); };
 /** Every location used in the Gear Locker, sorted (plus this one). */
 const gearLocations = (list, extra) => [...new Set(list.map((d) => d.location).concat(extra ? [extra] : []).filter(Boolean))].sort((a, b) => a.localeCompare(b, undefined, { numeric: true }));
@@ -167,7 +167,7 @@ function devThumb(d, size) {
 // ---------- the Gear Locker ----------
 /** Short words for what a piece of gear is, for card subtitles. */
 const KIND_SHORT = { mic: 'Wired mic', txmic: 'Wireless mic', capsule: 'Capsule', receiver: 'Receiver', di: 'DI', source: 'Source', iemtx: 'In-ear transmitter', bodypack: 'In-ear pack', headamp: 'Headphone amp',
-  console: 'Mixer', stagebox: 'Stage box', processor: 'Processor', amp: 'Amp', speaker: 'Speaker', wedge: 'Wedge', network: 'Network', computer: 'Computer' };
+  console: 'Mixer', stagebox: 'Stage box', processor: 'Processor', amp: 'Amp', speaker: 'Speaker', wedge: 'Wedge', network: 'Network', computer: 'Computer', interface: 'Audio interface' };
 /** A tag name with its model: "RX-1 (SLXD4D)". */
 const tagModel = (x) => (x ? (typeof Tags !== 'undefined' ? Tags.withModel(x.name, x.model) : x.name) : '');
 /**
@@ -182,6 +182,8 @@ function gearTags(d) {
   return [d.name];
 }
 const tagChips = (d, cls) => { const t = gearTags(d); return t.length && !(t.length === 1 && t[0] === gearTitle(d)) ? '<span class="dtags' + (cls ? ' ' + cls : '') + '">' + t.map((x) => '<i>' + esc(x) + '</i>').join('') + (qtyOf(d) > 1 && t.length < qtyOf(d) ? '<i class="miss">+' + (qtyOf(d) - t.length) + ' untagged</i>' : '') + '</span>' : ''; };
+/** A computer's software as small chips ("LiveProfessor", "OBS"). */
+const softwareChips = (d) => (d.kind === 'computer' && (d.software || []).length ? '<span class="gswchips">' + d.software.map((x) => '<span>' + esc(x) + '</span>').join('') + '</span>' : '');
 function gearLine(d, list, noModel) {
   list = list || DEV.list || [];
   const mm = [d.make, d.model].filter(Boolean).join(' ');
@@ -228,7 +230,7 @@ async function viewDevices(qs) {
     <div class="gchips" id="dcat"><button data-b="" class="chipb on">All <em>${list.length}</em></button>${order.filter((b) => list.some((d) => bucketOf(d) === b)).map((b) => '<button class="chipb" data-b="' + esc(b) + '">' + esc(b) + ' <em>' + list.filter((d) => bucketOf(d) === b).length + '</em></button>').join('')}</div>
     <div id="dgrid"></div>`;
   const cardHtml = (d) => '<a class="dcard" href="#/d/' + d.id + '">' + devThumb(d, 46) +
-    '<div class="t"><b>' + esc(gearTitle(d)) + (qtyOf(d) > 1 ? ' <span class="qtyb">×' + qtyOf(d) + '</span>' : '') + '</b>' + tagChips(d) + '<span>' + esc(gearLine(d, list, gearTitle(d) !== d.name)) + '</span>' +
+    '<div class="t"><b>' + esc(gearTitle(d)) + (qtyOf(d) > 1 ? ' <span class="qtyb">×' + qtyOf(d) + '</span>' : '') + '</b>' + tagChips(d) + '<span>' + esc(gearLine(d, list, gearTitle(d) !== d.name)) + '</span>' + softwareChips(d) +
     '<span class="dmeta">' + [d.location ? icon('pin') + esc(d.location) : '', d.networked && d.ips.length ? '<span class="mono">' + esc(d.ips[0]) + '</span>' + (d.ips.length > 1 ? ' +' + (d.ips.length - 1) : '') : '', users.get(d.id) ? icon('user') + esc(users.get(d.id)) : ''].filter(Boolean).join('<i>·</i>') + '</span></div>' +
     '<div class="dbadges">' + (d.files ? '<span class="badge" title="' + d.files + ' manual' + (d.files === 1 ? '' : 's') + '">' + icon('pdf') + d.files + '</span>' : '') + (d.tech_only ? '<span class="badge tech">Tech only</span>' : '') + '</div></a>';
   const paint = () => {
@@ -481,6 +483,7 @@ async function viewDevice(id) {
     ['Connected here', (L.children || []).map((x) => '<div>' + (x.port ? '<span class="mono">' + esc(x.port) + '</span> ' : '') + dl(x) + '</div>').join('')],
     ['Signal from', (L.signalIn || []).map((x) => dl(x) + (x.count > 1 ? ' <span class="note">×' + x.count + '</span>' : '')).join(', ')],
     ['Signal to', (L.signalOut || []).map((x) => dl(x) + (x.count > 1 ? ' <span class="note">×' + x.count + '</span>' : '')).join(', ')], ['IP address' + (v.ips.length > 1 ? 'es' : ''), v.networked ? ipRows : ''], ['Inputs / outputs', v.inputs || v.outputs ? (v.inputs || 0) + ' in · ' + (v.outputs || 0) + ' out' : ''], ['MAC', v.networked && v.mac ? '<span class="mono">' + esc(v.mac) + '</span>' : ''],
+    ['Software', v.kind === 'computer' ? softwareChips(v) : ''],
     ['Also called', esc(v.aliases.join(', '))]
   ].filter((f) => f[1]);
   const used = d.usedOn;
@@ -815,8 +818,9 @@ async function viewDeviceEdit(id) {
         ${f('make', 'Make', 'Manufacturer')}<label class="dfield"><span>Model</span><input data-k="model" value="${esc(d.model)}" placeholder="Model number" list="dmodels"><datalist id="dmodels"></datalist></label>
         <div class="dwl wide" id="dwl"></div>
         <label class="dfield"><span>Location</span><select data-k="location" id="dloc"><option value="">Not set</option>${locations.map((l) => '<option' + (l === d.location ? ' selected' : '') + '>' + esc(l) + '</option>').join('')}<option value="__new">+ New location…</option></select><em>Where it lives: a rack, a room, a road case</em></label>
-        <div class="dio wide" id="dio"><label class="dfield"><span>Inputs</span><input data-k="inputs" type="number" min="0" max="512" value="${esc(d.inputs || '')}" placeholder="0"><em>For stage boxes and consoles</em></label>
+        <div class="dio wide" id="dio"><label class="dfield"><span>Inputs</span><input data-k="inputs" type="number" min="0" max="512" value="${esc(d.inputs || '')}" placeholder="0"><em>For stage boxes, consoles and audio interfaces</em></label>
         <label class="dfield"><span>Outputs</span><input data-k="outputs" type="number" min="0" max="512" value="${esc(d.outputs || '')}" placeholder="0"></label></div>
+        <label class="dfield wide${d.kind === 'computer' ? '' : ' hide'}" id="dsww"><span>Software</span><input id="dsw" value="${esc((d.software || []).join(', '))}" placeholder="LiveProfessor, OBS, ProPresenter" list="dswl"><datalist id="dswl">${(typeof PatchCore !== 'undefined' ? PatchCore.SOFTWARE : []).map((x) => '<option value="' + esc(x) + '">').join('')}</datalist><em>What it runs, comma between: ${(typeof PatchCore !== 'undefined' ? PatchCore.SOFTWARE : []).join(', ')}</em></label>
         <div class="dfield wide drack" id="drack"></div>
         <div class="dfield wide dpow" id="dpow"></div>
         <div class="dfield wide dman"><span>Manuals and documents</span>${id ? '<div id="dfiles2"></div>' : '<div class="note">Save it first, then upload manuals here.</div>'}
@@ -905,6 +909,7 @@ async function viewDeviceEdit(id) {
     d.kind = $('#dkind').value;   // this runs before the general field listener, so take the new kind now
     if (['network', 'computer'].includes(d.kind)) { d.category = d.kind; $('[data-k=category]').value = d.kind; } else if (d.kind && d.kind !== 'other') { d.category = 'audio'; $('[data-k=category]').value = 'audio'; }
     wireless();
+    $('#dsww').classList.toggle('hide', d.kind !== 'computer');
     $('#dbauto').textContent = 'Automatic (' + autoBucket({ ...d }) + ')';
     qtyField();
   });
@@ -1004,6 +1009,7 @@ async function viewDeviceEdit(id) {
   const body = () => {
     const b = { ...d };
     b.qty = ONE_EACH.includes(d.kind) ? 1 : Math.max(1, Math.min(999, Math.round(Number($('#dqty').value) || 1)));
+    if (d.kind === 'computer') b.software = $('#dsw').value.split(',').map((x) => x.trim()).filter(Boolean).slice(0, 20); else b.software = [];
     if (b.qty > 1) b.unit_tags = $('#dut').value.split(',').map((x) => x.trim()).filter(Boolean).slice(0, b.qty); else b.unit_tags = [];
     if (d.kind === 'txmic') { b.capsule_id = /^\d+$/.test(String(d.capsule_id)) ? d.capsule_id : ''; if (d.capsule_id === '__text') b.capsule_typed = true; else delete b.capsule; }
     else delete b.capsule_id;

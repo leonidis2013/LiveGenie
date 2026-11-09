@@ -833,7 +833,7 @@ test('gear knows what it is: wireless mics pair with a receiver, capsules fit a 
   const dir = fs2.mkdtempSync(path.join(os2.tmpdir(), 'lg-kind-'));
   const DBm = require(path.join(ROOT, 'lib', 'db'));
   const db1 = DBm.open(path.join(dir, 'x.db'));
-  db1.exec('DROP TABLE racks; DROP INDEX uploads_sha; ALTER TABLE uploads DROP COLUMN sha256; ' + ['rack_id', 'rack_u', 'rack_h', 'rack_side', 'shelf_id', 'power_w', 'power_pdu', 'power_outlet', 'power_max'].map((c) => 'ALTER TABLE devices DROP COLUMN ' + c).join('; ')); db1.exec('ALTER TABLE devices DROP COLUMN unit_tags; ALTER TABLE devices DROP COLUMN capsule_card; ALTER TABLE devices DROP COLUMN manual_from; ALTER TABLE devices DROP COLUMN qty; ALTER TABLE patch DROP COLUMN rev; ALTER TABLE patch_versions DROP COLUMN rev; ALTER TABLE patch_versions DROP COLUMN kind'); db1.exec(['kind', 'pair_id', 'txtype', 'capsule', 'freq'].map((c) => 'ALTER TABLE devices DROP COLUMN ' + c).join('; ')); db1.prepare('UPDATE schema_version SET v = 12').run();
+  db1.exec('DROP TABLE racks; DROP INDEX uploads_sha; ALTER TABLE uploads DROP COLUMN sha256; ' + ['rack_id', 'rack_u', 'rack_h', 'rack_side', 'shelf_id', 'power_w', 'power_pdu', 'power_outlet', 'power_max'].map((c) => 'ALTER TABLE devices DROP COLUMN ' + c).join('; ')); db1.exec('ALTER TABLE devices DROP COLUMN software; ALTER TABLE devices DROP COLUMN unit_tags; ALTER TABLE devices DROP COLUMN capsule_card; ALTER TABLE devices DROP COLUMN manual_from; ALTER TABLE devices DROP COLUMN qty; ALTER TABLE patch DROP COLUMN rev; ALTER TABLE patch_versions DROP COLUMN rev; ALTER TABLE patch_versions DROP COLUMN kind'); db1.exec(['kind', 'pair_id', 'txtype', 'capsule', 'freq'].map((c) => 'ALTER TABLE devices DROP COLUMN ' + c).join('; ')); db1.prepare('UPDATE schema_version SET v = 12').run();
   db1.prepare("INSERT INTO settings (key, value) VALUES ('gear_models', ?)").run(JSON.stringify([{ kind: 'speaker', make: 'Brand', model: 'Col 70' }]));
   db1.prepare("INSERT INTO devices (name, aliases, category, make, model, location, ip, mac, photo, manual_url, notes, created_at, updated_at) VALUES ('Brand Col 70', '[]', 'audio', 'Brand', 'COL 70', '', '', '', '', '', '', 1, 1)").run();
   db1.close();
@@ -1066,7 +1066,7 @@ test('on update: bad plugs, dangling links and the id high-water mark are repair
   set(amp, 'power_pdu = ?, power_outlet = 2', strip);    // fine
   set(c, 'power_pdu = ?, power_outlet = 2', strip);      // same outlet as the amp: the newer card comes out
   set(d, 'pair_id = 9998, uplink_id = 9997');
-  db1.exec('ALTER TABLE devices DROP COLUMN unit_tags'); db1.prepare('UPDATE schema_version SET v = 20').run();
+  db1.exec('ALTER TABLE devices DROP COLUMN software; ALTER TABLE devices DROP COLUMN unit_tags'); db1.prepare('UPDATE schema_version SET v = 20').run();
   db1.close();
   const db = DBm.open(path.join(dir, 'x.db'));
   const row = (id) => db.prepare('SELECT power_pdu, pair_id, uplink_id FROM devices WHERE id = ?').get(id);
@@ -1165,7 +1165,7 @@ test('a card with a quantity keeps a tag for each piece; no other card can take 
   const db1 = DBm.open(path.join(dir, 'x.db'));
   const ins = db1.prepare("INSERT INTO devices (name, aliases, category, make, model, location, ip, mac, photo, manual_url, notes, kind, qty, created_at, updated_at) VALUES (?, '[]', 'audio', 'Rode', 'M5', '', '', '', '', '', '', 'mic', ?, 1, 1)");
   ins.run('MIC-2', 2); ins.run('MIC-3', 2);
-  db1.exec('ALTER TABLE devices DROP COLUMN unit_tags'); db1.prepare('UPDATE schema_version SET v = 21').run(); db1.close();
+  db1.exec('ALTER TABLE devices DROP COLUMN software; ALTER TABLE devices DROP COLUMN unit_tags'); db1.prepare('UPDATE schema_version SET v = 21').run(); db1.close();
   const db = DBm.open(path.join(dir, 'x.db'));
   const rows = db.prepare('SELECT name, unit_tags FROM devices ORDER BY id').all().map((r) => r.name + ':' + r.unit_tags);
   assert.deepStrictEqual(rows, ['MIC-2:["MIC-2","MIC-4"]', 'MIC-3:["MIC-3","MIC-5"]'], 'no tag used twice');
@@ -1190,7 +1190,7 @@ test('checklists that were on pages move to To do, keeping their ticks and log',
   const DBm = require(path.join(ROOT, 'lib', 'db'));
   // a database from before 0.20: back to migration 10, then a page with a checklist and a tick
   const db1 = DBm.open(path.join(dir, 'x.db'));
-  db1.exec('DROP TABLE racks; DROP INDEX uploads_sha; ALTER TABLE uploads DROP COLUMN sha256; ' + ['rack_id', 'rack_u', 'rack_h', 'rack_side', 'shelf_id', 'power_w', 'power_pdu', 'power_outlet', 'power_max'].map((c) => 'ALTER TABLE devices DROP COLUMN ' + c).join('; ')); db1.exec('ALTER TABLE devices DROP COLUMN unit_tags; ALTER TABLE devices DROP COLUMN capsule_card; ALTER TABLE devices DROP COLUMN manual_from; ALTER TABLE devices DROP COLUMN qty; ALTER TABLE patch DROP COLUMN rev; ALTER TABLE patch_versions DROP COLUMN rev; ALTER TABLE patch_versions DROP COLUMN kind'); db1.exec('DROP TABLE todo_lists; ALTER TABLE devices DROP COLUMN networked; ' + ['kind', 'pair_id', 'txtype', 'capsule', 'freq'].map((c) => 'ALTER TABLE devices DROP COLUMN ' + c).join('; ')); db1.prepare('UPDATE schema_version SET v = 10').run();
+  db1.exec('DROP TABLE racks; DROP INDEX uploads_sha; ALTER TABLE uploads DROP COLUMN sha256; ' + ['rack_id', 'rack_u', 'rack_h', 'rack_side', 'shelf_id', 'power_w', 'power_pdu', 'power_outlet', 'power_max'].map((c) => 'ALTER TABLE devices DROP COLUMN ' + c).join('; ')); db1.exec('ALTER TABLE devices DROP COLUMN software; ALTER TABLE devices DROP COLUMN unit_tags; ALTER TABLE devices DROP COLUMN capsule_card; ALTER TABLE devices DROP COLUMN manual_from; ALTER TABLE devices DROP COLUMN qty; ALTER TABLE patch DROP COLUMN rev; ALTER TABLE patch_versions DROP COLUMN rev; ALTER TABLE patch_versions DROP COLUMN kind'); db1.exec('DROP TABLE todo_lists; ALTER TABLE devices DROP COLUMN networked; ' + ['kind', 'pair_id', 'txtype', 'capsule', 'freq'].map((c) => 'ALTER TABLE devices DROP COLUMN ' + c).join('; ')); db1.prepare('UPDATE schema_version SET v = 10').run();
   db1.prepare("INSERT INTO spaces (slug, name) VALUES ('audio', 'Audio')").run();
   const blocks = [{ type: 'text', md: 'Before' }, { type: 'checklist', id: 'abc12345', title: 'Desk check', items: ['Faders down', 'Scenes loaded'], schedule: [] }];
   db1.prepare("INSERT INTO pages (space_id, title, blocks, version, created_at, updated_at) VALUES (1, 'Sunday desk', ?, 1, 1, 1)").run(JSON.stringify(blocks));
@@ -1398,6 +1398,95 @@ test('checklist log: every run, who did it, when it finished, what was missed', 
   assert.ok(log.runs[1].completed_at && !log.runs[0].completed_at, 'the newest run is still going, the older one finished');
   assert.ok(log.checklists.some((c) => c.block_id === blk));
   assert.strictEqual((await vol.get('/api/checklog')).status, 403);
+});
+
+test('computers: a software list on the card, kept on edit; migration 23 adds the column', async () => {
+  const id = (await admin.post('/api/devices', { name: 'PC-T1', kind: 'computer', category: 'computer', software: ['LiveProfessor', 'OBS', 'obs', ''] })).data.id;
+  const one = async () => (await admin.get('/api/devices/' + id)).data.device;
+  assert.deepStrictEqual((await one()).software, ['LiveProfessor', 'OBS'], 'cleaned: no blanks, no repeats');
+  assert.deepStrictEqual((await admin.get('/api/devices')).data.devices.find((d) => d.id === id).software, ['LiveProfessor', 'OBS'], 'listed with the gear');
+  await admin.put('/api/devices/' + id, { ...(await one()), software: undefined, notes: 'x' });
+  assert.deepStrictEqual((await one()).software, ['LiveProfessor', 'OBS'], 'kept when not sent');
+  await admin.put('/api/devices/' + id, { ...(await one()), kind: 'mic', software: ['OBS'] });
+  assert.deepStrictEqual((await one()).software, [], 'only computers have software');
+  const ai = (await admin.post('/api/devices', { name: 'AI-T1', kind: 'interface', inputs: 2, outputs: 4 })).data;
+  assert.ok(ai.id, 'an audio interface is a kind of gear');
+  await admin.del('/api/devices/' + id); await admin.del('/api/devices/' + ai.id);
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'lg-sw-'));
+  const DBm = require(path.join(ROOT, 'lib', 'db'));
+  const db1 = DBm.open(path.join(dir, 'x.db'));
+  db1.exec('ALTER TABLE devices DROP COLUMN software'); db1.prepare('UPDATE schema_version SET v = 22').run(); db1.close();
+  const db = DBm.open(path.join(dir, 'x.db'));
+  assert.ok(db.prepare('PRAGMA table_info(devices)').all().some((c) => c.name === 'software'), 'the column is back');
+  db.close();
+  fs.rmSync(dir, { recursive: true, force: true });
+});
+
+test('stage patch: USB and Dante links to computers, routes through them, signal followed there and back', () => {
+  const P = require(path.join(ROOT, 'public', 'patchcore.js'));
+  const T = require(path.join(ROOT, 'public', 'tags.js'));
+  let doc = P.clean({ gear: [] });
+  const con = P.addGear(doc, { kind: 'console', name: 'SQ-5', nin: 16, nout: 12, usbch: 32 });
+  const sb = P.addGear(doc, { kind: 'stagebox', name: 'SB-A', nin: 16, start: 1 });
+  const mic = P.addGear(doc, { kind: 'mic', name: 'MIC-1', use: 'Pastor' });
+  const mac = P.addGear(doc, { kind: 'computer', name: 'MacBook', software: ['LiveProfessor'] });
+  const ai = P.addGear(doc, { kind: 'interface', name: 'AI-1', model: 'SSL 2+', nin: 2, nout: 4 });
+  const pc2 = P.addGear(doc, { kind: 'computer', name: 'PC-2', software: ['OBS'] });
+  const pc3 = P.addGear(doc, { kind: 'computer', name: 'PC-3' });
+  const sw = P.addGear(doc, { kind: 'network', name: 'SW-1' });
+  assert.deepStrictEqual([mac.ins.length, mac.outs.length], [0, 0], 'a new computer has only its link and network sockets');
+  assert.deepStrictEqual(mac.software, ['LiveProfessor']);
+  P.connect(doc, sb, 'link', con, 'link');
+  P.connect(doc, mic, 0, sb, 0);
+  const u = P.connect(doc, mac, 'link', con, 'link', { ret: 33 });
+  assert.strictEqual(u.kind, 'usb', 'a computer to a console link is USB');
+  assert.deepStrictEqual([u.chin, u.chout, u.usbtype], [32, 32, 'USB'], 'channel counts start from the console USB audio');
+  const u2 = P.connect(doc, pc2, 'link', ai, 'link');
+  assert.deepStrictEqual([u2.kind, u2.chin, u2.chout], ['usb', 2, 4], 'an interface: its inputs to the computer, its outputs back');
+  assert.strictEqual(P.guessCable(sb, 'link', con, 'link'), 'link', 'a stage box link stays a digital snake');
+  assert.strictEqual(P.guessCable(sb, 'link', mac, 'link'), 'dante');
+  P.connect(doc, P.addGear(doc, { kind: 'mic', name: 'MIC-2', use: 'Vocal' }), 0, ai, 0);
+  mac.routes = [{ fc: u.id, fs: 1, fe: 2, app: 'LiveProfessor', tc: u.id, ts: 1 }];
+  pc2.routes = [{ fc: u2.id, fs: 1, fe: 2, app: 'OBS' }, { fc: 'nope', fs: 1, fe: 2 }];
+  // Dante: a computer on the network with a virtual soundcard
+  P.connect(doc, con, 'link', sw, 'link');
+  const n3 = P.connectNet(doc, pc3, sw, 3); n3.chin = 16; n3.chout = 16; n3.ret = 41;
+  // a usb kind that does not fit is put right; channel fields survive clean
+  doc.cables.push({ id: 'cbad', a: sb.id, ap: 'link', b: con.id, bp: 'link', kind: 'usb' });
+  doc = P.clean(JSON.parse(JSON.stringify(doc)));
+  const G = (n) => doc.gear.find((g) => g.name === n);
+  assert.strictEqual(doc.cables.find((c) => c.id === 'cbad').kind, 'link', 'USB only joins a computer to an interface or console');
+  const cu = doc.cables.find((c) => c.id === u.id);
+  assert.deepStrictEqual([cu.kind, cu.chin, cu.chout, cu.ret, cu.usbtype], ['usb', 32, 32, 33, 'USB'], 'clean keeps the USB cable and its channels');
+  assert.deepStrictEqual(G('PC-2').routes, [{ fc: u2.id, fs: 1, fe: 2, app: 'OBS' }], 'a route on a cable that is not there is dropped');
+  assert.deepStrictEqual(G('MacBook').software, ['LiveProfessor']);
+  assert.strictEqual(G('SQ-5').usbch, 32);
+  const nc = doc.cables.find((c) => c.id === n3.id);
+  assert.deepStrictEqual([nc.chin, nc.chout, nc.ret], [16, 16, 41], 'Dante channels on a computer network cable');
+  const ix = P.index(doc);
+  assert.strictEqual(ix.audioBy.get(n3.id).end.name, 'SQ-5', 'Dante goes to the one console on that network');
+  assert.strictEqual(P.audioLabel(ix.audioBy.get(n3.id)), 'NET · Dante 16/16');
+  assert.strictEqual(P.audioLabel(ix.audioBy.get(u.id)), 'USB · 32 in / 32 out');
+  // console → USB → computer route → USB → console
+  const rows = P.inputs(doc);
+  const back = rows.find((r) => r.ch === 33);
+  assert.ok(back && back.via.name === 'MacBook' && back.port === 'USB 1', 'USB 1 back from the computer lands on channel 33');
+  assert.strictEqual(back.up.source, 'Pastor · via LiveProfessor', 'and it is the pastor’s mic, through LiveProfessor');
+  assert.deepStrictEqual(back.up.chain.map((g) => g.name), ['MIC-1', 'SB-A', 'SQ-5', 'MacBook']);
+  assert.strictEqual(P.forwardText(P.pcForward(doc, ix, G('SQ-5'), 1)).split('; ')[0], 'USB 1 → MacBook (LiveProfessor) → USB 1 → SQ-5 ch 33');
+  assert.strictEqual(P.forwardText(P.pcForward(doc, ix, G('AI-1'), 1)), 'USB 1 → PC-2 (OBS) · recorded / streamed in OBS', 'no way out: it ends in the app');
+  assert.ok(/Dante 1 → PC-3 · ends here/.test(P.forwardText(P.pcForward(doc, ix, G('SQ-5'), 1))), 'a computer with no route: the channel ends there');
+  assert.deepStrictEqual(P.computers(doc).find((x) => x.g.name === 'MacBook').routes, ['USB 1-2 (SQ-5) → LiveProfessor → USB 1-2 (SQ-5)']);
+  // checks: returns with no channel, a route past the channels the link carries
+  delete doc.cables.find((c) => c.id === u.id).ret;
+  G('PC-2').routes[0].fe = 3;
+  const ck = P.checks(doc).map((c) => c.text);
+  assert.ok(ck.some((t) => /MacBook USB 1 back to SQ-5 .* lands on no channel yet/.test(t)), 'returns with nowhere to land are flagged');
+  assert.ok(ck.some((t) => /PC-2: .* uses USB 3, but the link carries 2 channels/.test(t)));
+  // names
+  assert.strictEqual(T.cableName({ type: 'usb' }, ['USB-001']), 'USB-002');
+  assert.strictEqual(T.suggest('interface', ['AI-1']), 'AI-2');
+  assert.strictEqual(T.suggest('computer', []), 'PC-1');
 });
 
 test('backup, then restore brings the data back after a restart', async () => {

@@ -17,7 +17,7 @@ const PatchView = (() => {
   /** A wireless system's mini-cards: MINI wide, RFG of radio line between them and the receiver or transmitter; WLH the label over the box. */
   const MINI = 150, RFG = 70, SIDE = MINI + RFG, WLH = 24;
   const GRID = 10, CW = 300, HEAD = 50, ROW = 20, FOOT = 10, COLGAP = 100, VGAP = 30, LINKY = 30;
-  const KIND_STYLE = { xlr: 'Analog · XLR', link: 'Digital snake', dante: 'Dante · Cat6', aes: 'AES3', speaker: 'Speaker · NL4', wiem: 'Wired IEM', rf: 'Wireless · RF', net: 'Network · Cat6' };
+  const KIND_STYLE = { xlr: 'Analog · XLR', link: 'Digital snake', dante: 'Dante · Cat6', usb: 'USB · Thunderbolt', aes: 'AES3', speaker: 'Speaker · NL4', wiem: 'Wired IEM', rf: 'Wireless · RF', net: 'Network · Cat6' };
   /** A short tag for a make: initials for "X & Y" names, the first word of a long one. */
   const makeTag = (m) => { m = String(m || '').trim(); if (/ & /.test(m)) return m.split(/\s*&\s*/).map((w) => w[0] || '').join('&'); return m.length > 10 ? m.split(/\s+/)[0] : m; };
   const CHW = 7;   // average width of a letter on a card (11.5 px text), for shortening names so they never run into each other
@@ -200,6 +200,32 @@ const PatchView = (() => {
         col.forEach((id, n) => rank.set(id, n));
       });
     }
+    // sockets: where a cable meets a card (its row), so cards can line up with the socket they plug into
+    const sockY = (id, side, port) => { const m = models.get(id); if (typeof port !== 'number' || port < 0) return LINKY; const v = side === 'in' ? m.inY[port] : m.outY[port]; return v == null ? HEAD : v; };
+    const wires = [];
+    for (const c of doc.cables) {
+      if (c.ap === 'net') continue;
+      const a = cardIdOf(c.a), b = cardIdOf(c.b);
+      if (a === b || !nb.has(a) || !nb.has(b)) continue;
+      // a mic in a wireless system plugs in through its receiver's card: the header row
+      wires.push({ a, ap: a === c.a ? c.ap : 'link', b, bp: b === c.b ? c.bp : 'link' });
+    }
+    /** Where each card in column k wants to be: next to the socket rows it connects to in the columns already placed (right of it). */
+    const targets = (id, k) => {
+      const t = [];
+      wires.forEach((w) => {
+        if (w.a === id && ciOf.get(w.b) > k && out.has(w.b)) t.push({ at: out.get(w.b).y + sockY(w.b, 'in', w.bp), own: sockY(id, 'out', w.ap) });
+        else if (w.b === id && ciOf.get(w.a) > k && out.has(w.a)) t.push({ at: out.get(w.a).y + sockY(w.a, 'out', w.ap), own: sockY(id, 'in', w.bp) });
+      });
+      return t;
+    };
+    // room between columns for every cable to have its own lane (a stage box with 14 mics needs more than a pair of cables)
+    const colX = [0];
+    for (let k = 0; k < inCols.length - 1; k++) {
+      const n = wires.filter((w) => { const a = ciOf.get(w.a), b = ciOf.get(w.b); return a != null && b != null && Math.min(a, b) <= k && Math.max(a, b) > k; }).length;
+      colX.push(colX[k] + CW + snap(Math.max(STEP - CW, (n + 4) * GRID)));
+    }
+    const conX = colX[CON] || 0;
     // the console column first (top), then each column to its left lines up with what it feeds
     const stack = (col, k, wantOf) => {
       let y = 0;
@@ -207,13 +233,18 @@ const PatchView = (() => {
         const o = box(id);
         const want = wantOf ? wantOf(id) : null;
         const yy = snap(Math.max(y - o.y, want == null ? -Infinity : want));
-        out.set(id, { x: k * STEP, y: yy });
+        out.set(id, { x: colX[k] || 0, y: yy });
         y = snap(yy + o.y + o.h + VGAP);
       });
     };
     if (inCols[CON]) stack(inCols[CON], CON);
     for (let k = CON - 1; k >= 0; k--) {
-      stack(inCols[k], k, (id) => { const ps = [...nb.get(id)].filter((x) => out.has(x) && ciOf.get(x) > k).map((x) => out.get(x).y); return ps.length ? Math.min(...ps) : null; });
+      // order by the mean height of the sockets each card plugs into (a wireless system counts as one block: its outputs),
+      // then line each card's first cable up with its socket: cables run nearly straight and never cross inside a column
+      const key = new Map(inCols[k].map((id) => { const t = targets(id, k); return [id, t.length ? t.reduce((s1, x) => s1 + x.at, 0) / t.length : Infinity]; }));
+      inCols[k].sort((a, b) => key.get(a) - key.get(b) || rank.get(a) - rank.get(b));
+      inCols[k].forEach((id, n) => rank.set(id, n));
+      stack(inCols[k], k, (id) => { const t = targets(id, k); return t.length ? Math.min(...t.map((x) => x.at - x.own)) : null; });
     }
 
     // ---- output side: how far each card is from the console (the stage box's outputs count as the console's)
@@ -245,16 +276,18 @@ const PatchView = (() => {
       let bottom = bandY;
       ks.forEach((k) => {
         const col = cols.get(k);
-        // in feed order: what sits higher on its feeder comes first
-        const key = (id) => { const ps = [...nb.get(id)].filter((x) => out.has(x)).map((x) => out.get(x).y); return ps.length ? Math.min(...ps) : 0; };
+        // in feed order: the output socket that feeds it (the console's Out 1 before Out 11), lined up with that socket
+        const feedBy = (id) => wires.filter((w) => w.b === id && out.has(w.a) && (!depth.has(w.a) || depth.get(w.a) < k)).map((w) => ({ at: out.get(w.a).y + sockY(w.a, 'out', w.ap), own: sockY(id, 'in', w.bp) }));
+        const key = (id) => { const f = feedBy(id); if (f.length) return Math.min(...f.map((x) => x.at)); const ps = [...nb.get(id)].filter((x) => out.has(x)).map((x) => out.get(x).y); return ps.length ? Math.min(...ps) : 0; };
         col.sort((a, b) => key(a) - key(b) || kindRank(a) - kindRank(b));
         let y = bandY;
         col.forEach((id) => {
           const o = box(id);
+          const f = feedBy(id);
           const ps = [...nb.get(id)].filter((x) => out.has(x) && depth.has(x) && depth.get(x) < k).map((x) => out.get(x).y);
-          const want = ps.length ? Math.min(...ps) : bandY;
+          const want = f.length ? Math.min(...f.map((x) => x.at - x.own)) : ps.length ? Math.min(...ps) : bandY;
           const yy = snap(Math.max(y - o.y, want));
-          out.set(id, { x: (CON + k) * STEP, y: yy });
+          out.set(id, { x: conX + k * STEP, y: yy });
           y = snap(yy + o.y + o.h + VGAP);
           bottom = Math.max(bottom, yy + o.y + o.h);
         });
@@ -274,7 +307,7 @@ const PatchView = (() => {
       return list2.length ? y + h : y0;
     };
     const width = Math.max(3, CON + 1 + Math.max(0, ...outSide.map((id) => depth.get(id))));
-    if (netIds.length) row(netIds.sort((a, b) => kindRank(a) - kindRank(b)), snap(bottom() + 90), CON * STEP, Math.max(2, width - CON));
+    if (netIds.length) row(netIds.sort((a, b) => kindRank(a) - kindRank(b)), snap(bottom() + 90), conX, Math.max(2, width - CON));
     if (loose.length) {
       const order = (id) => { const s0 = stage(id); return s0 === 'net' ? 6 : s0; };
       row(loose.sort((a, b) => order(a) - order(b) || kindRank(a) - kindRank(b) || (g(a).order || 0) - (g(b).order || 0)), snap((out.size ? bottom() : 0) + (out.size ? 110 : 0)), 0, width);
@@ -363,7 +396,8 @@ const PatchView = (() => {
           if (nx < 0 || ny < 0 || nx >= W || ny >= H) continue;
           const m = ny * W + nx;
           if (blocked[m] && m !== en) continue;
-          let cost = 1 + (nd !== d ? 5 : 0) + (nd & 1 ? usedV[m] : usedH[m]) * 3;
+          // a cell another cable runs along costs more (lines spread apart); crossing one costs a little (fewer crossings)
+          let cost = 1 + (nd !== d ? 5 : 0) + (nd & 1 ? usedV[m] : usedH[m]) * 3 + ((nd & 1 ? usedH[m] : usedV[m]) ? 3 : 0);
           if (m === en && nd !== wantEnd) cost += 6;
           const ns = m * 4 + nd, ng = g0 + cost;
           if (stamp[ns] === gen && gs[ns] <= ng) continue;
@@ -434,14 +468,17 @@ const PatchView = (() => {
       if (!ma || !mb) continue;           // a member's radio link stays inside its card
       if (c.ap === 'net') {
         if (ma.netY == null) continue;
-        list.push({ id: c.id, c, net: true, ma, mb, kind: 'net', label: c.label || '' });
+        const L = ix.audioBy.get(c.id);
+        list.push({ id: c.id, c, net: true, ma, mb, kind: 'net', label: L ? (c.label ? c.label + ' · Dante ' + L.chin + '/' + L.chout : P.audioLabel(L)) : c.label || '' });
         continue;
       }
       if (c.ap === 'link' || c.bp === 'link') {
         const a = ma.g, b = mb.g;
         const sb = a.kind === 'stagebox' ? a : b.kind === 'stagebox' ? b : null;
         let label = c.label || (c.kind === 'dante' ? 'Dante' : 'Link');
-        if (sb) {
+        const L = ix.audioBy.get(c.id);
+        if (L) label = c.label ? c.label + ' · ' + P.audioLabel(L).replace(/^(USB|TB) · /, '') : P.audioLabel(L);
+        else if (sb) {
           const nIn = sb.ins.filter((_, i) => ix.into.get(sb.id + ':' + i)).length;
           const nOut = sb.outs.filter((_, j) => (ix.from.get(sb.id + ':' + j) || []).length || (sb.feeds || {})[j]).length;
           label += ' · ' + nIn + ' in · ' + nOut + ' out';
@@ -478,7 +515,11 @@ const PatchView = (() => {
     const R = makeRouter(rects, b);
     const out = new Map();
     // links first (they are the thick ones), then the rest from top to bottom
-    const order = E.slice().sort((p, q) => (!!q.link - !!p.link) || (pos(p.ma.g).y + (p.ma.outY[p.c.ap] || 0)) - (pos(q.ma.g).y + (q.ma.outY[q.c.ap] || 0)));
+    // a fan of cables into one column of sockets crosses itself unless each cable keeps to its own lane: cables that
+    // climb to their socket go from the lowest up, cables that drop go from the highest down
+    const ySpan = (e) => { const en = ends(e, pos); return { sy: en.s.y, ty: en.e.y }; };
+    const sk = new Map(E.map((e) => { const { sy, ty } = ySpan(e); return [e.id, ty <= sy ? -sy : 100000 + sy]; }));
+    const order = E.slice().sort((p, q) => (!!q.link - !!p.link) || sk.get(p.id) - sk.get(q.id));
     for (const e of order) {
       const en = ends(e, pos);
       const sig = [en.s.x, en.s.y, en.e.x, en.e.y].join(',');
@@ -521,6 +562,8 @@ const PatchView = (() => {
       case 'console': return [g.model, usedIns ? usedIns + ' local in' : '', usedOuts ? usedOuts + ' local out' : ''].filter(Boolean).join(' · ');
       case 'iemtx': { const ie = P.inears(doc).find((x) => x.tx.id === g.id); return [g.mode, ie && ie.mix, g.freq && g.freq + ' MHz', m.shut ? m.live.length + ' pack' + (m.live.length === 1 ? '' : 's') : ''].filter(Boolean).join(' · '); }
       case 'bodypack': return [who(g), g.phones].filter(Boolean).join(' · ');
+      case 'computer': return [(g.software || []).join(', ') || g.model, g.use].filter(Boolean).join(' · ');
+      case 'interface': return [g.model, g.ins.length + ' in · ' + g.outs.length + ' out'].filter(Boolean).join(' · ');
       default: return [who(g), g.model].filter(Boolean).join(' · ');
     }
   }
@@ -583,6 +626,7 @@ const PatchView = (() => {
       const a = G.get(c.a), b = G.get(c.b);
       if (!a || !b) continue;
       if (c.ap === 'net') { out.set(c.id, { type: 'net' }); continue; }
+      if (c.kind === 'usb') { out.set(c.id, { type: 'usb' }); continue; }
       if (c.ap === 'link' || c.bp === 'link' || DIGITAL.includes(c.kind)) { out.set(c.id, { type: 'lnk' }); continue; }
       // follow the signal down to a stage box or console input
       let cur = c, back = 0, info = null;
@@ -688,7 +732,7 @@ const PatchView = (() => {
       }
     });
     if (m.link) {
-      s += '<rect class="ldot" data-g="' + g.id + '" x="' + (x + w - 5) + '" y="' + (y + LINKY - 5) + '" width="10" height="10" rx="2" transform="rotate(45 ' + (x + w) + ' ' + (y + LINKY) + ')"><title>Link (SLink, AES50, Dante): drag to a console, stage box or network</title></rect>';
+      s += '<rect class="ldot" data-g="' + g.id + '" x="' + (x + w - 5) + '" y="' + (y + LINKY - 5) + '" width="10" height="10" rx="2" transform="rotate(45 ' + (x + w) + ' ' + (y + LINKY) + ')"><title>' + (g.kind === 'computer' || g.kind === 'interface' ? 'USB / Thunderbolt / Dante: drag to ' + (g.kind === 'computer' ? 'an audio interface, a console or a network switch' : 'a computer') : 'Link (SLink, AES50, Dante): drag to a console, stage box or network') + '</title></rect>';
       s += '<rect class="ldot" data-g="' + g.id + '" x="' + (x - 5) + '" y="' + (y + LINKY - 5) + '" width="10" height="10" rx="2" transform="rotate(45 ' + x + ' ' + (y + LINKY) + ')"><title>Link</title></rect>';
     }
     if (opts.edit) s += '<g class="hand" data-g="' + g.id + '"><circle cx="' + (x + w - 2) + '" cy="' + (y + HEAD - 2) + '" r="9"/><path d="M' + (x + w - 6) + ' ' + (y + HEAD - 2) + 'h8M' + (x + w - 1) + ' ' + (y + HEAD - 6) + 'l4 4-4 4"/><title>Drag onto another card to connect</title></g>';
@@ -758,6 +802,30 @@ const PatchView = (() => {
     const gear = new Set(), cables = new Set();
     const linkCables = (gid) => (ix.links.get(gid) || []);
     const toConsole = (sb) => linkCables(sb.id).forEach(({ c, other }) => { cables.add(c.id); const o = ix.G.get(other); if (o) { gear.add(o.id); if (o.kind === 'network') linkCables(o.id).forEach((l2) => { const g2 = ix.G.get(l2.other); if (g2 && g2.kind === 'console') { cables.add(l2.c.id); gear.add(g2.id); } }); } });
+    // through a computer: over USB or Dante, its route, and back out (an interface output, or a console channel)
+    const pcMark = (steps, depth) => steps.forEach((x) => {
+      cables.add(x.L.c.id); gear.add(x.comp.id);
+      if (x.to) { cables.add(x.to.c.id); if (x.at) { gear.add(x.at.g.id); if (x.at.out != null) down(x.at.g, x.at.out, depth + 1); } }
+      pcMark(x.next, depth + 1);
+    });
+    const fwd = (g, ch, depth) => { if (depth < 12) pcMark(P.pcForward(doc, ix, g, ch), depth); };
+    /** Where a console channel comes from, walked back (a stage box input, a local input, a computer's return). */
+    const upChan = (con, ch, depth) => {
+      if (depth > 12) return;
+      for (const sb of doc.gear.filter((x) => x.kind === 'stagebox' && ix.consolesOf(x.id).includes(con))) { const i = sb.ins.findIndex((_, k) => P.chanOf(sb, k) === ch); if (i >= 0 && ix.into.get(sb.id + ':' + i)) { gear.add(sb.id); toConsole(sb); up(sb, i, depth + 1); return; } }
+      const i = ch - (con.localstart || 1);
+      if (i >= 0 && i < con.ins.length && ix.into.get(con.id + ':' + i)) return up(con, i, depth + 1);
+      for (const L of ix.audioAt.get(con.id) || []) if (L.c.ret && ch >= L.c.ret && ch < L.c.ret + L.chout) back(L, ch - L.c.ret + 1, depth + 1);
+    };
+    const back = (L, ch, depth) => {
+      const b = P.pcBack(doc, ix, L, ch, 0); if (!b || depth > 12) return;
+      cables.add(L.c.id); gear.add(L.comp.id);
+      if (!b.from) return;
+      cables.add(b.from.c.id);
+      const e = b.from.end; if (!e) return;
+      gear.add(e.id);
+      if (e.kind === 'console') upChan(e, b.ch + (b.from.c.snd || 1) - 1, depth + 1); else up(e, b.ch - 1, depth + 1);
+    };
     const down = (g, j, depth) => {
       if (depth > 12) return;
       for (const c of ix.from.get(g.id + ':' + j) || []) {
@@ -765,6 +833,9 @@ const PatchView = (() => {
         const b = ix.G.get(c.b); if (!b) continue;
         gear.add(b.id);
         const k = P.KINDS[b.kind];
+        if (b.kind === 'interface') fwd(b, c.bp + 1, depth + 1);
+        if (b.kind === 'stagebox') { const n = P.chanOf(b, c.bp); if (n != null) ix.consolesOf(b.id).forEach((con) => fwd(con, n, depth + 1)); fwd(b, c.bp + 1, depth + 1); }
+        if (b.kind === 'console') fwd(b, (b.localstart || 1) + c.bp, depth + 1);
         if (b.kind === 'stagebox') toConsole(b);
         else if (k.pass === 'same') down(b, c.bp, depth + 1);
         else if (k.pass === 'all' || k.pass === 'rf') b.outs.forEach((_, jj) => down(b, jj, depth + 1));
@@ -777,6 +848,7 @@ const PatchView = (() => {
       const a = ix.G.get(c.a); if (!a) return;
       gear.add(a.id);
       const k = P.KINDS[a.kind];
+      if (a.kind === 'interface') (ix.audioAt.get(a.id) || []).forEach((L) => { if (c.ap + 1 <= L.chout) back(L, c.ap + 1, depth + 1); });
       if (a.kind === 'stagebox') toConsole(a);
       else if (k.pass === 'same') up(a, c.ap, depth + 1);
       else if (k.pass === 'all' || k.pass === 'rf') a.ins.forEach((_, ii) => up(a, ii, depth + 1));
@@ -883,7 +955,7 @@ const PatchView = (() => {
           <button class="ghost" data-al="left" title="Line up left edges">⇤ Left</button><button class="ghost" data-al="top" title="Line up top edges">⤒ Top</button>
           <button class="ghost" data-al="center" title="Line up centres">↔ Centre</button><button class="ghost" data-al="vdist" title="Space evenly, top to bottom">⇕ Space</button><button class="ghost" data-al="hdist" title="Space evenly, left to right">⇔ Space</button></span>
         <span class="note" id="psave"></span><span class="grow"></span>
-        <span class="note phint">Drag a card to move it · drag its <b>→</b> onto another card to connect · right-click for more</span></div>
+        <span class="note phint">Drag a card to move it · drag the background to pick several (Shift-click adds, Ctrl+A all) · space-drag, right-drag or scroll to pan · drag <b>→</b> onto a card to connect</span></div>
       <div class="pmain"><div class="pcanvas" id="pcv"><svg id="psvg"><g id="pvp"></g><path id="ptmp" class="ptmp" d=""/><rect id="pmq" class="pmq" x="0" y="0" width="0" height="0"/></svg>
         <div class="pzoom"><button id="pzi" aria-label="Zoom in" data-tip="Zoom in">+</button><button id="pzo" aria-label="Zoom out" data-tip="Zoom out">−</button><button id="pzf" aria-label="Fit" data-tip="Fit">⤢</button></div>
         <div class="pkey hide" id="pkey"></div>
@@ -1120,7 +1192,15 @@ const PatchView = (() => {
     const isTouch = (e) => e.pointerType === 'touch';
     svg.addEventListener('pointerdown', (e) => {
       closeMenu();
-      if (e.button === 2) return;
+      // editing with a mouse: a drag on the empty drawing picks a box of cards, so the view pans with
+      // space + drag, the middle or right button, the scroll wheel, or two fingers
+      if ((e.button === 1 || e.button === 2) && !isTouch(e)) {
+        if (!st.edit && e.button === 2) return;
+        e.preventDefault(); svg.setPointerCapture(e.pointerId); pts.set(e.pointerId, { x: e.clientX, y: e.clientY });
+        gesture = { pan: true, sx: e.clientX, sy: e.clientY, x: st.tf.x, y: st.tf.y, moved: false, target: e.target, right: e.button === 2, middle: e.button === 1 };
+        return;
+      }
+      if (st.space && !isTouch(e)) { e.preventDefault(); svg.setPointerCapture(e.pointerId); pts.set(e.pointerId, { x: e.clientX, y: e.clientY }); gesture = { pan: true, sx: e.clientX, sy: e.clientY, x: st.tf.x, y: st.tf.y, moved: false, target: e.target, spacePan: true }; return; }
       pts.set(e.pointerId, { x: e.clientX, y: e.clientY });
       clearTimeout(longTimer);
       if (pts.size === 2) { const [p, q] = [...pts.values()]; gesture = { pinch: true, d: Math.hypot(p.x - q.x, p.y - q.y), k: st.tf.k }; return; }
@@ -1147,7 +1227,7 @@ const PatchView = (() => {
           gesture = { move: true, id, ids, sx: e.clientX, sy: e.clientY, w0, moved: false, target: t, shift: e.shiftKey || e.ctrlKey || e.metaKey };
           return;
         }
-        if (!card && (e.shiftKey || st.selTool)) { e.preventDefault(); svg.setPointerCapture(e.pointerId); clearTimeout(longTimer); gesture = { marquee: true, w0, sx: e.clientX, sy: e.clientY, moved: false, add: e.shiftKey || e.ctrlKey || e.metaKey }; return; }
+        if (!card && (e.shiftKey || st.selTool || (!isTouch(e) && !t.closest('.pe')))) { e.preventDefault(); svg.setPointerCapture(e.pointerId); clearTimeout(longTimer); gesture = { marquee: true, w0, sx: e.clientX, sy: e.clientY, moved: false, target: t, add: e.shiftKey || e.ctrlKey || e.metaKey }; return; }
       }
       gesture = { pan: true, sx: e.clientX, sy: e.clientY, x: st.tf.x, y: st.tf.y, moved: false, target: t, shift: e.shiftKey || e.ctrlKey || e.metaKey };
       svg.setPointerCapture(e.pointerId);
@@ -1227,9 +1307,11 @@ const PatchView = (() => {
           // every card the box touches; Shift or Ctrl adds to what was picked
           const ids = [...D.models.values()].filter((m) => { const o = outer(m); return o.x < g.box.x1 && o.x + o.w > g.box.x0 && o.y < g.box.y1 && o.y + o.h > g.box.y0; }).map((m) => m.g.id);
           select({ gear: g.add ? [...new Set(st.sel.concat(ids))] : ids }, { noSheet: true });
-        } else if (!g.add) select(null);
+        } else if (!g.add) tap(g.target, false);
         return;
       }
+      if (g.right) { if (g.moved) st.rpanAt = Date.now(); else menuAt(g.target, e.clientX, e.clientY); return; }
+      if ((g.middle || g.spacePan) && !g.moved) return;
       if (g.pan && !g.moved) {
         // a double tap on the empty drawing fits it
         const empty = !(g.target.closest && (g.target.closest('.pcard') || g.target.closest('.pe')));
@@ -1241,7 +1323,22 @@ const PatchView = (() => {
     const snapOr = (v) => Math.round(v);
     svg.addEventListener('pointerup', end);
     svg.addEventListener('pointercancel', (e) => { clearTimeout(longTimer); pts.delete(e.pointerId); gesture = null; $('#ptmp').setAttribute('d', ''); if (st.drag) { st.drag = null; paintDrawing(); } });
-    svg.addEventListener('contextmenu', (e) => { e.preventDefault(); gesture = null; pts.clear(); menuAt(e.target, e.clientX, e.clientY); });
+    svg.addEventListener('contextmenu', (e) => {
+      e.preventDefault();
+      // editing: the right button pans when dragged, and opens the menu when it is let go without moving
+      if (gesture && gesture.right) return;
+      if (st.edit && Date.now() - (st.rpanAt || 0) < 500) return;
+      gesture = null; pts.clear(); menuAt(e.target, e.clientX, e.clientY);
+    });
+    // hold space to pan with the mouse while editing
+    const spaceKey = (e) => {
+      if (!svg.isConnected) { document.removeEventListener('keydown', spaceKey); document.removeEventListener('keyup', spaceKey); return; }
+      if (e.code !== 'Space' || /input|textarea|select|button/i.test(e.target.tagName) || document.querySelector('.modal')) return;
+      e.preventDefault();
+      st.space = e.type === 'keydown'; svg.classList.toggle('spacepan', st.space);
+    };
+    document.addEventListener('keydown', spaceKey); document.addEventListener('keyup', spaceKey);
+    window.addEventListener('blur', () => { st.space = false; svg.classList.remove('spacepan'); });
 
     function markPending() { $$('.pending', vp).forEach((x) => x.classList.remove('pending')); if (st.pending) $$('.pcard[data-g="' + st.pending.gid + '"]', vp).forEach((x) => x.classList.add('pending')); }
     function tap(t, shift) {
@@ -1254,6 +1351,7 @@ const PatchView = (() => {
       if (wlt) { const g = gearOf(wlt.dataset.wl); const flip = () => { g.wlshut = !g.wlshut; if (!g.wlshut) delete g.wlshut; }; if (st.edit) change(flip, null, true); else { flip(); st.cache = null; paintDrawing(); if (canEdit) queueSave(); } return; }
       if (more) { const g = gearOf(more.dataset.open); if (st.edit) change(() => { g.open = !g.open; if (!g.open) delete g.open; }, null, true); else { g.open = !g.open; if (!g.open) delete g.open; st.cache = null; paintDrawing(); } return; }
       const sk = t.closest('.sk'), card = t.closest('.pcard'), edge = t.closest('.pe'), mem = t.closest('.crow.mem'), slk = t.closest('.crow.slk');
+      if (mem && shift && st.edit && card) { const id = card.dataset.g; const s2 = st.sel.includes(id) ? st.sel.filter((x) => x !== id) : st.sel.concat(id); return select({ gear: s2 }, { noSheet: true }); }
       if (mem) return select({ gear: [mem.dataset.mem] });
       if (slk) return select({ gear: [slk.dataset.g] });
       if (sk && (sk.dataset.net || sk.dataset.p === 'net')) {
@@ -1568,6 +1666,8 @@ const PatchView = (() => {
       const con = sb ? (sb === a ? b : a) : null;
       const ix = P.index(st.doc);
       const wire = !opts.linkOnly && a.outs.length && b.ins.length && !(sb && opts.port == null);
+      // a computer and an interface or console: a USB or Thunderbolt cable with its channel counts
+      if (P.usbOk(a, 'link', b, 'link') && (opts.linkOnly || !wire)) return usbDialog(a, b);
       if (!wire && !linkable) return toast(!a.outs.length ? a.name + ' has no outputs' : b.name + ' has no inputs', 'bad');
       // mic onto a receiver, pack onto a transmitter: a member of the wireless system
       if (a.kind === 'txmic' && b.kind === 'receiver') return memberDialog(b, a);
@@ -1613,6 +1713,31 @@ const PatchView = (() => {
             if (doCh) { const box = gearOf(sb.id); P.assignChannels(box, Math.min(cf, ct), Math.max(cf, ct), c1); msg.push(sb.ins[Math.min(cf, ct)] + '–' + sb.ins[Math.max(cf, ct)] + ' → ch ' + c1 + '–' + (c1 + Math.abs(ct - cf))); }
             if (wire) { for (let i = 0; i < n && ao + i < a.outs.length && bi + i < b.ins.length; i++) P.connect(st.doc, a, ao + i, b, bi + i, { kind, label: n > 1 && label ? label + '.' + (i + 1) : label }); msg.push(n > 1 ? n + ' cables' : 'Connected'); }
           }, msg.join(' · ') || null);
+        });
+      });
+    }
+    /** A computer to an audio interface or console: USB or Thunderbolt, how many channels each way, where the returns land. */
+    function usbDialog(a, b) {
+      const comp = a.kind === 'computer' ? a : b, end = comp === a ? b : a;
+      const old = st.doc.cables.find((c) => c.kind === 'usb' && ((c.a === a.id && c.b === b.id) || (c.a === b.id && c.b === a.id)));
+      const din = old ? old.chin : end.kind === 'interface' ? end.ins.length : end.usbch || 2, dout = old ? old.chout : end.kind === 'interface' ? end.outs.length : end.usbch || 2;
+      const con = end.kind === 'console' ? end : null;
+      modal('<h3>' + esc(tm(comp)) + ' ⇄ ' + esc(tm(end)) + '</h3><form id="puf">' +
+        '<label>Cable</label><select id="pu_t">' + P.USB_TYPES.map((t) => '<option' + ((old && old.usbtype) === t ? ' selected' : '') + '>' + t + '</option>').join('') + '</select>' +
+        '<div class="two"><div><label>Channels to ' + esc(comp.name) + '</label><input id="pu_i" type="number" min="0" max="256" value="' + (din == null ? 2 : din) + '"></div><div><label>Channels from ' + esc(comp.name) + '</label><input id="pu_o" type="number" min="0" max="256" value="' + (dout == null ? 2 : dout) + '"></div></div>' +
+        (con ? '<div class="two"><div><label>USB 1 carries ' + esc(con.name) + ' channel</label><input id="pu_s" type="number" min="1" max="512" value="' + ((old && old.snd) || 1) + '"></div><div><label>Returns land on channel</label><input id="pu_r" type="number" min="1" max="512" placeholder="not set" value="' + ((old && old.ret) || '') + '"></div></div><p class="note">USB 1, 2… back from the computer land on console channels from this one (e.g. 33 on an SQ-5).</p>' : '') +
+        '<p class="note">Then say what the computer does with the audio under Routes on ' + esc(comp.name) + '.</p>' +
+        '<div class="acts"><button type="button" data-close>Cancel</button><button class="primary">' + (old ? 'Save' : 'Connect') + '</button></div></form>', (w, close) => {
+        $('#puf', w).addEventListener('submit', (e) => {
+          e.preventDefault();
+          const f = { kind: 'usb', usbtype: $('#pu_t', w).value, chin: Math.max(0, Number($('#pu_i', w).value) || 0), chout: Math.max(0, Number($('#pu_o', w).value) || 0) };
+          if (con) { f.snd = Math.max(1, Number($('#pu_s', w).value) || 1); if (Number($('#pu_r', w).value) >= 1) f.ret = Number($('#pu_r', w).value); }
+          close();
+          change(() => {
+            const cur = old && st.doc.cables.find((c) => c.id === old.id);
+            if (cur) { Object.assign(cur, f); if (!f.ret) delete cur.ret; if (f.snd === 1) delete cur.snd; return; }
+            P.connect(st.doc, gearOf(comp.id), 'link', gearOf(end.id), 'link', f);
+          }, (old ? 'Saved ' : '') + comp.name + ' ⇄ ' + end.name + ' · ' + f.chin + ' in / ' + f.chout + ' out');
         });
       });
     }
@@ -2017,7 +2142,7 @@ const PatchView = (() => {
       stagebox: [['nin', 'Inputs', 16], ['nout', 'Outputs', 8], ['link', 'Link to the console', 'SLink']],
       receiver: [['nin', 'Channels', 2]], amp: [['nin', 'Channels', 2]],
       processor: [['nin', 'Inputs', 2], ['nout', 'Outputs', 6]], source: [['nout', 'Outputs', 2]],
-      computer: [['nin', 'Inputs', 2], ['nout', 'Outputs', 2]], other: [['nin', 'Inputs', 1], ['nout', 'Outputs', 1]],
+      computer: [['software', 'Software (comma between)', '']], interface: [['nin', 'Inputs', 2], ['nout', 'Outputs', 2]], other: [['nin', 'Inputs', 1], ['nout', 'Outputs', 1]],
       di: [['nout', 'Outputs (1 mono, 2 stereo)', 1]], txmic: [['capsule', 'Capsule', '']], iemtx: [['mode', 'Mode', 'Stereo']], network: [['nports', 'Ports', 8]]
     };
     /*
@@ -2038,6 +2163,7 @@ const PatchView = (() => {
       const fields = (NEWF[kind] || []).map(([f, label, def]) => {
         const v = pre[f] != null ? pre[f] : def;
         if (f === 'mode') return '<label>' + label + '<select data-nf="mode"><option>Stereo</option><option' + (v === 'Mono' ? ' selected' : '') + '>Mono</option></select></label>';
+        if (f === 'software') return '<label class="wide">' + label + '<input data-nf="software" value="' + esc(Array.isArray(v) ? v.join(', ') : v || '') + '" placeholder="LiveProfessor, OBS, ProPresenter"><span class="note">' + P.SOFTWARE.join(' · ') + '</span></label>';
         const num = ['nin', 'nout', 'namelen', 'nports'].includes(f);
         return '<label' + (f === 'colors' ? ' class="wide"' : '') + '>' + label + '<input data-nf="' + f + '"' + (num ? ' type="number" min="0" max="128"' : '') + ' value="' + esc(Array.isArray(v) ? v.join(', ') : v) + '"' + (f === 'colors' ? ' placeholder="Red, Green, Yellow, Blue, Purple, Cyan, White"' : f === 'namelen' ? ' placeholder="no limit"' : '') + '></label>';
       }).join('');
@@ -2086,12 +2212,12 @@ const PatchView = (() => {
         $$('[data-nf]', host).forEach((x) => {
           const f = x.dataset.nf, v = x.value.trim();
           if (['nin', 'nout', 'namelen', 'nports'].includes(f)) { if (v !== '') m[f] = Math.max(0, Math.min(128, Number(v) || 0)); }
-          else if (f === 'colors') { const c = v.split(',').map((y) => y.trim()).filter(Boolean); if (c.length) m.colors = c; }
+          else if (f === 'colors' || f === 'software') { const c = v.split(',').map((y) => y.trim()).filter(Boolean); if (c.length) m[f] = c; }
           else if (v) m[f] = v;
         });
         const tag = $('#pn_tag', host).value.trim(), n = Math.max(1, Math.min(24, Number(($('#pn_n', host) || {}).value) || 1));
         const p0 = st.prefill; st.prefill = null; st.newKind = k;
-        const toList = { ...m }; delete toList.nports;
+        const toList = { ...m }; delete toList.nports; delete toList.software;
         await GearModels.add([toList]);
         if (p0 && p0.device_id) { placeItem({ ...m, name: tag || p0.name, device_id: p0.device_id }, tag || p0.name); return; }
         for (let i = 0; i < n; i++) {
@@ -2132,6 +2258,8 @@ const PatchView = (() => {
         return;
       }
       const item = { ...(m || { kind: d.kind }), name: d.name, make: d.make || (m && m.make), model: d.model || (m && m.model), device_id: d.id };
+      if (Array.isArray(d.software) && d.software.length) item.software = d.software.slice();
+      if (d.kind === 'interface' && !m) { if (d.inputs) item.nin = d.inputs; if (d.outputs) item.nout = d.outputs; }
       if (d.kind && P.KINDS[d.kind]) item.kind = d.kind;
       if (typeof qtyOf === 'function' && qtyOf(d) > 1) {
         const taken = st.doc.gear.map((g) => g.name).concat(((typeof DEV !== 'undefined' && DEV.list) || []).filter((x) => x.id !== d.id).flatMap((x) => Tags.namesOf(x)));
@@ -2164,7 +2292,7 @@ const PatchView = (() => {
         if (ex) device_id = ex.id;
         else {
           try {
-            const r = await call('POST', '/api/devices', { name, kind: it.kind, category: it.kind === 'network' ? 'network' : 'audio', make: it.make || '', model: it.model, inputs: it.kind === 'receiver' ? 0 : it.kind === 'network' ? it.nports || 8 : it.nin || 0, outputs: it.kind === 'receiver' ? it.nin || 0 : it.nout || 0, ...(it.kind === 'network' ? { networked: true } : {}) });
+            const r = await call('POST', '/api/devices', { name, kind: it.kind, category: it.kind === 'network' || it.kind === 'computer' ? it.kind : 'audio', software: it.software || [], make: it.make || '', model: it.model, inputs: it.kind === 'receiver' ? 0 : it.kind === 'network' ? it.nports || 8 : it.nin || 0, outputs: it.kind === 'receiver' ? it.nin || 0 : it.nout || 0, ...(it.kind === 'network' || it.kind === 'computer' ? { networked: true } : {}) });
             device_id = r.id; if (typeof forgetDevices === 'function') forgetDevices(); await loadDevices(true);
           } catch (e) { /* the drawing still works without a card */ }
         }
@@ -2205,7 +2333,7 @@ const PatchView = (() => {
         (k.fields.includes('mode') ? '<label>Mode<select data-f="mode"' + (ro ? ' disabled' : '') + '><option' + (g.mode !== 'Mono' ? ' selected' : '') + '>Stereo</option><option' + (g.mode === 'Mono' ? ' selected' : '') + '>Mono</option></select></label>' : '') +
         (k.fields.includes('phones') ? fld('phones', 'Earphones', g.phones) : '') +
         (k.fields.includes('localstart') ? fld('localstart', 'Channel for local In 1', g.localstart || 1, ' type="number" min="1"') : '') +
-        (g.kind === 'console' ? '<div class="two">' + fld('namelen', 'Channel name: most letters', g.namelen || '', ' type="number" min="0" max="64" placeholder="no limit"') + fld('colors', 'Channel colours (comma between)', (g.colors || []).join(', '), ' placeholder="Red, Green, Yellow, Blue"') + '</div>' : '') +
+        (g.kind === 'console' ? '<div class="two">' + fld('namelen', 'Channel name: most letters', g.namelen || '', ' type="number" min="0" max="64" placeholder="no limit"') + fld('colors', 'Channel colours (comma between)', (g.colors || []).join(', '), ' placeholder="Red, Green, Yellow, Blue"') + '</div>' + fld('usbch', 'USB audio channels <span class="note">(USB-B to a computer; blank if none)</span>', g.usbch || '', ' type="number" min="0" max="256" placeholder="none"') : '') +
         (k.fields.includes('mixes') ? '<label>Mixes <span class="note">(comma between)</span><textarea data-f="mixes" rows="2"' + (ro ? ' disabled' : '') + '>' + esc((g.mixes || P.DEFAULT_MIXES).join(', ')) + '</textarea></label>' : '') +
         (k.counts === 'both' ? '<div class="two">' + fld('nin', 'Inputs', g.ins.length, ' type="number" min="0" max="128"') + fld('nout', 'Outputs', g.outs.length, ' type="number" min="0" max="128"') + '</div>' : '') +
         (k.counts === 'ch' ? fld('nch', 'Channels', g.ins.length, ' type="number" min="1" max="' + (g.kind === 'amp' ? 4 : 16) + '"') : '') +
@@ -2244,7 +2372,12 @@ const PatchView = (() => {
         const land = P.landing(st.doc, g);
         const con = land.length ? land[0].console : st.doc.gear.find((x) => x.kind === 'console');
         const pal = con && con.colors ? con.colors : null;
-        html += '<div class="pmem"><div class="pch">On the console</div><p class="note">' + (land.length ? esc(con.name) + ' ' + land.map((r) => 'ch ' + (r.ch == null ? '(not assigned)' : r.ch)).join(', ') : 'Not on a console channel yet.') + '</p>' +
+        // and on through computers: over USB or Dante, their routes, and back
+        const via = [];
+        land.forEach((r) => { if (r.ch != null) { const t = P.forwardText(P.pcForward(st.doc, ix, r.console, r.ch)); if (t) via.push(t); } });
+        g.outs.forEach((_, j) => (ix.from.get(g.id + ':' + j) || []).forEach((c) => { const b = ix.G.get(c.b); if (b && b.kind === 'interface') { const t = P.forwardText(P.pcForward(st.doc, ix, b, c.bp + 1)); via.push(b.name + ' ' + b.ins[c.bp] + (t ? ' → ' + t : ' (not on a computer yet)')); } }));
+        html += '<div class="pmem"><div class="pch">On the console</div><p class="note">' + (land.length ? esc(con.name) + ' ' + land.map((r) => 'ch ' + (r.ch == null ? '(not assigned)' : r.ch)).join(', ') : via.length ? 'Not on a console channel: it goes to a computer.' : 'Not on a console channel yet.') + '</p>' +
+          (via.length ? '<div class="pch">Through computers</div>' + via.map((t) => '<p class="note pvia">' + esc(t) + '</p>').join('') : '') +
           (ro ? (g.chname || g.chcolor ? '<p class="chn big">' + (g.chcolor ? '<i style="background:' + colorCss(g.chcolor) + '"></i>' : '') + esc(g.chname || '') + (g.chcolor ? ' <span class="note">' + esc(g.chcolor) + '</span>' : '') + '</p>' : '')
             : '<div class="pform two"><label>Channel name' + (con && con.namelen ? ' <span class="note">(' + con.namelen + ' letters)</span>' : '') + '<input data-f="chname" value="' + esc(g.chname || '') + '"' + (con && con.namelen ? ' maxlength="' + con.namelen + '"' : '') + ' placeholder="' + esc(cut((g.person || g.use || 'WMIC-1'), con && con.namelen ? con.namelen : 12)) + '"></label>' +
               '<label>Colour' + (pal ? '<select data-f="chcolor"><option value="">None</option>' + pal.map((c) => '<option' + (key(c) === key(g.chcolor) ? ' selected' : '') + '>' + esc(c) + '</option>').join('') + (g.chcolor && !pal.some((c) => key(c) === key(g.chcolor)) ? '<option selected>' + esc(g.chcolor) + '</option>' : '') + '</select>' : '<input data-f="chcolor" value="' + esc(g.chcolor || '') + '" placeholder="Red">') + '</label></div>') + '</div>';
@@ -2255,6 +2388,7 @@ const PatchView = (() => {
         const rows = P.inputs(st.doc).filter((r) => r.console.id === g.id && r.via.kind === 'stagebox' && r.ch != null && r.used);
         if (rows.length) html += '<div class="pmem"><div class="pch">Over the link</div>' + rows.map((r) => '<div class="psk"><b>Ch ' + r.ch + '</b><span>' + esc(r.via.name + ' ' + r.port) + (r.up.source ? ' <span class="note">' + esc(r.up.source) + '</span>' : '') + '</span></div>').join('') + '</div>';
       }
+      if (g.kind === 'computer' || g.kind === 'interface') html += computerHtml(g, ix, ro);
       // sockets
       const feedable = g.kind === 'console' || g.kind === 'stagebox';
       if ((g.ins.length || g.outs.length || k.link) && !host2) {
@@ -2299,6 +2433,7 @@ const PatchView = (() => {
         memberDialog(live(), null, Number(b.dataset.addm));
       }));
       const pc = $('#pchan', host); if (pc) pc.addEventListener('click', () => channelDialog(live()));
+      if (g.kind === 'computer' || g.kind === 'interface') computerWire(host, gid);
       $$('[data-f]', host).forEach((inp) => inp.addEventListener('change', () => {
         const f = inp.dataset.f, v = inp.value;
         const g = live(); if (!g) return;
@@ -2311,6 +2446,7 @@ const PatchView = (() => {
           else if (f === 'open') { if (inp.checked) g.open = true; else delete g.open; }
           else if (f === 'spare') { if (inp.checked) g.spare = true; else delete g.spare; }
           else if (f === 'localstart') g[f] = Math.max(1, Number(v) || 1);
+          else if (f === 'usbch') { if (Number(v) >= 1) g.usbch = Math.min(256, Math.floor(Number(v))); else delete g.usbch; }
           else if (f === 'namelen') { if (Number(v) >= 1) g.namelen = Math.min(64, Math.floor(Number(v))); else delete g.namelen; }
           else if (f === 'colors') { const c = v.split(',').map((x) => x.trim()).filter(Boolean); if (c.length) g.colors = c; else delete g.colors; }
           else if (f === 'nports') { g.nports = Math.max(1, Math.min(128, Math.floor(Number(v)) || 8)); st.doc.cables = st.doc.cables.filter((c) => !(c.ap === 'net' && c.b === g.id && c.port > g.nports)); }
@@ -2354,7 +2490,7 @@ const PatchView = (() => {
         try {
           await loadDevices();
           const ex = DEV.list.find((d) => key(d.name) === key(g.name));
-          const id = ex ? ex.id : (await call('POST', '/api/devices', { name: g.name, kind: g.kind, category: 'audio', make: g.make || '', model: g.model || '', inputs: g.ins.length, outputs: g.outs.length })).id;
+          const id = ex ? ex.id : (await call('POST', '/api/devices', { name: g.name, kind: g.kind, category: g.kind === 'computer' || g.kind === 'network' ? g.kind : 'audio', software: g.software || [], make: g.make || '', model: g.model || '', inputs: g.ins.length, outputs: g.outs.length })).id;
           if (typeof forgetDevices === 'function') forgetDevices(); await loadDevices(true);
           change(() => { live().device_id = id; }, 'Added to the Gear Locker');
         } catch (e) { toast(e.message, 'bad'); }
@@ -2385,29 +2521,114 @@ const PatchView = (() => {
       change(() => P.removeGear(st.doc, id), 'Removed ' + g.name + (mem.length ? ' with its ' + mem.length + (g.kind === 'receiver' ? ' mic' : ' pack') + (mem.length === 1 ? '' : 's') : '') + (n ? ' and ' + n + ' cable' + (n === 1 ? '' : 's') : '') + '. Undo brings it back.');
       closeSheet();
     }
+    /** A computer's software, its audio links (USB, Dante) and routes; an interface's link to its computer. */
+    function computerHtml(g, ix, ro) {
+      const chip = (t, i) => '<span class="swchip">' + esc(t) + (ro ? '' : '<button type="button" class="ghost xs" data-swx="' + i + '" title="Remove">' + icon('x') + '</button>') + '</span>';
+      let h = '';
+      if (g.kind === 'computer') {
+        const sw = g.software || [];
+        h += '<div class="pmem"><div class="pch">Software</div><div class="swchips">' + (sw.map(chip).join('') || '<span class="note">None listed yet.</span>') + '</div>' +
+          (ro ? '' : '<form class="swadd" id="pswf"><input id="pswi" list="pswl" placeholder="Add: LiveProfessor, OBS…"><datalist id="pswl">' + P.SOFTWARE.filter((x) => !sw.includes(x)).map((x) => '<option value="' + esc(x) + '">').join('') + '</datalist><button class="btn sm">Add</button></form>') + '</div>';
+      }
+      const links = g.kind === 'computer' ? ix.audio.get(g.id) || [] : ix.audioAt.get(g.id) || [];
+      h += '<div class="pmem"><div class="pch">Audio links</div>' + (links.map((L) => '<div class="psk"><b>' + esc(L.how) + '</b><span><button class="linkbtn" data-selc="' + L.c.id + '">' + esc(P.audioLabel(L)) + '</button> <span class="note">' + esc(g.kind === 'computer' ? (L.end ? '⇄ ' + L.end.name : 'Dante to: not set') : '⇄ ' + L.comp.name) + '</span></span></div>').join('') ||
+        '<p class="note">' + (g.kind === 'computer' ? 'Not connected yet. Drag its ◆ link onto an audio interface or console for USB, or plug it into a switch and set its Dante channels.' : 'Not connected to a computer yet. Drag its ◆ link onto a computer.') + '</p>') + '</div>';
+      if (g.kind !== 'computer') return h;
+      // routes: link channels in, through an app, out on a link (or ending in the app)
+      const rs = g.routes || [];
+      const linkOpt = (sel, none) => (none ? '<option value="">' + none + '</option>' : '') + links.map((L) => '<option value="' + L.c.id + '"' + (sel === L.c.id ? ' selected' : '') + '>' + esc(L.how + (L.end ? ' · ' + L.end.name : '')) + '</option>').join('');
+      const apps = [...new Set((g.software || []).concat(rs.map((r) => r.app).filter(Boolean)))];
+      h += '<div class="pmem"><div class="pch">Routes</div>';
+      if (ro || !links.length) h += rs.map((r) => '<div class="psk pfull"><span>' + esc(P.routeText(ix, r)) + '</span></div>').join('') || '<p class="note">' + (links.length ? 'No routes: audio to it ends here (recorded or streamed).' : 'Connect it first, then add routes.') + '</p>';
+      else {
+        h += rs.map((r, i) => '<div class="proute" data-r="' + i + '">' +
+          '<div class="prr"><span class="note">From</span><select data-rf="fc">' + linkOpt(r.fc) + '</select></div>' +
+          '<div class="prr"><span class="note">Channels</span><input data-rf="fs" type="number" min="1" value="' + r.fs + '"><span>–</span><input data-rf="fe" type="number" min="1" value="' + r.fe + '"></div>' +
+          '<div class="prr"><span class="note">Through</span><input data-rf="app" list="pswapps" value="' + esc(r.app || '') + '" placeholder="App"></div>' +
+          '<div class="prr"><span class="note">To</span><select data-rf="tc">' + linkOpt(r.tc || '', 'Ends here (recorded / streamed)') + '</select></div>' +
+          '<div class="prr">' + (r.tc ? '<span class="note">Channels</span><input data-rf="ts" type="number" min="1" value="' + (r.ts || 1) + '"><span class="note">–' + ((r.ts || 1) + r.fe - r.fs) + '</span>' : '') +
+          '<span class="grow"></span><button type="button" class="ghost xs" data-rx="' + i + '" title="Remove route">' + icon('trash') + 'Remove</button></div>' +
+          '<div class="note prt">' + esc(P.routeText(ix, r)) + '</div></div>').join('') +
+          '<datalist id="pswapps">' + apps.map((x) => '<option value="' + esc(x) + '">').join('') + '</datalist>' +
+          '<button class="btn" id="praddr">' + icon('plus') + 'Add a route</button>';
+      }
+      h += '</div>';
+      return h;
+    }
+    function computerWire(host, gid) {
+      $$('[data-selc]', host).forEach((b) => b.addEventListener('click', () => select({ cable: b.dataset.selc })));
+      if (!st.edit) return;
+      const g = () => gearOf(gid);
+      // the software list lives on its Gear Locker card too
+      const syncSw = () => { const x = g(); if (x && x.device_id && canEdit && !shared(x.device_id)) putDevice(x.device_id, { software: x.software || [] }).catch((e) => toast('Gear Locker card not updated: ' + e.message, 'bad')); };
+      $$('[data-swx]', host).forEach((b) => b.addEventListener('click', () => { change(() => { const x = g(); x.software.splice(Number(b.dataset.swx), 1); if (!x.software.length) delete x.software; }); syncSw(); }));
+      const f = $('#pswf', host);
+      if (f) f.addEventListener('submit', (e) => {
+        e.preventDefault(); const v = $('#pswi', host).value.trim(); if (!v) return;
+        change(() => { const x = g(); x.software = [...new Set((x.software || []).concat(v))]; }, v + ' added'); syncSw();
+      });
+      const add = $('#praddr', host);
+      if (add) add.addEventListener('click', () => change(() => {
+        const x = g(), ix = P.index(st.doc), L = (ix.audio.get(gid) || [])[0];
+        if (!L) return;
+        x.routes = (x.routes || []).concat({ fc: L.c.id, fs: 1, fe: Math.min(2, Math.max(1, L.chin)), app: (x.software || [])[0] || '', tc: L.c.id, ts: 1 });
+      }));
+      $$('[data-rx]', host).forEach((b) => b.addEventListener('click', () => change(() => { const x = g(); x.routes.splice(Number(b.dataset.rx), 1); if (!x.routes.length) delete x.routes; })));
+      $$('.proute', host).forEach((row) => $$('[data-rf]', row).forEach((inp) => inp.addEventListener('change', () => change(() => {
+        const x = g(), r = x.routes[Number(row.dataset.r)]; if (!r) return;
+        const k = inp.dataset.rf, v = inp.value.trim();
+        if (k === 'fc') r.fc = v;
+        else if (k === 'tc') { if (v) { r.tc = v; r.ts = r.ts || 1; } else { delete r.tc; delete r.ts; } }
+        else if (k === 'app') { if (v) r.app = v; else delete r.app; if (v && !(x.software || []).includes(v)) { x.software = (x.software || []).concat(v); setTimeout(syncSw, 0); } }
+        else { const n = Math.max(1, Math.floor(Number(v)) || 1); r[k] = n; if (k === 'fs' && r.fe < n) r.fe = n; if (k === 'fe' && r.fs > n) r.fs = n; }
+      }))));
+    }
     function cablePane(host, c) {
       const a = gearOf(c.a), b = gearOf(c.b);
       const ro = !st.edit;
       const net = c.ap === 'net', link = c.ap === 'link';
-      const kinds = Object.entries(KIND_STYLE).filter(([k]) => net ? k === 'net' : link ? (k === 'link' || k === 'dante') : (k !== 'net' && k !== 'link'));
-      host.innerHTML = '<div class="pph"><button class="ghost pback" id="pbk">' + icon('x') + '</button><span class="pkind">' + (link ? 'Link' : net ? 'Network cable' : 'Cable') + '</span></div>' +
+      const usbable = link && P.usbOk(a, 'link', b, 'link'), usb = c.kind === 'usb';
+      const kinds = Object.entries(KIND_STYLE).filter(([k]) => net ? k === 'net' : link ? (k === 'link' || k === 'dante' || (k === 'usb' && usbable)) : (k !== 'net' && k !== 'link' && k !== 'usb'));
+      // a computer's audio on this cable: USB, a Dante link, or Dante over its network cable (a virtual soundcard)
+      const comp = a.kind === 'computer' ? a : b.kind === 'computer' ? b : null;
+      const audio = comp && (usb || (link && c.kind === 'dante') || (net && a.kind === 'computer'));
+      const ixa = P.index(st.doc), AL = ixa.audioBy.get(c.id);
+      const endG = AL ? AL.end : comp && !net ? (comp === a ? b : a) : null;
+      const num = (f, label, val, ph) => '<label>' + label + '<input data-c="' + f + '" type="number" min="' + (f === 'chin' || f === 'chout' ? 0 : 1) + '" max="512" value="' + (val == null ? '' : val) + '"' + (ph ? ' placeholder="' + ph + '"' : '') + (ro ? ' disabled' : '') + '></label>';
+      let audioHtml = '';
+      if (audio) {
+        audioHtml = '<div class="pch">' + (usb ? 'Audio over ' + (c.usbtype || 'USB') : 'Dante channels') + '</div>' +
+          '<div class="two">' + num('chin', 'Channels to ' + esc(comp.name), c.chin != null ? c.chin : usb ? 2 : '', usb ? '' : '0') + num('chout', 'Channels from ' + esc(comp.name), c.chout != null ? c.chout : usb ? 2 : '', usb ? '' : '0') + '</div>' +
+          (usb ? '<label>Connection<select data-c="usbtype"' + (ro ? ' disabled' : '') + '>' + P.USB_TYPES.map((t) => '<option' + ((c.usbtype || 'USB') === t ? ' selected' : '') + '>' + t + '</option>').join('') + '</select></label>' : '');
+        if (net) {
+          const cands = st.doc.gear.filter((x) => x.kind === 'console' || x.kind === 'stagebox');
+          const auto = P.danteCandidates(st.doc, ixa.G, ixa.links, c, comp);
+          audioHtml += '<label>Dante to<select data-c="dto"' + (ro ? ' disabled' : '') + '><option value="">' + (auto.length === 1 || auto.filter((x) => x.kind === 'console').length === 1 ? 'On this network: ' + esc((auto.find((x) => x.kind === 'console') || auto[0]).name) : 'Pick one…') + '</option>' + cands.map((x) => '<option value="' + x.id + '"' + (c.dto === x.id ? ' selected' : '') + '>' + esc(tm(x)) + '</option>').join('') + '</select></label>';
+        }
+        if (endG && endG.kind === 'console') audioHtml += '<div class="two">' + num('snd', (AL ? AL.how : 'USB') + ' 1 carries channel', c.snd || 1) + num('ret', 'Returns land on channel', c.ret, 'not set') + '</div><p class="note">Channels back from ' + esc(comp.name) + ' land on ' + esc(endG.name) + ' channels from this one.</p>';
+        else if (endG) audioHtml += '<p class="note">' + (AL ? AL.how : 'USB') + ' 1, 2… to ' + esc(comp.name) + ' are ' + esc(endG.name) + ' In 1, 2…; channels back play on its Out 1, 2…</p>';
+      }
+      host.innerHTML = '<div class="pph"><button class="ghost pback" id="pbk">' + icon('x') + '</button><span class="pkind">' + (usb ? (c.usbtype || 'USB') + ' cable' : link ? 'Link' : net ? 'Network cable' : 'Cable') + '</span></div>' +
         '<p class="pcab"><b>' + esc(tm(a) + (link || net ? (net ? ' · network' : '') : ' ' + a.outs[c.ap])) + '</b><br>→ <b>' + esc(tm(b) + (link ? '' : net ? (c.port ? ' · port ' + c.port : '') : ' ' + b.ins[c.bp])) + '</b></p><div class="pform">' +
         (kinds.length > 1 ? '<label>Type<select data-c="kind"' + (ro ? ' disabled' : '') + '>' + kinds.map(([k, v]) => '<option value="' + k + '"' + (c.kind === k ? ' selected' : '') + '>' + v + '</option>').join('') + '</select></label>' : '') +
         (net ? '<label>Switch port<select data-c="port"' + (ro ? ' disabled' : '') + '><option value="">Not set</option>' + Array.from({ length: b.nports || 8 }, (_, i) => i + 1).map((n) => { const o = st.doc.cables.find((x) => x.ap === 'net' && x.b === b.id && x.port === n && x.id !== c.id); return '<option value="' + n + '"' + (c.port === n ? ' selected' : '') + (o ? ' disabled' : '') + '>Port ' + n + (o ? ' · ' + esc(gearOf(o.a).name) : '') + '</option>'; }).join('') + '</select></label>' : '') +
-        (link ? '<label>Link name (SLink, AES50, Dante)<input data-c="label" value="' + esc(c.label || '') + '"' + (ro ? ' disabled' : '') + '></label>'
+        (link && !usb ? '<label>Link name (SLink, AES50, Dante)<input data-c="label" value="' + esc(c.label || '') + '"' + (ro ? ' disabled' : '') + '></label>'
           : '<label>Tag name<span class="tagrow"><input data-c="label" value="' + esc(c.label || '') + '" placeholder="C-001"' + (ro ? ' disabled' : '') + '>' + (ro ? '' : '<button type="button" class="btn sm" id="pcauto" title="The next free cable number">Auto label</button>') + '</span></label>') +
         '<label>Length<input data-c="length" value="' + esc(c.length || '') + '" placeholder="25 ft"' + (ro ? ' disabled' : '') + '></label>' +
-        '<label>Notes<textarea data-c="notes" rows="2"' + (ro ? ' disabled' : '') + '>' + esc(c.notes || '') + '</textarea></label></div>' +
+        '<label>Notes<textarea data-c="notes" rows="2"' + (ro ? ' disabled' : '') + '>' + esc(c.notes || '') + '</textarea></label>' + audioHtml + '</div>' +
+        (comp && audio ? '<button class="btn" id="pcomp">' + icon('list') + 'Routes on ' + esc(comp.name) + '</button>' : '') +
         (st.edit && link && (a.kind === 'stagebox' || b.kind === 'stagebox') ? '<button class="btn" id="pchan2">' + icon('list') + 'Assign console channels</button>' : '') +
         (st.edit ? '<div class="pacts"><span class="grow"></span><button class="ghost danger" id="pcdel">' + icon('trash') + 'Remove ' + (link ? 'link' : 'cable') + '</button></div>' : '');
       $('#pbk', host).addEventListener('click', () => { select(null); const m = host.closest('.modal'); if (m) m.remove(); });
+      const pcm = $('#pcomp', host); if (pcm) pcm.addEventListener('click', () => select({ gear: [comp.id] }));
       if (!st.edit) return;
       const pc = $('#pchan2', host); if (pc) pc.addEventListener('click', () => channelDialog(a.kind === 'stagebox' ? a : b));
       $$('[data-c]', host).forEach((inp) => inp.addEventListener('change', () => change(() => {
         const cc = st.doc.cables.find((x) => x.id === c.id); const f = inp.dataset.c;
         if (f === 'port') { if (Number(inp.value)) cc.port = Number(inp.value); else delete cc.port; return; }
+        if (['chin', 'chout', 'ret', 'snd'].includes(f)) { const n = Math.floor(Number(inp.value)); if (inp.value.trim() !== '' && n >= (f === 'chin' || f === 'chout' ? 0 : 1) && !(f === 'snd' && n === 1)) cc[f] = Math.min(512, n); else delete cc[f]; return; }
         if (inp.value.trim()) cc[f] = inp.value.trim(); else delete cc[f];
-      }, null, true)));
+      }, null, !['kind', 'dto', 'usbtype'].includes(inp.dataset.c))));
       const au = $('#pcauto', host);
       if (au) au.addEventListener('click', () => { const inp = $('[data-c=label]', host); inp.value = Tags.cableName(cableInfos(st.doc).get(c.id) || { type: 'out' }, st.doc.cables.filter((x) => x.id !== c.id).map((x) => x.label || '')); inp.dispatchEvent(new Event('change')); });
       $('#pcdel', host).addEventListener('click', () => { st.selCable = null; change(() => { st.doc.cables = st.doc.cables.filter((x) => x.id !== c.id); }, 'Cable removed'); closeSheet(); });
@@ -2525,7 +2746,7 @@ const PatchView = (() => {
         return parts.join('<br>');
       };
       // wireless receivers and in-ear transmitters have their own sections above, so they are not listed again here
-      const GROUPS = [['Console', ['console']], ['Stage I/O', ['stagebox']], ['Headphone amps', ['headamp']], ['Processing', ['processor']], ['Amplifiers', ['amp']], ['Speakers and monitors', ['speaker', 'wedge']], ['Network', ['network', 'computer']], ['Other', ['other']]];
+      const GROUPS = [['Console', ['console']], ['Stage I/O', ['stagebox']], ['Headphone amps', ['headamp']], ['Processing', ['processor']], ['Amplifiers', ['amp']], ['Speakers and monitors', ['speaker', 'wedge']], ['Network', ['network']], ['Other', ['other']]];
       const eq = GROUPS.map(([title, kinds]) => {
         const list = doc.gear.filter((g) => kinds.includes(g.kind));
         if (!list.length) return '';
@@ -2536,6 +2757,14 @@ const PatchView = (() => {
           return [gs.map((x) => '<b>' + esc(x.name) + '</b>').join(', '), String(gs.length), esc(g.make || (dev && dev.make) || ''), esc(g.model || (dev && dev.model) || ''), esc((dev && dev.location) || ''), gs.map((x) => conn(x)).filter(Boolean).join('<br>'), gs.map((x) => net(x)).filter(Boolean).join('<br>')]; }), '');
       }).join('');
       add('gear', 'Equipment', eq || '<p class="rnone">No equipment yet.</p>');
+      // computers and audio interfaces: software, audio links with channel counts, routes
+      const pcs = P.computers(doc);
+      if (pcs.length) {
+        const rows = pcs.map((x) => { const dev = devOf(x.g);
+          return ['<b>' + esc(tm(x.g)) + '</b><div class="rs">' + esc(P.KINDS[x.g.kind].label) + ((dev && dev.location) ? ' · ' + esc(dev.location) : '') + '</div>', esc(x.software.join(', ')),
+            x.links.map((l) => esc(l.text) + ' <span class="rs">⇄ ' + esc(l.to || 'Dante: not set') + '</span>').join('<br>'), x.routes.map(esc).join('<br>') || (x.g.kind === 'computer' && x.links.length ? '<span class="rs">No routes: audio ends here</span>' : ''), net(x.g)]; });
+        add('pcs', 'Computers and interfaces', T(['Tag', 'Software', 'Audio links', 'Routes', 'Network'], rows, ''));
+      }
       // cables
       const cl = P.cableList(doc).filter((r) => r.a && r.b && r.c.kind !== 'rf').sort((p, q) => String(p.c.label || '~').localeCompare(String(q.c.label || '~'), undefined, { numeric: true }))
         .map((r) => ['<b>' + esc(r.c.label || '') + '</b>', esc(r.from), esc(r.to), esc(KIND_STYLE[r.c.kind] || r.c.kind || ''), esc(r.c.length || '')]);

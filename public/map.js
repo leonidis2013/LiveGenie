@@ -139,7 +139,7 @@ function drawMap(host, data, view) {
       <button class="btn ghost" id="mpdf" title="Export PDF">${icon('pdf')}<span class="hide-sm">PDF</span></button></div>
     <div class="mapwrap"><svg id="msvg" role="img" aria-label="System map"><defs><marker id="marr" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0 0L10 5L0 10z" class="marr"/></marker></defs><g id="mvp"><g id="medges"></g><g id="mnodes"></g></g></svg>
       <div class="mside hide" id="mside"></div><div class="mhint note">${editable ? 'Drag to move around, scroll or pinch to zoom, tap a box for details. Arrange lets you drag boxes.' : 'Drag to move around, scroll or pinch to zoom, tap a box for details.'}</div></div>
-    ${view === 'signal' ? '<div class="mlegend">' + Object.keys(CAT_COLOR).filter((c) => ids.some((id) => byId.get(id).category === c)).map((c) => '<span><i style="background:' + CAT_COLOR[c] + '"></i>' + CAT[c] + '</span>').join('') + '</div>' : ''}
+    ${view === 'signal' ? '<div class="mlegend">' + Object.keys(CAT_COLOR).filter((c) => ids.some((id) => byId.get(id).category === c)).map((c) => '<span><i style="background:' + CAT_COLOR[c] + '"></i>' + CAT[c] + '</span>').join('') + (edges.some((e) => e.kind === 'usb') ? '<span><i style="background:#e0a526;height:4px"></i>USB · Thunderbolt</span>' : '') + (edges.some((e) => e.kind === 'link') ? '<span><i style="background:#8b6cff;height:4px"></i>Digital link</span>' : '') + '</div>' : ''}
     ${trayHtml(tray)}`;
   const svg = $('#msvg'), vp = $('#mvp'), gE = $('#medges'), gN = $('#mnodes');
   const color = (n) => view === 'network' ? (vColor.get(n.vlans[0]) || 'var(--faint)') : (CAT_COLOR[n.category] || CAT_COLOR.other);
@@ -160,9 +160,9 @@ function drawMap(host, data, view) {
   function drawEdges() {
     gE.innerHTML = edges.filter((e) => pos.has(e.from) && pos.has(e.to)).map((e, i) => {
       const [x2, y2] = pos.get(e.to), [x1, y1] = pos.get(e.from);
-      const lab = view === 'network' ? (e.port ? 'port ' + e.port : '') : (e.count > 1 ? '×' + e.count : '');
+      const lab = view === 'network' ? (e.port ? 'port ' + e.port : '') : e.kind === 'usb' ? cut(e.rows[0] || 'USB', 28) : (e.count > 1 ? '×' + e.count : '');
       const lx = view === 'network' ? x2 - 6 : (x1 + NW + x2) / 2, ly = view === 'network' ? y2 + NH / 2 - 6 : (y1 + y2) / 2 + NH / 2 - 6;
-      return '<g class="me ' + view + '" data-i="' + i + '" data-from="' + e.from + '" data-to="' + e.to + '"><path class="hit" d="' + edgePath(e) + '"/><path class="ln" d="' + edgePath(e) + '"' + (view === 'signal' ? ' marker-end="url(#marr)"' : '') + '/>' +
+      return '<g class="me ' + view + (e.kind ? ' k-' + e.kind : '') + '" data-i="' + i + '" data-from="' + e.from + '" data-to="' + e.to + '"><path class="hit" d="' + edgePath(e) + '"/><path class="ln" d="' + edgePath(e) + '"' + (view === 'signal' ? ' marker-end="url(#marr)"' : '') + '/>' +
         (lab ? '<text x="' + lx + '" y="' + ly + '" text-anchor="' + (view === 'network' ? 'end' : 'middle') + '">' + esc(lab) + '</text>' : '') + '</g>';
     }).join('');
   }

@@ -36,7 +36,13 @@ const PatchView = (() => {
   /** Gear with a network socket: switches and computers, anything ticked "On the network" in the Gear Locker, or already cabled. */
   /** Gear that takes a network cable: big gear always does (a console, stage box, receiver…); anything else once its card says it is on the network. */
   const NET_KINDS = ['network', 'computer', 'console', 'stagebox', 'processor', 'amp', 'receiver', 'iemtx'];
-  const hasNet = (doc, g) => NET_KINDS.includes(g.kind) || !!(devOf(g) || {}).networked || !!P.netOf(doc, g);
+  // a block linked to a Gear Locker card follows its "On the network" tick; a block with no card goes by its kind.
+  // A network cable already drawn keeps its socket, so nothing is left hanging.
+  const hasNet = (doc, g) => {
+    if (g.kind === 'network' || P.netOf(doc, g)) return true;
+    const d = devOf(g);
+    return d ? !!d.networked : NET_KINDS.includes(g.kind);
+  };
 
   // ================= cards =================
   /** Gear drawn as cards: everything except mics and packs that live inside a wireless system. */

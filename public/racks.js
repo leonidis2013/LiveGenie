@@ -555,15 +555,17 @@ function lineUp(rack, done) {
  * a patch panel and a switch), gear mounted a hole off, and photos taken at an angle. Here each spot can be moved and
  * resized by hand; "Back to the grid" drops the change for one piece. Saved on the rack.
  */
-function adjustSpots(rack, rows, done) {
+function adjustSpots(rack, rows, done, opts) {
+  // opts (rooms): { free: true } no U lines or rails to snap to and no grid to go back to; title, note
+  opts = opts || {};
   const spots = JSON.parse(JSON.stringify(rack.spots || {}));
   // rows: { key, name, title, grid() } for gear and the rack's own pieces
   const boxOf = (g) => spots[g.key] || g.grid();
-  let cur = rows.length ? rows[0].key : null;
-  modal('<h3>Adjust spots</h3><p class="note">Drag a spot to where that piece of gear really is in the photo. Drag any of its four corners to fit it: corners move on their own, so a spot can lean with a photo taken at an angle.</p>' +
+  let cur = opts.start && rows.some((g) => g.key === opts.start) ? opts.start : rows.length ? rows[0].key : null;
+  modal('<h3>' + esc(opts.title || 'Adjust spots') + '</h3><p class="note">' + esc(opts.note || 'Drag a spot to where that piece of gear really is in the photo. Drag any of its four corners to fit it: corners move on their own, so a spot can lean with a photo taken at an angle.') + '</p>' +
     '<div class="sjwrap"><div class="lupic sjpic" id="sjp"><img src="/uploads/' + esc(rack.photo) + '" alt="" draggable="false"><div id="sjb"></div><div id="sjg" class="sjg"></div></div>' +
     '<div class="sjlist" id="sjl"></div></div>' +
-    '<div class="acts"><label class="tog sjtog"><input type="checkbox" id="sjsnap"' + ((() => { try { return localStorage.getItem('lg-rack-snap'); } catch (e) { return null; } })() === '0' ? '' : ' checked') + '><span>Snap</span></label><button type="button" class="ghost" id="sjall">All back to the grid</button><span class="grow"></span><button type="button" data-close>Cancel</button><button class="primary" id="sjok">Save</button></div>', (w, close) => {
+    '<div class="acts"><label class="tog sjtog"><input type="checkbox" id="sjsnap"' + ((() => { try { return localStorage.getItem('lg-rack-snap'); } catch (e) { return null; } })() === '0' ? '' : ' checked') + '><span>Snap</span></label>' + (opts.free ? '' : '<button type="button" class="ghost" id="sjall">All back to the grid</button>') + '<span class="grow"></span><button type="button" data-close>Cancel</button><button class="primary" id="sjok">Save</button></div>', (w, close) => {
     w.classList.add('mwide', 'mkmodal');
     const pic = $('#sjp', w);
     /**
@@ -571,8 +573,8 @@ function adjustSpots(rack, rows, done) {
      * (within about 1% of the photo), and a guide line shows what it caught. Off with the tick, or hold Alt (Option).
      */
     const THR = 0.012;
-    const uLines = () => { const out = []; for (let u = 0; u <= rack.units; u++) out.push(RackCore.at(rack.rails, 0.5, u / rack.units).y); return out; };
-    const railX = () => { const out = []; for (let k = 0; k <= 4; k++) { const d = k / 4; out.push(RackCore.at(rack.rails, 0, d).x, RackCore.at(rack.rails, 1, d).x, RackCore.at(rack.rails, 0.5, d).x); } return out; };
+    const uLines = () => { if (opts.free) return []; const out = []; for (let u = 0; u <= rack.units; u++) out.push(RackCore.at(rack.rails, 0.5, u / rack.units).y); return out; };
+    const railX = () => { if (opts.free) return []; const out = []; for (let k = 0; k <= 4; k++) { const d = k / 4; out.push(RackCore.at(rack.rails, 0, d).x, RackCore.at(rack.rails, 1, d).x, RackCore.at(rack.rails, 0.5, d).x); } return out; };
     const near = (v, list) => { let best = null; list.forEach((c) => { if (Math.abs(c - v) <= THR && (best == null || Math.abs(c - v) < Math.abs(best - v))) best = c; }); return best; };
     function snapBox(b, key, resize, off) {
       const on = $('#sjsnap', w).checked && !off;
@@ -614,7 +616,7 @@ function adjustSpots(rack, rows, done) {
     }
     const paint = () => {
       $('#sjb', w).innerHTML = rows.map((g) => boxHtml(g)).join('') + (cur ? cornersHtml(rows.find((g) => g.key === cur)) : '');
-      $('#sjl', w).innerHTML = rows.map((g) => '<button type="button" class="sjrow' + (g.key === cur ? ' on' : '') + '" data-pick="' + g.key + '"><b>' + esc(g.title) + '</b><span>' + (spots[g.key] ? 'Moved by hand · <u data-reset="' + g.key + '">back to the grid</u>' : 'On the grid') + '</span></button>').join('');
+      $('#sjl', w).innerHTML = rows.map((g) => '<button type="button" class="sjrow' + (g.key === cur ? ' on' : '') + '" data-pick="' + g.key + '"><b>' + esc(g.title) + '</b><span>' + (opts.free ? esc(g.sub || '') : spots[g.key] ? 'Moved by hand · <u data-reset="' + g.key + '">back to the grid</u>' : 'On the grid') + '</span></button>').join('');
       $$('[data-pick]', w).forEach((b) => b.addEventListener('click', (e) => { const r = e.target.closest('[data-reset]'); if (r) { delete spots[r.dataset.reset]; } cur = b.dataset.pick; paint(); }));
     };
     paint();
@@ -660,7 +662,7 @@ function adjustSpots(rack, rows, done) {
     const end = () => { if (drag) { drag = null; guides([], []); paint(); } };
     pic.addEventListener('pointerup', end); pic.addEventListener('pointercancel', end);
     $('#sjsnap', w).addEventListener('change', (e) => { try { localStorage.setItem('lg-rack-snap', e.target.checked ? '1' : '0'); } catch (er) { /* private mode */ } });
-    $('#sjall', w).addEventListener('click', () => { Object.keys(spots).forEach((k) => delete spots[k]); paint(); });
+    const sjall = $('#sjall', w); if (sjall) sjall.addEventListener('click', () => { Object.keys(spots).forEach((k) => delete spots[k]); paint(); });
     $('#sjok', w).addEventListener('click', async () => {
       // keep only spots for gear still in the rack
       const keep = {}; rows.forEach((g) => { if (spots[g.key]) keep[g.key] = spots[g.key]; });

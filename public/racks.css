@@ -162,7 +162,7 @@
 .sjh { position:absolute; right:-9px; bottom:-9px; width:18px; height:18px; border-radius:50%; background:#4c8dff; border:3px solid #fff; cursor:nwse-resize; }
 .sjlist { flex:0 1 240px; display:flex; flex-direction:column; gap:4px; max-height:70vh; overflow:auto; }
 .sjrow { display:flex; flex-direction:column; align-items:flex-start; text-align:left; gap:2px; padding:7px 10px; border-radius:10px; border:1px solid var(--line); background:var(--card); }
-.sjrow.on { border-color:var(--acc); }
+.sjrow.on { border-color:var(--acc); background:color-mix(in srgb, var(--acc) 14%, var(--card)); color:var(--fg); }
 .sjrow span { font-size:12px; color:var(--dim); font-weight:400; }
 .sjrow u { color:var(--acc); cursor:pointer; }
 

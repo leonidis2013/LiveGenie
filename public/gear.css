@@ -160,3 +160,11 @@
 .pphoto .pphimg .spstage, .pphoto .pphimg .mkpic { max-width:100%; }
 .pphoto .pphimg .mkpic img { max-height:240px; max-width:100%; width:auto; height:auto; }
 .pphoto .note { margin-top:4px; }
+
+/* a card's photos (0.29.0): its own, its room spots, its rack spot */
+.dmk.capped .spstage, .dmk.capped .mkpic { max-width:100%; }
+.dmk.capped .mkpic img { max-height:420px; max-width:100%; width:auto; height:auto; }
+@media (max-width:600px) { .dmk.capped .mkpic img { max-height:320px; } }
+.dpich { display:flex; align-items:center; gap:10px; justify-content:space-between; margin:16px 0 8px; }
+.dpich:first-of-type { margin-top:4px; }
+.dpich b { font-size:14px; }

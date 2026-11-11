@@ -40,6 +40,8 @@ const ICONS = {
   users: '<circle cx="9" cy="8" r="3.5"/><path d="M2.5 20c.8-3.5 3.3-5.5 6.5-5.5s5.7 2 6.5 5.5"/><path d="M16 4.5a3.5 3.5 0 0 1 0 7M18 14.8c2 .8 3.2 2.6 3.6 5.2"/>',
   box: '<path d="M3 7l9-4 9 4v10l-9 4-9-4z"/><path d="M3 7l9 4 9-4M12 11v10"/>',
   rack: '<rect x="4" y="3" width="16" height="18" rx="1.5"/><path d="M4 8h16M4 13h16M4 18h16M7 5.5h.01M7 10.5h.01M7 15.5h.01"/>',
+  stage: '<path d="M3 7h18v8H3z"/><path d="M7 15v4M17 15v4"/><circle cx="9" cy="11" r="1.6"/><circle cx="15" cy="11" r="1.6"/>',
+  room: '<rect x="6" y="3" width="12" height="18" rx="2"/><circle cx="12" cy="14" r="3.5"/><circle cx="12" cy="7.5" r="1.5"/>',
   plug: '<path d="M9 3v5M15 3v5M6 8h12v3a6 6 0 0 1-12 0zM12 17v4"/>',
   list: '<path d="M8 6h13M8 12h13M8 18h13M3 6h.01M3 12h.01M3 18h.01"/>',
   restore: '<path d="M3 12a9 9 0 1 0 3-6.7L3 8"/><path d="M3 3v5h5"/>',
@@ -1570,7 +1572,7 @@ async function route() {
   const p = pathPart.split('/').filter(Boolean);
   markGear(p[0] === 'settings');
   Shell.setCtx({});
-  document.body.classList.toggle('wideview', p[0] === 'patch');
+  document.body.classList.toggle('wideview', p[0] === 'patch' || (p[0] === 'plots' && !!p[1]));
   if (p[0] !== 'settings') S.lastRoute = h;
   if (p[0] !== 'search') $('#q').value = '';
   if (S.landing === undefined) S.landing = true;
@@ -1586,6 +1588,8 @@ async function route() {
     else if (p[0] === 'new') await viewEdit(null, qs.get('space'));
     else if (p[0] === 'map') await viewMap(p[1]);
     else if (p[0] === 'racks') await (p[1] ? viewRack(p[1], p[2]) : viewRacks());
+    else if (p[0] === 'rooms') await (p[1] ? viewRoom(p[1], p[2]) : viewRooms());
+    else if (p[0] === 'plots') await (p[1] ? PlotView.view(p[1], p[2]) : PlotView.list());
     else if (p[0] === 'patch') await PatchView.view(qs);
     else if (p[0] === 'gear-setup') await viewGearSetup(qs);
     else if ((p[0] === 'devices' || p[0] === 'gear') && p[1] === 'new') await viewDeviceEdit(null);

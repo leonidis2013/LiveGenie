@@ -22,6 +22,7 @@ const Training = require('./lib/training');
 const Patch = require('./lib/patch');
 const Admin = require('./lib/admin');
 const Racks = require('./lib/racks');
+const Rooms = require('./lib/rooms');
 const PatchConvert = require('./lib/patchconvert');
 const PatchCoreLib = require('./public/patchcore');
 
@@ -45,6 +46,7 @@ const devices = Devices.create(db, { UserError: Store.UserError, audit: store.au
 const uploadExists = (id) => !!store.upload(id);
 const patch = Patch.create(db, { UserError: Store.UserError, audit: store.audit });
 const racks = Racks.create(db, { UserError: Store.UserError, audit: store.audit, uploadExists: (id) => !!store.upload(id) });
+const rooms = Rooms.create(db, { UserError: Store.UserError, audit: store.audit, uploadExists: (id) => !!store.upload(id), getSetting: store.getSetting, setSetting: store.setSetting });
 const adm = Admin.create(db, { UserError: Store.UserError, audit: store.audit, dataDir: DATA, getSetting: store.getSetting, setSetting: store.setSetting });
 const network = Network.create(db, { UserError: Store.UserError, audit: store.audit, devices, getSetting: store.getSetting, setSetting: store.setSetting, patch });
 if (restoreNote) store.audit(null, 'backup.restored', '', restoreNote);
@@ -521,6 +523,30 @@ async function api(req, res, url, user, token) {
         url: store.getSetting('base_url')
       });
       return r.ok ? send(res, 200, { ok: true, status: r.status }) : fail(res, 502, 'The webhook did not accept it: ' + r.error);
+    }
+  }
+
+  // ----- rooms: a photo of a room with its gear highlighted -----
+  if (a === 'rooms') {
+    if (m === 'GET' && !b) return send(res, 200, { ok: true, rooms: rooms.list(user) });
+    if (m === 'POST' && !b) { need(user, 'admin'); return send(res, 200, { ok: true, id: rooms.add(await readJson(req), user) }); }
+    if (b && /^\d+$/.test(b)) {
+      if (m === 'GET' && !c) return send(res, 200, { ok: true, ...rooms.get(b, user) });
+      if (m === 'PUT' && !c) { need(user, 'admin'); rooms.edit(b, await readJson(req), user); return send(res, 200, { ok: true, ...rooms.get(b, user) }); }
+      if (m === 'DELETE' && !c) { need(user, 'admin'); rooms.remove(b, user); return send(res, 200, { ok: true }); }
+      if (m === 'PUT' && c === 'gear') { need(user, 'admin'); return send(res, 200, { ok: true, ...rooms.setGear(b, (await readJson(req)).gear, user) }); }
+    }
+  }
+  // ----- stage plots, and the stage outline they share -----
+  if (a === 'plots') {
+    if (m === 'GET' && !b) return send(res, 200, { ok: true, plots: rooms.plots(), outline: rooms.outline() });
+    if (m === 'POST' && !b) { need(user, 'admin'); return send(res, 200, { ok: true, id: rooms.addPlot(await readJson(req), user) }); }
+    if (b === 'outline' && m === 'GET') return send(res, 200, { ok: true, outline: rooms.outline() });
+    if (b === 'outline' && m === 'PUT') { need(user, 'admin'); return send(res, 200, { ok: true, outline: rooms.setOutline(await readJson(req), user) }); }
+    if (b && /^\d+$/.test(b) && !c) {
+      if (m === 'GET') return send(res, 200, { ok: true, ...rooms.plot(b) });
+      if (m === 'PUT') { need(user, 'admin'); return send(res, 200, { ok: true, ...rooms.editPlot(b, await readJson(req, 4 * 1024 * 1024), user) }); }
+      if (m === 'DELETE') { need(user, 'admin'); rooms.removePlot(b, user); return send(res, 200, { ok: true }); }
     }
   }
 

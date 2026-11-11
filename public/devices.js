@@ -453,6 +453,8 @@ async function viewDevice(id) {
   // in a rack: its spot, and the rack photo when the card has no photo of its own
   let rack = null;
   if (v.rack_id) { try { rack = (await get('/api/racks/' + v.rack_id)).rack; } catch (e) { rack = null; } }
+  // in a room: its spot in the room photo (each piece of a card with a quantity has its own)
+  const roomHits = typeof roomSpotsOf === 'function' ? roomSpotsOf(v.id, await loadRooms().catch(() => [])) : [];
   const ipRows = v.ips.map((ip) => {
     const src = v.ipSources.filter((s) => s.ip === ip);
     const where = [...new Set((v.ip === ip ? ['on this card'] : []).concat(src.map((s) => 'IP list ' + s.network + (s.vlan ? ' (VLAN ' + s.vlan + ')' : ''))))];
@@ -471,6 +473,7 @@ async function viewDevice(id) {
     ['Capsule', (() => { const c = v.kind === 'txmic' && v.capsule_card && all.find((x) => x.id === v.capsule_card); return c ? dl(c) : esc(v.capsule); })()],
     ['In mics', (() => { if (v.kind !== 'capsule') return ''; const on = all.filter((x) => x.kind === 'txmic' && x.capsule_card === v.id); return on.length ? on.map(dl).join(', ') + (v.qty > 1 ? ' <span class="note">' + on.length + ' of ' + v.qty + ' in use</span>' : '') : '<span class="note">' + (v.qty > 1 ? 'All ' + v.qty + ' spare' : 'Spare') + '</span>'; })()],
     ['Location', esc(v.location)],
+    ['Room', roomHits.map((h) => '<a href="#/rooms/' + h.room.id + '">' + esc(h.room.name) + '</a>' + (h.entries.length > 1 || qtyOf(v) > 1 ? ' <span class="note">' + esc(h.entries.map((e) => e.tag).join(', ')) + '</span>' : '')).join(' · ')],
     ['Rack', rack ? '<a href="#/racks/' + rack.id + '">' + esc(rack.name) + '</a> · ' + esc(rackSpot(v, rack)) : ''],
     ['Power', (() => {
       const pdu = v.power_pdu && all.find((x) => x.id === v.power_pdu);
@@ -488,17 +491,23 @@ async function viewDevice(id) {
   ].filter((f) => f[1]);
   const used = d.usedOn;
   // the photo: its own (with its highlights), or its spot in the rack photo
-  const pic = v.photo ? { photo: v.photo, marks: v.marks, card: v } : rack && rack.photo ? { rack: true, photo: rack.photo, marks: [rackMark(v, rack)], card: { ...v, location: rack.name } } : null;
+  // its own photo first, then where it is in a room, then its spot in the rack photo: every one of them is shown
+  const pics = [];
+  if (v.photo) pics.push({ photo: v.photo, marks: v.marks, card: v, title: 'Its photo' });
+  roomHits.forEach((h) => { if (h.room.photo && h.marks.length) pics.push({ focus: true, photo: h.room.photo, marks: h.marks, card: { ...v, location: h.room.name }, title: h.room.name, link: '#/rooms/' + h.room.id }); });
+  if (rack && rack.photo) pics.push({ rack: true, focus: true, photo: rack.photo, marks: [rackMark(v, rack)], card: { ...v, location: rack.name }, title: rack.name, link: '#/racks/' + rack.id });
+  const pic = pics[0] || null;
   app.innerHTML = `<div class="page dev">
     <div class="crumbs"><a href="#/">Home</a><span>/</span><a href="#/gear">Gear Locker</a></div>
-    <div class="devhead">${pic ? '<a href="#dphoto" class="devphotoa" id="dpa"><img class="devphoto" src="/uploads/' + esc(pic.photo) + '" alt=""' + (pic.rack ? ' style="object-position:' + Math.round((pic.marks[0].x + pic.marks[0].w / 2) * 100) + '% ' + Math.round((pic.marks[0].y + pic.marks[0].h / 2) * 100) + '%"' : '') + '></a>' : devThumb(v, 84)}
+    <div class="devhead">${pic ? '<a href="#dphoto" class="devphotoa" id="dpa"><img class="devphoto" src="/uploads/' + esc(pic.photo) + '" alt=""' + (pic.focus ? ' style="object-position:' + Math.round((pic.marks[0].x + pic.marks[0].w / 2) * 100) + '% ' + Math.round((pic.marks[0].y + pic.marks[0].h / 2) * 100) + '%"' : '') + '></a>' : devThumb(v, 84)}
       <div class="grow"><h1 class="title">${esc(gearTitle(v))}${qtyOf(v) > 1 ? ' <span class="qtyb big">×' + qtyOf(v) + '</span>' : ''}</h1>${tagChips(v, 'big')}<div class="meta" style="margin:0">${esc(kindLabel(v.kind) || '')}
         <span class="chip">${CAT[v.category] || 'Other'}</span>${v.tech_only ? '<span class="badge tech">Tech only</span>' : ''}</div></div>
       <div class="acts-top">${can('admin') ? '<button class="btn" id="eD">' + icon('edit') + 'Edit</button>' + (qtyOf(v) > 1 ? '<button class="btn" id="spD" title="Make a card for each one, to give each its own details">Split into ' + qtyOf(v) + ' cards</button>' : '') + '<button class="ghost danger" id="xD" title="Delete device">' + icon('trash') + '</button>' : '<button class="btn ghost" id="rD">' + icon('alert') + 'Report a problem</button>'}</div></div>
     ${facts.length ? '<div class="card facts">' + facts.map((f) => '<div class="fact"><span>' + f[0] + '</span><div>' + f[1] + '</div></div>').join('') + '</div>' : ''}
     ${v.notes.trim() ? '<div class="doc" id="dnotes">' + md(v.notes) + '</div>' : ''}
-    ${pic ? '<div class="section" style="margin-top:20px" id="dphoto"><div class="hsh"><h2>Photo</h2>' + (pic.rack ? '<a class="btn" href="#/racks/' + rack.id + '">' + icon('list') + 'Open ' + esc(rack.name) + '</a>' : '') + '</div><div id="dmarks" class="capped"></div>' +
-      '<div class="note" style="margin-top:6px">' + (pic.rack ? 'Where it sits in ' + esc(rack.name) + '. ' : '') + 'Tap the photo to see it full screen.' + (can('admin') && !pic.rack && !v.marks.length ? ' Admins: Edit, then Highlight on the photo.' : '') + '</div></div>' : ''}
+    ${pic ? '<div class="section" style="margin-top:20px" id="dphoto"><div class="hsh"><h2>Photo' + (pics.length > 1 ? 's' : '') + '</h2>' + (pics.length === 1 && pic.link ? '<a class="btn" href="' + pic.link + '">' + icon('list') + 'Open ' + esc(pic.title) + '</a>' : '') + '</div>' +
+      pics.map((p, k) => (pics.length > 1 ? '<div class="dpich"><b>' + esc(p.title) + '</b>' + (p.link ? '<a class="btn sm" href="' + p.link + '">' + icon('list') + 'Open</a>' : '') + '</div>' : '') + '<div id="dmarks' + k + '" class="capped dmk"></div>' +
+        '<div class="note" style="margin-top:6px">' + (p.rack ? 'Where it sits in ' + esc(p.title) + '. ' : p.focus ? 'Where it is in the ' + esc(p.title) + ' photo. ' : '') + 'Tap the photo to see it full screen.' + (can('admin') && !p.focus && !v.marks.length ? ' Admins: Edit, then Highlight on the photo.' : '') + '</div>').join('') + '</div>' : ''}
     ${PAIR_CHILD[v.kind] ? (() => { const P = GEAR_PAIR[PAIR_CHILD[v.kind]];
       return '<div class="section" style="margin-top:20px"><div class="hsh"><h2>' + P.list + '</h2>' + (can('admin') ? '<a class="btn" href="#/gear/new?kind=' + PAIR_CHILD[v.kind] + '&pair=' + v.id + '">' + icon('plus') + P.add + '</a>' : '') + '</div>' +
         (kids.length ? '<div class="list pairs">' + kids.map((x) => '<a class="row" href="#/d/' + x.id + '">' + devThumb(x, 36) + '<div class="t"><b>' + esc(tagModel(x)) + '</b><span>' + esc([x.txtype, x.capsule, x.freq && x.freq + ' MHz'].filter(Boolean).join(' · ') || [x.make, x.model].filter(Boolean).join(' ')) + '</span></div></a>').join('') + '</div>'
@@ -515,9 +524,12 @@ async function viewDevice(id) {
   linkDevices($('#dnotes'));
   paintFiles($('#dfiles'), v, d.files || [], d.sharedFiles || [], { view: true });
   if (pic) {
-    $('#dmarks').innerHTML = marksView(pic.photo, pic.marks, pic.card);
-    wireMarksView($('#dmarks'));
-    photoLightbox($('#dmarks'), pic.photo, pic.marks, pic.card);
+    pics.forEach((p, k) => {
+      const h = $('#dmarks' + k);
+      h.innerHTML = marksView(p.photo, p.marks, p.card);
+      wireMarksView(h);
+      photoLightbox(h, p.photo, p.marks, p.card);
+    });
     $('#dpa').addEventListener('click', (e) => { e.preventDefault(); $('#dphoto').scrollIntoView({ behavior: 'smooth', block: 'start' }); });
   }
   const rd = $('#rD'); if (rd) rd.addEventListener('click', () => reportProblem(v.name, { device_id: v.id }));
@@ -594,6 +606,10 @@ const RACK_CACHE = new Map();
 async function gearPicture(v) {
   if (!v) return null;
   if (v.photo) return { photo: v.photo, marks: v.marks || [], card: v };
+  if (typeof roomSpotsOf === 'function') {
+    const hit = roomSpotsOf(v.id, await loadRooms().catch(() => [])).find((h) => h.room.photo && h.marks.length);
+    if (hit) return { room: hit.room, photo: hit.room.photo, marks: hit.marks, card: { ...v, location: hit.room.name } };
+  }
   if (!v.rack_id) return null;
   let hit = RACK_CACHE.get(v.rack_id);
   if (!hit || Date.now() - hit.at > 60000) {

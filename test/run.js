@@ -833,7 +833,7 @@ test('gear knows what it is: wireless mics pair with a receiver, capsules fit a 
   const dir = fs2.mkdtempSync(path.join(os2.tmpdir(), 'lg-kind-'));
   const DBm = require(path.join(ROOT, 'lib', 'db'));
   const db1 = DBm.open(path.join(dir, 'x.db'));
-  db1.exec('DROP TABLE racks; DROP INDEX uploads_sha; ALTER TABLE uploads DROP COLUMN sha256; ' + ['rack_id', 'rack_u', 'rack_h', 'rack_side', 'shelf_id', 'power_w', 'power_pdu', 'power_outlet', 'power_max'].map((c) => 'ALTER TABLE devices DROP COLUMN ' + c).join('; ')); db1.exec('ALTER TABLE devices DROP COLUMN software; ALTER TABLE devices DROP COLUMN unit_tags; ALTER TABLE devices DROP COLUMN capsule_card; ALTER TABLE devices DROP COLUMN manual_from; ALTER TABLE devices DROP COLUMN qty; ALTER TABLE patch DROP COLUMN rev; ALTER TABLE patch_versions DROP COLUMN rev; ALTER TABLE patch_versions DROP COLUMN kind'); db1.exec(['kind', 'pair_id', 'txtype', 'capsule', 'freq'].map((c) => 'ALTER TABLE devices DROP COLUMN ' + c).join('; ')); db1.prepare('UPDATE schema_version SET v = 12').run();
+  db1.exec('DROP TABLE racks; DROP INDEX uploads_sha; ALTER TABLE uploads DROP COLUMN sha256; ' + ['rack_id', 'rack_u', 'rack_h', 'rack_side', 'shelf_id', 'power_w', 'power_pdu', 'power_outlet', 'power_max'].map((c) => 'ALTER TABLE devices DROP COLUMN ' + c).join('; ')); db1.exec('DROP TABLE room_gear; DROP TABLE rooms; DROP TABLE plots; ALTER TABLE devices DROP COLUMN software; ALTER TABLE devices DROP COLUMN unit_tags; ALTER TABLE devices DROP COLUMN capsule_card; ALTER TABLE devices DROP COLUMN manual_from; ALTER TABLE devices DROP COLUMN qty; ALTER TABLE patch DROP COLUMN rev; ALTER TABLE patch_versions DROP COLUMN rev; ALTER TABLE patch_versions DROP COLUMN kind'); db1.exec(['kind', 'pair_id', 'txtype', 'capsule', 'freq'].map((c) => 'ALTER TABLE devices DROP COLUMN ' + c).join('; ')); db1.prepare('UPDATE schema_version SET v = 12').run();
   db1.prepare("INSERT INTO settings (key, value) VALUES ('gear_models', ?)").run(JSON.stringify([{ kind: 'speaker', make: 'Brand', model: 'Col 70' }]));
   db1.prepare("INSERT INTO devices (name, aliases, category, make, model, location, ip, mac, photo, manual_url, notes, created_at, updated_at) VALUES ('Brand Col 70', '[]', 'audio', 'Brand', 'COL 70', '', '', '', '', '', '', 1, 1)").run();
   db1.close();
@@ -1066,7 +1066,7 @@ test('on update: bad plugs, dangling links and the id high-water mark are repair
   set(amp, 'power_pdu = ?, power_outlet = 2', strip);    // fine
   set(c, 'power_pdu = ?, power_outlet = 2', strip);      // same outlet as the amp: the newer card comes out
   set(d, 'pair_id = 9998, uplink_id = 9997');
-  db1.exec('ALTER TABLE devices DROP COLUMN software; ALTER TABLE devices DROP COLUMN unit_tags'); db1.prepare('UPDATE schema_version SET v = 20').run();
+  db1.exec('DROP TABLE room_gear; DROP TABLE rooms; DROP TABLE plots; ALTER TABLE devices DROP COLUMN software; ALTER TABLE devices DROP COLUMN unit_tags'); db1.prepare('UPDATE schema_version SET v = 20').run();
   db1.close();
   const db = DBm.open(path.join(dir, 'x.db'));
   const row = (id) => db.prepare('SELECT power_pdu, pair_id, uplink_id FROM devices WHERE id = ?').get(id);
@@ -1165,7 +1165,7 @@ test('a card with a quantity keeps a tag for each piece; no other card can take 
   const db1 = DBm.open(path.join(dir, 'x.db'));
   const ins = db1.prepare("INSERT INTO devices (name, aliases, category, make, model, location, ip, mac, photo, manual_url, notes, kind, qty, created_at, updated_at) VALUES (?, '[]', 'audio', 'Rode', 'M5', '', '', '', '', '', '', 'mic', ?, 1, 1)");
   ins.run('MIC-2', 2); ins.run('MIC-3', 2);
-  db1.exec('ALTER TABLE devices DROP COLUMN software; ALTER TABLE devices DROP COLUMN unit_tags'); db1.prepare('UPDATE schema_version SET v = 21').run(); db1.close();
+  db1.exec('DROP TABLE room_gear; DROP TABLE rooms; DROP TABLE plots; ALTER TABLE devices DROP COLUMN software; ALTER TABLE devices DROP COLUMN unit_tags'); db1.prepare('UPDATE schema_version SET v = 21').run(); db1.close();
   const db = DBm.open(path.join(dir, 'x.db'));
   const rows = db.prepare('SELECT name, unit_tags FROM devices ORDER BY id').all().map((r) => r.name + ':' + r.unit_tags);
   assert.deepStrictEqual(rows, ['MIC-2:["MIC-2","MIC-4"]', 'MIC-3:["MIC-3","MIC-5"]'], 'no tag used twice');
@@ -1200,7 +1200,7 @@ test('checklists that were on pages move to To do, keeping their ticks and log',
   const DBm = require(path.join(ROOT, 'lib', 'db'));
   // a database from before 0.20: back to migration 10, then a page with a checklist and a tick
   const db1 = DBm.open(path.join(dir, 'x.db'));
-  db1.exec('DROP TABLE racks; DROP INDEX uploads_sha; ALTER TABLE uploads DROP COLUMN sha256; ' + ['rack_id', 'rack_u', 'rack_h', 'rack_side', 'shelf_id', 'power_w', 'power_pdu', 'power_outlet', 'power_max'].map((c) => 'ALTER TABLE devices DROP COLUMN ' + c).join('; ')); db1.exec('ALTER TABLE devices DROP COLUMN software; ALTER TABLE devices DROP COLUMN unit_tags; ALTER TABLE devices DROP COLUMN capsule_card; ALTER TABLE devices DROP COLUMN manual_from; ALTER TABLE devices DROP COLUMN qty; ALTER TABLE patch DROP COLUMN rev; ALTER TABLE patch_versions DROP COLUMN rev; ALTER TABLE patch_versions DROP COLUMN kind'); db1.exec('DROP TABLE todo_lists; ALTER TABLE devices DROP COLUMN networked; ' + ['kind', 'pair_id', 'txtype', 'capsule', 'freq'].map((c) => 'ALTER TABLE devices DROP COLUMN ' + c).join('; ')); db1.prepare('UPDATE schema_version SET v = 10').run();
+  db1.exec('DROP TABLE racks; DROP INDEX uploads_sha; ALTER TABLE uploads DROP COLUMN sha256; ' + ['rack_id', 'rack_u', 'rack_h', 'rack_side', 'shelf_id', 'power_w', 'power_pdu', 'power_outlet', 'power_max'].map((c) => 'ALTER TABLE devices DROP COLUMN ' + c).join('; ')); db1.exec('DROP TABLE room_gear; DROP TABLE rooms; DROP TABLE plots; ALTER TABLE devices DROP COLUMN software; ALTER TABLE devices DROP COLUMN unit_tags; ALTER TABLE devices DROP COLUMN capsule_card; ALTER TABLE devices DROP COLUMN manual_from; ALTER TABLE devices DROP COLUMN qty; ALTER TABLE patch DROP COLUMN rev; ALTER TABLE patch_versions DROP COLUMN rev; ALTER TABLE patch_versions DROP COLUMN kind'); db1.exec('DROP TABLE todo_lists; ALTER TABLE devices DROP COLUMN networked; ' + ['kind', 'pair_id', 'txtype', 'capsule', 'freq'].map((c) => 'ALTER TABLE devices DROP COLUMN ' + c).join('; ')); db1.prepare('UPDATE schema_version SET v = 10').run();
   db1.prepare("INSERT INTO spaces (slug, name) VALUES ('audio', 'Audio')").run();
   const blocks = [{ type: 'text', md: 'Before' }, { type: 'checklist', id: 'abc12345', title: 'Desk check', items: ['Faders down', 'Scenes loaded'], schedule: [] }];
   db1.prepare("INSERT INTO pages (space_id, title, blocks, version, created_at, updated_at) VALUES (1, 'Sunday desk', ?, 1, 1, 1)").run(JSON.stringify(blocks));
@@ -1425,7 +1425,7 @@ test('computers: a software list on the card, kept on edit; migration 23 adds th
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'lg-sw-'));
   const DBm = require(path.join(ROOT, 'lib', 'db'));
   const db1 = DBm.open(path.join(dir, 'x.db'));
-  db1.exec('ALTER TABLE devices DROP COLUMN software'); db1.prepare('UPDATE schema_version SET v = 22').run(); db1.close();
+  db1.exec('DROP TABLE room_gear; DROP TABLE rooms; DROP TABLE plots; ALTER TABLE devices DROP COLUMN software'); db1.prepare('UPDATE schema_version SET v = 22').run(); db1.close();
   const db = DBm.open(path.join(dir, 'x.db'));
   assert.ok(db.prepare('PRAGMA table_info(devices)').all().some((c) => c.name === 'software'), 'the column is back');
   db.close();
@@ -1499,6 +1499,54 @@ test('stage patch: USB and Dante links to computers, routes through them, signal
   assert.strictEqual(T.suggest('computer', []), 'PC-1');
 });
 
+test('rooms: gear is placed per piece with its own spot; stage plots keep their items and share one outline', async () => {
+  const spk = (await admin.post('/api/devices', { name: 'SPK-7', kind: 'speaker', make: 'JBL', model: 'CBT 70J-1', category: 'audio', qty: 2 })).data.id;
+  let r = await admin.post('/api/rooms', { name: 'Test sanctuary', notes: 'Main room' });
+  assert.strictEqual(r.status, 200);
+  const rid = r.data.id;
+  assert.strictEqual((await admin.post('/api/rooms', { name: 'test SANCTUARY' })).status, 400, 'names are unique');
+  assert.strictEqual((await vol.post('/api/rooms', { name: 'Nope' })).status, 403, 'only admins make rooms');
+  const q = [{ x: 0.1, y: 0.2 }, { x: 0.3, y: 0.21 }, { x: 0.31, y: 0.4 }, { x: 0.1, y: 0.38 }];
+  r = await admin.put('/api/rooms/' + rid + '/gear', { gear: [{ device_id: spk, unit: 0, spot: { q } }, { device_id: spk, unit: 1 }] });
+  assert.strictEqual(r.status, 200);
+  let room = r.data.room;
+  assert.deepStrictEqual(room.gear.map((g) => g.tag), ['SPK-7', 'SPK-8'], 'each piece has its own tag');
+  assert.strictEqual(room.gear[0].spot.q.length, 4); assert.strictEqual(room.gear[1].spot, null);
+  assert.strictEqual((await admin.put('/api/rooms/' + rid + '/gear', { gear: [{ device_id: spk, unit: 0 }, { device_id: spk, unit: 0 }] })).status, 400, 'a piece is placed once');
+  // spots move by entry; an entry kept by id keeps its spot
+  await admin.put('/api/rooms/' + rid, { spots: { ['g' + room.gear[1].id]: { x: 0.6, y: 0.2, w: 0.2, h: 0.2 } } });
+  r = await admin.put('/api/rooms/' + rid + '/gear', { gear: room.gear.map((g) => ({ id: g.id, device_id: g.device_id, unit: g.unit })) });
+  room = r.data.room;
+  assert.ok(room.gear[0].spot && room.gear[1].spot && room.gear[1].spot.x === 0.6, 'spots kept');
+  const all = (await vol.get('/api/rooms')).data.rooms;
+  assert.ok(all.find((x) => x.id === rid).gear.length === 2, 'everyone can see rooms with their gear');
+  // the stage outline, and plots
+  r = await admin.put('/api/plots/outline', { w: 1000, d: 20, tw: 12, td: 6, label: 'Audience' });
+  assert.deepStrictEqual(r.data.outline, { w: 200, d: 20, tw: 12, td: 6, label: 'Audience' }, 'clamped');
+  r = await admin.post('/api/plots', { name: 'Sunday test', notes: 'Band' });
+  const pid = r.data.id;
+  r = await admin.put('/api/plots/' + pid, { doc: { items: [
+    { id: 'a1', t: 'person', x: 10, y: 5, r: 100, label: 'Kyle' }, { id: 'a2', t: 'gear', gear: 'g1', x: 10.5, y: 6, on: 'a1', stand: 'Tall boom' },
+    { id: 'a3', t: 'choir', x: 15, y: 3, w: 12, h: 4 }, { id: 'a4', t: 'nope', x: 1, y: 1 }, { id: 'a5', t: 'power', x: 1, y: 1, on: 'gone', room: { id: rid, spot: { x: 0.5, y: 0.5, w: 0.1, h: 0.1 } } }] } });
+  const doc = r.data.plot.doc;
+  assert.deepStrictEqual(doc.items.map((x) => x.id), ['a1', 'a2', 'a3', 'a5'], 'unknown types dropped');
+  assert.strictEqual(doc.items[0].r, 105, 'turned in 15° steps');
+  assert.strictEqual(doc.items[1].on, 'a1'); assert.ok(!doc.items[3].on, 'a link to nothing goes');
+  assert.strictEqual(doc.items[3].room.id, rid);
+  r = await admin.post('/api/plots', { name: 'Christmas test', copy: pid });
+  assert.strictEqual((await admin.get('/api/plots/' + r.data.id)).data.plot.doc.items.length, 4, 'a copy starts with the same items');
+  const pl = (await vol.get('/api/plots')).data;
+  assert.ok(pl.plots.length >= 2 && pl.outline.w === 200);
+  assert.strictEqual((await vol.put('/api/plots/' + pid, { name: 'x' })).status, 403);
+  await admin.del('/api/plots/' + r.data.id);
+  await admin.put('/api/plots/outline', { w: 32, d: 18, tw: 0, td: 0, label: 'Downstage · Audience' });
+  // the card page finds its room; deleting the card takes it out of the room
+  const spk2 = (await admin.post('/api/devices', { name: 'WEDGE-9', kind: 'wedge', category: 'audio' })).data.id;
+  await admin.put('/api/rooms/' + rid + '/gear', { gear: room.gear.map((g) => ({ id: g.id, device_id: g.device_id, unit: g.unit })).concat([{ device_id: spk2, unit: 0 }]) });
+  await admin.del('/api/devices/' + spk2);
+  assert.strictEqual((await admin.get('/api/rooms/' + rid)).data.room.gear.length, 2, 'a deleted card leaves the room');
+});
+
 test('backup, then restore brings the data back after a restart', async () => {
   let r = await admin.post('/api/backups/now');
   assert.strictEqual(r.status, 200);
@@ -1526,6 +1574,8 @@ test('backup, then restore brings the data back after a restart', async () => {
   assert.strictEqual((await admin.get('/api/spaces/volunteers')).data.pages.filter((p) => /^Audio/.test(p.title)).length, 6, 'training pages are not added a second time');
   const list = (await admin.get('/api/backups')).data.backups;
   assert.ok(list.some((b) => b.kind === 'before-restore'), 'data was saved before the restore');
+  assert.ok((await admin.get('/api/rooms')).data.rooms.some((x) => x.name === 'Test sanctuary' && x.gear.length === 2), 'rooms come back with their gear');
+  assert.ok((await admin.get('/api/plots')).data.plots.some((x) => x.name === 'Sunday test' && x.items === 4), 'stage plots come back');
   const act = (await admin.get('/api/activity')).data.activity;
   assert.ok(act.some((a) => a.action === 'backup.restored'));
 });
